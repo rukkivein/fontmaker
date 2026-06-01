@@ -24,7 +24,8 @@ const state = {
       linkMasters: false,
       ghostMasters: {},            // { masterId: bool } show other masters as ghosts
     },
-    gridEditMode: false,           // toggled by Tab — lets metric lines move
+    gridEditMode: false,           // held Tab — lets guides/metrics be edited
+    gridTool: { type: 'line', symmetry: true }, // add-guide tool (line/circle)
     layout: { glyph: 1, work: 1, chart: 1 },  // flex weights
     filePath: null,
     dirty: false,

@@ -7,6 +7,9 @@ export function createProject({ familyName, masterNames, alphabets, gridPreset }
   const masters = masterNames.map((name, i) => ({ id: uid('m'), name: name || ('Master ' + (i + 1)) }));
   const gp = GRID_PRESETS[gridPreset] || GRID_PRESETS.standard;
   const grid = { preset: gridPreset, ...gp.build(UPM) };
+  // User-added guides (line / circle) — the non-standard, Tab-editable grid.
+  grid.userGuides = [];
+  grid.centerX = Math.round(UPM * 0.3); // symmetry center
 
   // Collect glyphs from each selected alphabet, deduped by unicode.
   const seen = new Set();

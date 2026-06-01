@@ -187,6 +187,96 @@ export class Glyphboard {
     // Guides (golden / modular / radial).
     this.drawGuides(ctx, v, col);
     ctx.globalAlpha = 1;
+    // User line/circle guides (the non-standard, editable grid).
+    this.drawUserGuides(ctx, v, col);
+  }
+
+  mirX(x) { return 2 * store.project.grid.centerX - x; }
+
+  drawUserGuides(ctx, v, col) {
+    const grid = store.project.grid;
+    const guides = grid.userGuides || [];
+    const edit = store.ui.gridEditMode;
+    ctx.save();
+    ctx.setLineDash([6, 4]); ctx.lineWidth = 1;
+    const handle = (x, y) => { const s = v.toScreen(x, y); ctx.fillStyle = col('--grid-movable'); ctx.fillRect(s.sx - 3, s.sy - 3, 6, 6); };
+    const drawOne = (g, mir) => {
+      const mx = (x) => mir ? this.mirX(x) : x;
+      ctx.strokeStyle = col('--accent-2'); ctx.globalAlpha = 0.75;
+      if (g.type === 'line') {
+        const a = v.toScreen(mx(g.x1), g.y1), b = v.toScreen(mx(g.x2), g.y2);
+        ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke();
+        if (edit) { ctx.globalAlpha = 1; handle(mx(g.x1), g.y1); handle(mx(g.x2), g.y2); }
+      } else {
+        const c = v.toScreen(mx(g.cx), g.cy);
+        ctx.beginPath(); ctx.arc(c.sx, c.sy, g.r * v.scale, 0, Math.PI * 2); ctx.stroke();
+        if (edit) { ctx.globalAlpha = 1; handle(mx(g.cx), g.cy); handle(mx(g.cx) + g.r, g.cy); }
+      }
+    };
+    for (const g of guides) { drawOne(g, false); if (g.mirror) drawOne(g, true); }
+    // Live creation preview.
+    if (this.drag && this.drag.guideCreate) {
+      const gc = this.drag.guideCreate, s = gc.start, e = gc.cur || gc.start;
+      ctx.strokeStyle = col('--grid-movable'); ctx.globalAlpha = 0.9;
+      if (gc.type === 'line') { const a = v.toScreen(s.x, s.y), b = v.toScreen(e.x, e.y); ctx.beginPath(); ctx.moveTo(a.sx, a.sy); ctx.lineTo(b.sx, b.sy); ctx.stroke(); }
+      else { const c = v.toScreen(s.x, s.y), r = Math.hypot(e.x - s.x, e.y - s.y); ctx.beginPath(); ctx.arc(c.sx, c.sy, r * v.scale, 0, Math.PI * 2); ctx.stroke(); }
+    }
+    // Center line + handle (edit mode only).
+    if (edit) {
+      ctx.setLineDash([3, 3]); ctx.strokeStyle = col('--grid-movable'); ctx.globalAlpha = 0.7;
+      const cs = v.toScreen(grid.centerX, 0);
+      ctx.beginPath(); ctx.moveTo(cs.sx, 0); ctx.lineTo(cs.sx, 99999); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.fillStyle = col('--grid-movable');
+      ctx.beginPath(); ctx.arc(cs.sx, cs.sy, 4, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Hit-test guides/center for editing (returns a drag descriptor or null).
+  guideHit(v, pt) {
+    const grid = store.project.grid, tol = v.pxToWorld(8);
+    if (Math.abs(pt.x - grid.centerX) <= tol && Math.abs(pt.y) <= v.pxToWorld(12)) return { center: true };
+    const guides = grid.userGuides || [];
+    for (let i = guides.length; i--;) {
+      const g = guides[i];
+      for (const mir of (g.mirror ? [false, true] : [false])) {
+        const mx = (x) => mir ? this.mirX(x) : x;
+        if (g.type === 'line') {
+          if (Math.hypot(mx(g.x1) - pt.x, g.y1 - pt.y) <= tol) return { i, part: 'p1', mir };
+          if (Math.hypot(mx(g.x2) - pt.x, g.y2 - pt.y) <= tol) return { i, part: 'p2', mir };
+          if (this.distToSeg(pt, { x: mx(g.x1), y: g.y1 }, { x: mx(g.x2), y: g.y2 }) <= tol) return { i, part: 'move', mir };
+        } else {
+          if (Math.hypot(mx(g.cx) - pt.x, g.cy - pt.y) <= tol) return { i, part: 'center', mir };
+          const d = Math.hypot(pt.x - mx(g.cx), pt.y - g.cy);
+          if (Math.abs(d - g.r) <= tol) return { i, part: 'radius', mir };
+        }
+      }
+    }
+    return null;
+  }
+  distToSeg(p, a, b) {
+    const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    let t = l2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / l2 : 0; t = Math.max(0, Math.min(1, t));
+    return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+  }
+
+  handleGuideDrag(d, pt) {
+    const grid = store.project.grid;
+    if (d.center) { grid.centerX = Math.round(pt.x); return; }
+    const g = grid.userGuides[d.i]; if (!g) return;
+    const ux = d.mir ? this.mirX(pt.x) : pt.x; // edit in the guide's own space
+    if (g.type === 'line') {
+      if (d.part === 'p1') { g.x1 = Math.round(ux); g.y1 = Math.round(pt.y); }
+      else if (d.part === 'p2') { g.x2 = Math.round(ux); g.y2 = Math.round(pt.y); }
+      else { // move whole line
+        const dx = ux - (d.last ? d.last.x : ux), dy = pt.y - (d.last ? d.last.y : pt.y);
+        g.x1 += dx; g.x2 += dx; g.y1 += dy; g.y2 += dy;
+      }
+    } else {
+      if (d.part === 'center') { g.cx = Math.round(ux); g.cy = Math.round(pt.y); }
+      else g.r = Math.round(Math.hypot(ux - g.cx, pt.y - g.cy));
+    }
+    d.last = { x: ux, y: pt.y };
   }
 
   drawGuides(ctx, v, col) {
@@ -428,10 +518,16 @@ export class Glyphboard {
         this.drag = { panning: true, lastX: e.clientX, lastY: e.clientY, mid };
         return;
       }
-      // Grid editing has priority while Tab is held.
+      // Grid/guide editing has priority while Tab is held.
       if (store.ui.gridEditMode) {
-        const g = this.gridHit(this.viewports[mid], pt);
+        const v = this.viewports[mid];
+        const gh = this.guideHit(v, pt);
+        if (gh) { store.beginGesture('Edit guide'); this.drag = { mid, guideDrag: gh }; return; }
+        const g = this.gridHit(v, pt);
         if (g) { store.beginGesture('Edit grid'); this.drag = { mid, gridDrag: g }; return; }
+        store.beginGesture('Add guide');
+        this.drag = { mid, guideCreate: { type: store.ui.gridTool.type, start: pt, cur: pt } };
+        return;
       }
       const env = this.makeEnv(mid);
       this.drag = { mid, tool };
@@ -453,6 +549,8 @@ export class Glyphboard {
         return;
       }
       if (this.drag.gridDrag) { this.handleGridDrag(this.drag.gridDrag, pt); this.requestDraw(); return; }
+      if (this.drag.guideDrag) { this.handleGuideDrag(this.drag.guideDrag, pt); this.requestDraw(); return; }
+      if (this.drag.guideCreate) { this.drag.guideCreate.cur = pt; this.requestDraw(); return; }
       const env = this.makeEnv(this.drag.mid);
       if (this.drag.tool && this.drag.tool.onMove) this.drag.tool.onMove(env, pt, e);
       this.requestDraw();
@@ -460,7 +558,19 @@ export class Glyphboard {
 
     const end = (e) => {
       if (!this.drag) return;
-      if (!this.drag.panning && this.drag.tool && this.drag.tool.onUp) {
+      if (this.drag.guideCreate) {
+        const gc = this.drag.guideCreate, s = gc.start, e2 = gc.cur || gc.start;
+        const sym = store.ui.gridTool.symmetry;
+        let guide = null;
+        if (gc.type === 'line') {
+          if (Math.hypot(e2.x - s.x, e2.y - s.y) > 5)
+            guide = { type: 'line', x1: Math.round(s.x), y1: Math.round(s.y), x2: Math.round(e2.x), y2: Math.round(e2.y), mirror: sym };
+        } else {
+          const r = Math.round(Math.hypot(e2.x - s.x, e2.y - s.y));
+          if (r > 5) guide = { type: 'circle', cx: Math.round(s.x), cy: Math.round(s.y), r, mirror: sym };
+        }
+        if (guide) store.project.grid.userGuides.push(guide);
+      } else if (!this.drag.panning && this.drag.tool && this.drag.tool.onUp) {
         const pt = getPt(e);
         this.drag.tool.onUp(this.makeEnv(this.drag.mid), pt, e);
       }

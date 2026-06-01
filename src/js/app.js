@@ -45,6 +45,9 @@ function boot() {
 function setupProject(project, filePath = null) {
   store.setProject(project, { filePath, markClean: true });
   ensureWork(project);
+  // Back-fill fields older projects may lack.
+  if (!project.grid.userGuides) project.grid.userGuides = [];
+  if (project.grid.centerX == null) project.grid.centerX = Math.round(project.unitsPerEm * 0.3);
   // Open the alphabet's anchor glyph by default.
   const anchorChar = ALPHABET_ANCHOR[project.alphabets[0]] || 'A';
   const idx = project.glyphs.findIndex(g => g.char === anchorChar);
@@ -324,7 +327,7 @@ function wireGlobalEvents() {
     // Hold Tab to make grid lines editable (release to lock). Not a toggle.
     if (e.key === 'Tab' && !typing) {
       e.preventDefault();
-      if (!store.ui.gridEditMode) { store.ui.gridEditMode = true; glyphboard.requestDraw(); }
+      if (!store.ui.gridEditMode) { store.ui.gridEditMode = true; refreshControlPanel(); glyphboard.requestDraw(); }
     }
     if (e.key === 'Escape') { store.ui.selection.points = []; store.ui.workSelection = []; glyphboard.requestDraw(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) { deleteSelection(); e.preventDefault(); }
@@ -349,7 +352,7 @@ function wireGlobalEvents() {
   });
   window.addEventListener('keyup', (e) => {
     if (e.code === 'Space') store._space = false;
-    if (e.key === 'Tab' && store.ui.gridEditMode) { store.ui.gridEditMode = false; glyphboard.requestDraw(); }
+    if (e.key === 'Tab' && store.ui.gridEditMode) { store.ui.gridEditMode = false; refreshControlPanel(); glyphboard.requestDraw(); }
   });
   // Releasing Tab outside focus (e.g. window blur) should also lock the grid.
   window.addEventListener('blur', () => { if (store.ui.gridEditMode) { store.ui.gridEditMode = false; glyphboard.requestDraw(); } });

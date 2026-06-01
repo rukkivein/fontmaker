@@ -117,12 +117,26 @@ export function refreshControlPanel() {
   const globalHost = document.getElementById('global-controls');
   toolHost.innerHTML = ''; globalHost.innerHTML = '';
 
-  // Active tool's contextual controls.
-  const tool = getTool(store.ui.tool);
-  const nameTag = document.createElement('div'); nameTag.className = 'ctl-group';
-  nameTag.innerHTML = `<div class="ctl-label">Tool</div><div class="ctl-row" style="font-weight:600">${tool.label}</div>`;
-  toolHost.appendChild(nameTag);
-  for (const d of (tool.controls ? tool.controls() : [])) toolHost.appendChild(renderControl(d));
+  // While Tab is held: editing the non-standard grid (line/circle guides).
+  if (store.ui.gridEditMode) {
+    const gt = store.ui.gridTool;
+    const tag = document.createElement('div'); tag.className = 'ctl-group';
+    tag.innerHTML = `<div class="ctl-label">Grid (Tab held)</div><div class="ctl-row" style="font-weight:600;color:var(--grid-movable)">Add guide</div>`;
+    toolHost.appendChild(tag);
+    toolHost.appendChild(renderControl({ type: 'segmented', label: 'Guide', value: gt.type,
+      options: [['line', 'Line'], ['circle', 'Circle']], onChange: v => { gt.type = v; } }));
+    toolHost.appendChild(renderControl({ type: 'toggle', label: 'Symmetry', value: gt.symmetry,
+      text: 'Mirror across center', onChange: v => { gt.symmetry = v; } }));
+    toolHost.appendChild(renderControl({ type: 'button', label: ' ', text: 'Clear guides',
+      onClick: () => { store.project.grid.userGuides = []; glyphboard.requestDraw(); } }));
+  } else {
+    // Active tool's contextual controls.
+    const tool = getTool(store.ui.tool);
+    const nameTag = document.createElement('div'); nameTag.className = 'ctl-group';
+    nameTag.innerHTML = `<div class="ctl-label">Tool</div><div class="ctl-row" style="font-weight:600">${tool.label}</div>`;
+    toolHost.appendChild(nameTag);
+    for (const d of (tool.controls ? tool.controls() : [])) toolHost.appendChild(renderControl(d));
+  }
 
   // Global controls (right side).
   const g = store.ui.globals;
