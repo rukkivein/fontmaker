@@ -3,3 +3,4 @@ dist/
 *.log
 test/*.otf
 .DS_Store
+test/_shots/

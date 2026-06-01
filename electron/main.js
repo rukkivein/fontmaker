@@ -1,8 +1,7 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { buildMenu } = require('./menu');
 const projectIO = require('./projectIO');
 const fontExport = require('./fontExport');
 const fileWatcher = require('./fileWatcher');
@@ -28,7 +27,10 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, '..', 'src', 'index.html'));
-  buildMenu(mainWindow);
+  // No native menu bar — the app owns its own File/Edit/Window menu in the top
+  // bar (Photoshop-style), so we don't show a duplicate OS menu. All keyboard
+  // shortcuts are handled in the renderer.
+  Menu.setApplicationMenu(null);
 
   if (isDev) mainWindow.webContents.openDevTools({ mode: 'detach' });
 

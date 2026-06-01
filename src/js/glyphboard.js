@@ -294,6 +294,35 @@ export class Glyphboard {
       `zoom ${(v.scale * 100).toFixed(0)}%`;
   }
 
+  // ---- Grid editing (active only while Tab is held) ---------------------
+  gridHit(v, pt) {
+    const tolY = v.pxToWorld(6), tolX = v.pxToWorld(6);
+    const m = store.project.metrics;
+    const lines = [['ascender', m.ascender], ['capHeight', m.capHeight], ['xHeight', m.xHeight], ['descender', m.descender]];
+    for (const [key, val] of lines) if (Math.abs(pt.y - val) <= tolY) return { kind: 'h', key };
+    const verts = store.project.grid.verticals;
+    for (let i = 0; i < verts.length; i++) {
+      if (Math.abs(pt.x - verts[i].x) <= tolX) {
+        const mid = verts.length === 2 ? (verts[i].x + verts[1 - i].x) / 2 : null;
+        return { kind: 'v', idx: i, mid };
+      }
+    }
+    return null;
+  }
+
+  handleGridDrag(g, pt) {
+    if (g.kind === 'h') {
+      // Metric lines move freely (baseline stays at 0).
+      store.project.metrics[g.key] = Math.round(pt.y);
+    } else {
+      const verts = store.project.grid.verticals;
+      const nx = Math.round(pt.x);
+      verts[g.idx].x = nx;
+      // Symmetry: keep the paired sidebearing mirrored about the fixed midpoint.
+      if (g.mid != null && verts.length === 2) verts[1 - g.idx].x = Math.round(2 * g.mid - nx);
+    }
+  }
+
   // ---- Editing context passed to tools ----------------------------------
   makeEnv(mid) {
     const idx = store.ui.selectedGlyph;
@@ -330,6 +359,11 @@ export class Glyphboard {
         this.drag = { panning: true, lastX: e.clientX, lastY: e.clientY, mid };
         return;
       }
+      // Grid editing has priority while Tab is held.
+      if (store.ui.gridEditMode) {
+        const g = this.gridHit(this.viewports[mid], pt);
+        if (g) { store.beginGesture('Edit grid'); this.drag = { mid, gridDrag: g }; return; }
+      }
       const env = this.makeEnv(mid);
       this.drag = { mid, tool };
       if (tool.onDown) tool.onDown(env, pt, e);
@@ -349,8 +383,9 @@ export class Glyphboard {
         this.requestDraw();
         return;
       }
+      if (this.drag.gridDrag) { this.handleGridDrag(this.drag.gridDrag, pt); this.requestDraw(); return; }
       const env = this.makeEnv(this.drag.mid);
-      if (this.drag.tool.onMove) this.drag.tool.onMove(env, pt, e);
+      if (this.drag.tool && this.drag.tool.onMove) this.drag.tool.onMove(env, pt, e);
       this.requestDraw();
     });
 

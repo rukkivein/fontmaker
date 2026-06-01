@@ -133,8 +133,17 @@ async function importSource() {
 function loadShapesFromSource(content, filePath, ext) {
   let shapes = [];
   try { shapes = parseSVG(content); } catch (e) { shapes = []; }
-  if (!shapes.length && ext === '.ai') {
-    toast('No SVG-compatible art found in this .ai — re-save as SVG or PDF-compatible');
+  if (!shapes.length) {
+    const isAi = ext === '.ai' || !/<svg[\s>]/i.test(content || '');
+    if (isAi) {
+      infoDialog('Couldn’t read vectors',
+        `Adobe <b>.ai</b> files are PDF-based and don’t contain plain vector paths we can read directly.<br><br>` +
+        `In Illustrator: <b>File ▸ Save As…</b> (or <b>Export ▸ Export As…</b>) and choose <b>SVG</b>, then import that .svg here.<br><br>` +
+        `SVG keeps your exact paths, anchor points and curves.`);
+    } else {
+      toast('No shapes found in this file');
+    }
+    return; // nothing to add
   }
   store.commit('Import source', (p) => {
     const work = ensureWork(p);
@@ -286,11 +295,10 @@ function wireGlobalEvents() {
   window.addEventListener('keydown', (e) => {
     const typing = /input|textarea|select/i.test(document.activeElement?.tagName || '');
     if (e.code === 'Space' && !typing) { store._space = true; }
+    // Hold Tab to make grid lines editable (release to lock). Not a toggle.
     if (e.key === 'Tab' && !typing) {
       e.preventDefault();
-      store.ui.gridEditMode = !store.ui.gridEditMode;
-      glyphboard.requestDraw();
-      toast(store.ui.gridEditMode ? 'Grid edit ON (lines movable, symmetric)' : 'Grid edit OFF');
+      if (!store.ui.gridEditMode) { store.ui.gridEditMode = true; glyphboard.requestDraw(); }
     }
     if (e.key === 'Escape') { store.ui.selection.points = []; store.ui.workSelection = []; glyphboard.requestDraw(); }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !typing) { deleteSelection(); e.preventDefault(); }
@@ -301,8 +309,9 @@ function wireGlobalEvents() {
       if (map[e.key]) selectTool(map[e.key]);
     }
 
-    // When running without Electron, handle Cmd/Ctrl shortcuts here.
-    if (!hasNative && (e.metaKey || e.ctrlKey)) {
+    // The app owns all shortcuts (no native menu). Skip while editing text so
+    // inputs keep normal copy/paste/select behavior.
+    if ((e.metaKey || e.ctrlKey) && !typing) {
       const k = e.key.toLowerCase();
       const combo = { z: e.shiftKey ? 'edit:redo' : 'edit:undo', y: 'edit:redo', s: e.shiftKey ? 'file:saveAs' : 'file:save',
         o: 'file:open', n: 'file:new', e: 'file:export', i: 'file:import', a: 'edit:selectAll', d: 'edit:deselect',
@@ -312,7 +321,12 @@ function wireGlobalEvents() {
       if (num[e.key]) { e.preventDefault(); dispatch(num[e.key]); }
     }
   });
-  window.addEventListener('keyup', (e) => { if (e.code === 'Space') store._space = false; });
+  window.addEventListener('keyup', (e) => {
+    if (e.code === 'Space') store._space = false;
+    if (e.key === 'Tab' && store.ui.gridEditMode) { store.ui.gridEditMode = false; glyphboard.requestDraw(); }
+  });
+  // Releasing Tab outside focus (e.g. window blur) should also lock the grid.
+  window.addEventListener('blur', () => { if (store.ui.gridEditMode) { store.ui.gridEditMode = false; glyphboard.requestDraw(); } });
 }
 
 function deleteSelection() {

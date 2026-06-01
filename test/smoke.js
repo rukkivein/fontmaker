@@ -50,6 +50,16 @@ app.whenReady().then(async () => {
         masterTabs: document.querySelectorAll('.board-tab').length
       };
     })()`);
+
+    // Parse the user's actual Illustrator SVG exports through the importer.
+    probe.svg = await win.webContents.executeJavaScript(`(async () => {
+      const mod = await import('./js/svgimport.js');
+      const txt = (u) => fetch(u).then(r => r.text());
+      const logo = mod.parseSVG(await txt('./assets/logo.svg'));
+      const cur = mod.parseSVG(await txt('./assets/cursor.svg'));
+      const pts = (s) => s.reduce((n, sh) => n + sh.contours.reduce((m, c) => m + c.points.length, 0), 0);
+      return { logoShapes: logo.length, logoPoints: pts(logo), cursorShapes: cur.length, cursorPoints: pts(cur) };
+    })()`);
   } catch (err) { probe = { error: String(err), partial: probe }; }
 
   const errors = messages.filter(m => m.level === 3 /* error */ || /error|exception|failed/i.test(m.message));

@@ -86,16 +86,24 @@ function masterGhostMenu(anchor) {
   pop.style.top = (r.bottom + 4) + 'px';
   pop.style.left = Math.min(r.left, window.innerWidth - 250) + 'px';
   const title = document.createElement('div'); title.className = 'ctl-label'; title.style.padding = '4px 8px';
-  title.textContent = 'Show master ghosts'; pop.appendChild(title);
+  title.textContent = "Master ghosts — overlay other masters"; pop.appendChild(title);
+  const editing = store.ui.ghostMasterId || store.ui.activeMasterId;
   for (const m of store.project.masters) {
+    const isEditing = m.id === editing;
     const on = !!store.ui.globals.ghostMasters[m.id];
     const item = document.createElement('button'); item.className = 'dropdown-item';
-    item.innerHTML = `<span>${(on ? '☑' : '☐')} ${m.name}</span>`;
-    item.onclick = (e) => {
-      e.stopPropagation();
-      store.ui.globals.ghostMasters[m.id] = !on;
-      glyphboard.requestDraw(); masterGhostMenu(anchor);
-    };
+    if (isEditing) {
+      // The master you're editing can't ghost itself.
+      item.innerHTML = `<span style="opacity:.5">${m.name}</span><span class="accel">editing</span>`;
+      item.disabled = true; item.style.cursor = 'default';
+    } else {
+      item.innerHTML = `<span>${(on ? '☑' : '☐')} ${m.name}</span>`;
+      item.onclick = (e) => {
+        e.stopPropagation();
+        store.ui.globals.ghostMasters[m.id] = !on;
+        glyphboard.requestDraw(); masterGhostMenu(anchor);
+      };
+    }
     pop.appendChild(item);
   }
   document.getElementById('modal-root').appendChild(pop);
@@ -118,11 +126,13 @@ export function refreshControlPanel() {
 
   // Global controls (right side).
   const g = store.ui.globals;
-  globalHost.appendChild(iconToggle('👁', g.ghostOn, 'Toggle ghost letters', () => { g.ghostOn = !g.ghostOn; glyphboard.requestDraw(); refreshControlPanel(); }));
+  globalHost.appendChild(iconToggle('👁', g.ghostOn, 'Font ghost — system reference letter behind the glyph', () => { g.ghostOn = !g.ghostOn; glyphboard.requestDraw(); refreshControlPanel(); }));
   globalHost.appendChild(iconToggle('▦', g.gridsOn, 'Toggle grids', () => { g.gridsOn = !g.gridsOn; glyphboard.requestDraw(); refreshControlPanel(); }));
-  globalHost.appendChild(iconToggle('🔗', g.linkMasters, 'Link masters (apply edits to all)', () => { g.linkMasters = !g.linkMasters; refreshControlPanel(); }));
+  globalHost.appendChild(iconToggle('🔗', g.linkMasters, 'Link masters (mirror geometric edits to all)', () => { g.linkMasters = !g.linkMasters; refreshControlPanel(); }));
   globalHost.appendChild(iconToggle('▶', g.varAnim, 'Test variable interpolation', toggleVarAnim));
-  const ghostBtn = iconToggle('◍', false, 'Master ghosts…', null);
+  // Master ghosts: overlay OTHER masters' outlines (distinct from the font ghost).
+  const anyGhost = Object.values(g.ghostMasters || {}).some(Boolean);
+  const ghostBtn = iconToggle('◍', anyGhost, 'Master ghosts — overlay other masters', null);
   ghostBtn.onclick = () => masterGhostMenu(ghostBtn);
   globalHost.appendChild(ghostBtn);
 }
