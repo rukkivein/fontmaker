@@ -1,5 +1,5 @@
 import { store, uid } from './store.js';
-import { createProject, deletePointsAllMasters } from './project.js';
+import { createProject, deletePointsAllMasters, createAlternate, createLigature } from './project.js';
 import { ALPHABET_ANCHOR } from './data.js';
 import { buildMenubar } from './menus.js';
 import { buildToolbar, selectTool } from './toolbar.js';
@@ -10,7 +10,7 @@ import { workboard, ensureWork } from './workboard.js';
 import { chartboard } from './chartboard.js';
 import { initTestbar, renderTestbar } from './testbar.js';
 import { parseSVG } from './svgimport.js';
-import { newProjectDialog, exportDialog, findGlyphDialog, infoDialog } from './modals.js';
+import { newProjectDialog, exportDialog, findGlyphDialog, infoDialog, textPromptDialog } from './modals.js';
 import { toast, prompt } from './toast.js';
 
 const hasNative = typeof window.fm !== 'undefined';
@@ -235,6 +235,26 @@ function clipboardOp(kind) {
   toast(kind === 'cut' ? 'Cut' : 'Copied');
 }
 
+// Chart right-click actions: find alternates / create alternate / ligature.
+function onChartContext({ action, idx }) {
+  const g = store.project.glyphs[idx];
+  if (action === 'find-alternates') {
+    const base = g.char || (g.baseName && (store.project.glyphs.find(x => x.name === g.baseName) || {}).char) || '';
+    findGlyphDialog(openGlyph, base);
+  } else if (action === 'create-alternate') {
+    let ni; store.commit('Create alternate', (p) => { ni = createAlternate(p, idx); });
+    if (ni != null) { openGlyph(ni); toast(`Created ${store.project.glyphs[ni].name} — base shown as ghost to trace`); }
+  } else if (action === 'create-ligature') {
+    textPromptDialog('Create ligature',
+      'Type the characters that form the ligature — they must already exist as glyphs.',
+      'e.g. ft, fi, ffi', (val) => {
+        let ni; store.commit('Create ligature', (p) => { ni = createLigature(p, val); });
+        if (ni >= 0) { openGlyph(ni); toast(`Created ligature ${store.project.glyphs[ni].name}`); }
+        else infoDialog('Ligature not created', 'A ligature needs at least two characters that already exist as glyphs.');
+      });
+  }
+}
+
 function openGlyph(idx) {
   store.ui.selectedGlyph = idx;
   if (!store.ui.visibleBoards.glyphboard) store.ui.visibleBoards.glyphboard = true;
@@ -280,6 +300,7 @@ function wireStore() {
   store.on('select-glyph', () => { glyphboard.requestDraw(); rebuildGlyphHead(); renderTestbar(); });
   store.on('focus-changed', () => { layout.markActive(); refreshControlPanel(); });
   store.on('assign', () => { chartboard.renderAll(); renderTestbar(); });
+  store.on('chart-context', onChartContext);
 
   store.subscribe((reason) => {
     if (reason === 'apply') { glyphboard.requestDraw(); return; }

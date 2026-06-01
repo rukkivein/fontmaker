@@ -75,10 +75,11 @@ export class Chartboard {
       const hasOutline = (ensureLayer(glyph, masterId).contours.length > 0);
       if (hasOutline) cell.classList.add('assigned');
       if (idx === store.ui.selectedGlyph) cell.classList.add('selected');
+      if (glyph.kind) cell.classList.add('special');
       const cv = document.createElement('canvas');
       const label = document.createElement('div');
       label.className = 'cell-label';
-      label.textContent = glyph.char === ' ' ? '␣' : glyph.char;
+      label.textContent = glyph.char ? (glyph.char === ' ' ? '␣' : glyph.char) : glyph.name;
       cell.appendChild(cv); cell.appendChild(label);
       grid.appendChild(cell);
       this.cells.push({ cell, cv, idx });
@@ -91,6 +92,11 @@ export class Chartboard {
       cell.addEventListener('dblclick', () => {
         store.ui.selectedGlyph = idx;
         store.emit('open-glyphboard', idx);
+      });
+      cell.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        store.ui.selectedGlyph = idx; this.refreshSelection();
+        this.showCellMenu(e, idx);
       });
     });
 
@@ -109,6 +115,28 @@ export class Chartboard {
     for (const { cell, idx } of this.cells) cell.classList.toggle('selected', idx === store.ui.selectedGlyph);
   }
 
+  showCellMenu(e, idx) {
+    closeChartMenu();
+    const g = store.project.glyphs[idx];
+    const baseLabel = g.char ? `“${g.char === ' ' ? 'space' : g.char}”` : g.name;
+    const menu = document.createElement('div');
+    menu.className = 'dropdown'; menu.id = 'chart-ctx';
+    menu.style.left = Math.min(e.clientX, window.innerWidth - 250) + 'px';
+    menu.style.top = Math.min(e.clientY, window.innerHeight - 160) + 'px';
+    const item = (label, action) => {
+      const b = document.createElement('button'); b.className = 'dropdown-item';
+      b.innerHTML = `<span>${label}</span>`;
+      b.onclick = () => { closeChartMenu(); store.emit('chart-context', { action, idx }); };
+      menu.appendChild(b);
+    };
+    item(`🔎 Find alternates for ${baseLabel}`, 'find-alternates');
+    item('✚ Create alternate (.ssNN)', 'create-alternate');
+    item('🔗 Create ligature…', 'create-ligature');
+    menu.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    document.getElementById('modal-root').appendChild(menu);
+    setTimeout(() => document.addEventListener('pointerdown', closeChartMenu, { once: true }), 0);
+  }
+
   // Highlight a cell as a drop target while dragging a workboard shape.
   setDropTarget(idx) {
     for (const { cell, idx: i } of this.cells) cell.classList.toggle('drop-target', i === idx);
@@ -119,5 +147,7 @@ export class Chartboard {
     return cell ? +cell.dataset.idx : null;
   }
 }
+
+function closeChartMenu() { const m = document.getElementById('chart-ctx'); if (m) m.remove(); }
 
 export const chartboard = new Chartboard();

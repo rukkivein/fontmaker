@@ -125,7 +125,7 @@ export class Glyphboard {
     pane.classList.toggle('active', isActive && store.ui.activeBoard === 'glyphboard');
 
     if (store.ui.globals.gridsOn) this.drawGrid(ctx, v, col);
-    if (store.ui.globals.ghostOn && glyph) this.drawGhost(ctx, v, glyph, col);
+    if (store.ui.globals.ghostOn && glyph) this.drawGhosts(ctx, v, glyph, mid, col);
 
     // Master ghosts: other masters' outlines, faint.
     if (glyph) {
@@ -213,6 +213,51 @@ export class Glyphboard {
         for (const y of ys) { const s = v.toScreen(0, y); ctx.beginPath(); ctx.moveTo(0, s.sy); ctx.lineTo(99999, s.sy); ctx.stroke(); }
       }
     }
+    ctx.restore();
+  }
+
+  // Choose the right reference ghost: a normal glyph gets the system-font
+  // letter; an alternate traces its base glyph; a ligature traces its
+  // component glyphs side by side.
+  drawGhosts(ctx, v, glyph, mid, col) {
+    if (glyph.ghostFrom) {
+      const src = store.project.glyphs.find(g => g.name === glyph.ghostFrom);
+      this.drawOutlineGhost(ctx, v, src, mid, col, 0);
+    } else if (glyph.ghostComponents) {
+      let ox = 0;
+      for (const ch of glyph.ghostComponents) {
+        const g = store.project.glyphs.find(x => x.char === ch);
+        if (!g) continue;
+        this.drawOutlineGhost(ctx, v, g, mid, col, ox);
+        ox += g.advanceWidth;
+      }
+    } else {
+      this.drawGhost(ctx, v, glyph, col); // system reference letter
+    }
+  }
+
+  // Faint outline of another glyph (the "structure ghost"), x-offset in units.
+  drawOutlineGhost(ctx, v, g, mid, col, offsetX) {
+    if (!g) return;
+    const layer = ensureLayer(g, mid);
+    if (!layer.contours.length) return;
+    ctx.save();
+    ctx.beginPath();
+    for (const c of layer.contours) {
+      const pts = c.points; if (!pts.length) continue;
+      let s = v.toScreen(pts[0].x + offsetX, pts[0].y); ctx.moveTo(s.sx, s.sy);
+      const n = pts.length, segs = c.closed ? n : n - 1;
+      for (let i = 0; i < segs; i++) {
+        const a = pts[i], b = pts[(i + 1) % n], bs = v.toScreen(b.x + offsetX, b.y);
+        if (a.handleOut || b.handleIn) {
+          const c1 = v.toScreen((a.handleOut || a).x + offsetX, (a.handleOut || a).y);
+          const c2 = v.toScreen((b.handleIn || b).x + offsetX, (b.handleIn || b).y);
+          ctx.bezierCurveTo(c1.sx, c1.sy, c2.sx, c2.sy, bs.sx, bs.sy);
+        } else ctx.lineTo(bs.sx, bs.sy);
+      }
+      if (c.closed) ctx.closePath();
+    }
+    ctx.fillStyle = col('--accent'); ctx.globalAlpha = 0.16; ctx.fill('evenodd');
     ctx.restore();
   }
 
@@ -308,9 +353,12 @@ export class Glyphboard {
   updateInfo(info, mid, glyph, v) {
     if (!glyph) { info.textContent = 'No glyph selected'; return; }
     const m = store.project.masters.find(x => x.id === mid);
+    const idLabel = glyph.unicode != null
+      ? 'U+' + glyph.unicode.toString(16).toUpperCase().padStart(4, '0')
+      : (glyph.name || '');
+    const head = glyph.char ? (glyph.char === ' ' ? 'space' : glyph.char) : (glyph.name || '');
     info.innerHTML =
-      `<b>${glyph.char === ' ' ? 'space' : glyph.char}</b>  ` +
-      `U+${glyph.unicode.toString(16).toUpperCase().padStart(4, '0')}<br>` +
+      `<b>${head}</b>  ${idLabel}<br>` +
       `${m ? m.name : ''} · w ${glyph.advanceWidth}<br>` +
       `zoom ${(v.scale * 100).toFixed(0)}%`;
   }

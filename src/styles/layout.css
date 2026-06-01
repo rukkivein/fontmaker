@@ -243,6 +243,8 @@ body { display: flex; flex-direction: column; }
   padding: 2px 0 4px; border-top: 1px solid var(--panel-border);
 }
 .chart-cell.assigned .cell-label { color: var(--accent); }
+.chart-cell.special { border-style: dashed; border-color: var(--accent-2); }
+.chart-cell.special .cell-label { color: var(--accent-2); font-size: 8.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px; }
 
 /* ---------- Test bar (always light) ---------- */
 .testbar {

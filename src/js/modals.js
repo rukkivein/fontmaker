@@ -122,41 +122,45 @@ export function exportDialog(onExport) {
 }
 
 // ---- Find Glyph ----------------------------------------------------------
-export function findGlyphDialog(onPick) {
+export function findGlyphDialog(onPick, seed = '') {
   const ov = overlay();
   const m = document.createElement('div'); m.className = 'modal'; ov.appendChild(m);
   m.innerHTML = `
-    <h2>Find Glyph</h2>
-    <p class="sub">Type characters (e.g. A B é). Related glyphs are shown too.</p>
+    <h2>${seed ? 'Alternates & related' : 'Find Glyph'}</h2>
+    <p class="sub">Type characters (e.g. A B é). Case variants, diacritics, stylistic alternates (.ssNN) and ligatures are shown too.</p>
     <input id="fg-input" type="text" placeholder="Type a letter…" autofocus>
     <div class="find-results" id="fg-results"></div>`;
   const input = m.querySelector('#fg-input');
   const results = m.querySelector('#fg-results');
+  if (seed) input.value = seed;
 
   function update() {
     const q = input.value.trim();
     results.innerHTML = '';
+    const glyphs = store.project.glyphs;
     let list = [];
     if (!q) {
-      list = store.project.glyphs.slice(0, 40);
+      list = glyphs.slice(0, 40);
     } else {
       const targets = [...q];
-      const bases = new Set(targets.map(baseLetter).map(s => s.toLowerCase()));
+      const bases = new Set(targets.map(c => baseLetter(c).toLowerCase()));
       const seen = new Set();
-      // exact matches first, then related (same base letter ignoring diacritics)
-      for (const g of store.project.glyphs) {
-        if (targets.includes(g.char)) { list.push(g); seen.add(g.unicode); }
-      }
-      for (const g of store.project.glyphs) {
-        if (seen.has(g.unicode)) continue;
-        const gb = baseLetter(g.char).toLowerCase();
-        if (bases.has(gb)) { list.push(g); seen.add(g.unicode); }
-      }
+      const add = (g) => { if (g && !seen.has(g)) { seen.add(g); list.push(g); } };
+      // 1) exact characters
+      for (const g of glyphs) if (g.char && targets.includes(g.char)) add(g);
+      // 2) case variants / diacritics (same base letter)
+      for (const g of glyphs) if (g.char && bases.has(baseLetter(g.char).toLowerCase())) add(g);
+      // 3) stylistic alternates (.ssNN) of any matched base
+      const baseNames = new Set(list.filter(g => g.char).map(g => g.name));
+      for (const g of glyphs) if (g.baseName && baseNames.has(g.baseName)) add(g);
+      // 4) ligatures whose components include a typed character
+      for (const g of glyphs) if (g.components && g.components.some(c => targets.includes(c))) add(g);
     }
-    for (const g of list.slice(0, 60)) {
-      const idx = store.project.glyphs.indexOf(g);
+    for (const g of list.slice(0, 80)) {
+      const idx = glyphs.indexOf(g);
       const cell = document.createElement('div'); cell.className = 'find-cell';
-      cell.innerHTML = `<div class="ch">${g.char === ' ' ? '␣' : g.char}</div><div class="nm">${g.name}</div>`;
+      const label = g.char ? (g.char === ' ' ? '␣' : g.char) : (g.kind === 'ligature' ? '∮' : g.name.split('.').pop());
+      cell.innerHTML = `<div class="ch">${label}</div><div class="nm">${g.name}</div>`;
       cell.onclick = () => { close(); onPick(idx); };
       results.appendChild(cell);
     }
@@ -164,6 +168,22 @@ export function findGlyphDialog(onPick) {
   input.oninput = update;
   input.onkeydown = (e) => { if (e.key === 'Enter') { const first = results.querySelector('.find-cell'); first && first.click(); } };
   update();
+  setTimeout(() => input.focus(), 30);
+}
+
+// ---- Small text prompt ---------------------------------------------------
+export function textPromptDialog(title, sub, placeholder, onSubmit) {
+  const ov = overlay();
+  const m = document.createElement('div'); m.className = 'modal'; ov.appendChild(m);
+  m.innerHTML = `<h2>${title}</h2><p class="sub">${sub}</p>
+    <input id="tp-input" type="text" placeholder="${placeholder}" autofocus>
+    <div class="modal-actions"><button class="btn-ghost" id="tp-cancel">Cancel</button>
+      <button class="btn-primary" id="tp-ok">Create</button></div>`;
+  const input = m.querySelector('#tp-input');
+  const go = () => { const v = input.value.trim(); close(); if (v) onSubmit(v); };
+  m.querySelector('#tp-cancel').onclick = close;
+  m.querySelector('#tp-ok').onclick = go;
+  input.onkeydown = (e) => { if (e.key === 'Enter') go(); };
   setTimeout(() => input.focus(), 30);
 }
 

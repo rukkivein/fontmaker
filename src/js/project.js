@@ -52,6 +52,48 @@ export function getGlyph(project, index) {
   return project.glyphs[index];
 }
 
+function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function emptyLayers(project) { return Object.fromEntries(project.masters.map(m => [m.id, { contours: [] }])); }
+
+// Create a stylistic alternate (X.ssNN) of a base glyph. It is created with
+// EMPTY layers in EVERY master, so it is variable-compatible from the start
+// (same axes as the base) and shows the base outline as a ghost to trace.
+export function createAlternate(project, baseIndex) {
+  const base = project.glyphs[baseIndex];
+  const baseName = base.name;
+  let max = 0;
+  const re = new RegExp('^' + escapeRe(baseName) + '\\.ss(\\d+)$');
+  for (const g of project.glyphs) { const m = g.name && g.name.match(re); if (m) max = Math.max(max, +m[1]); }
+  const ss = String(max + 1).padStart(2, '0');
+  const glyph = {
+    name: baseName + '.ss' + ss, char: null, unicode: null,
+    advanceWidth: base.advanceWidth, layers: emptyLayers(project), grid: null,
+    kind: 'alternate', baseName, ghostFrom: baseName,
+  };
+  // Insert after the base's existing alternates for tidy ordering.
+  let pos = baseIndex + 1;
+  while (pos < project.glyphs.length && project.glyphs[pos].baseName === baseName) pos++;
+  project.glyphs.splice(pos, 0, glyph);
+  return pos;
+}
+
+// Create a ligature glyph (e.g. f_t) from a string of characters. Empty in all
+// masters; shows its component glyphs side-by-side as a ghost.
+export function createLigature(project, chars) {
+  const comps = [...chars].filter(c => c.trim());
+  if (comps.length < 2) return -1;
+  const compGlyphs = comps.map(c => project.glyphs.find(g => g.char === c)).filter(Boolean);
+  const name = comps.map(c => { const g = project.glyphs.find(x => x.char === c); return g ? g.name : 'uni' + c.codePointAt(0).toString(16); }).join('_');
+  if (project.glyphs.some(g => g.name === name)) return project.glyphs.findIndex(g => g.name === name);
+  const adv = compGlyphs.reduce((a, g) => a + g.advanceWidth, 0) || Math.round(project.unitsPerEm * 0.8);
+  const glyph = {
+    name, char: null, unicode: null, advanceWidth: adv, layers: emptyLayers(project), grid: null,
+    kind: 'ligature', components: comps, ghostComponents: comps,
+  };
+  project.glyphs.push(glyph);
+  return project.glyphs.length - 1;
+}
+
 export function findGlyphByChar(project, ch) {
   return project.glyphs.findIndex(g => g.char === ch);
 }
