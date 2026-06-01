@@ -1,0 +1,19 @@
+{
+  "name": "fontmaker",
+  "version": "0.1.0",
+  "description": "Glyph-based font design studio — Photoshop-like UX, Illustrator-like paths, real font export.",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0"
+  },
+  "dependencies": {
+    "chokidar": "^3.6.0",
+    "opentype.js": "^1.3.4"
+  }
+}
