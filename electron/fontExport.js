@@ -139,6 +139,37 @@ function exportFont(project, format, metadata, filePath) {
   if (metadata.version) font.names.version = { en: String(metadata.version) };
   if (metadata.manufacturer) font.names.manufacturer = { en: metadata.manufacturer };
 
+  // ---- GSUB: make alternates (ssNN/salt) and ligatures (liga) real --------
+  // opentype.js works in glyph indices; ours are project index + 1 (.notdef=0).
+  try {
+    const nameToOt = new Map(), charToOt = new Map();
+    project.glyphs.forEach((g, pi) => {
+      nameToOt.set(g.name, pi + 1);
+      if (g.char) charToOt.set(g.char, pi + 1);
+    });
+    const ligatures = [];          // { sub:[ot], by:ot }
+    const altsByBase = new Map();  // baseOt -> [altOt]
+    const singles = [];            // { feature:'ssNN', sub:baseOt, by:altOt }
+    project.glyphs.forEach((g, pi) => {
+      const ot = pi + 1;
+      if (g.kind === 'alternate' && g.baseName && nameToOt.has(g.baseName)) {
+        const base = nameToOt.get(g.baseName);
+        const ssm = g.name.match(/\.ss(\d+)$/);
+        if (ssm) singles.push({ feature: 'ss' + ssm[1], sub: base, by: ot });
+        if (!altsByBase.has(base)) altsByBase.set(base, []);
+        altsByBase.get(base).push(ot);
+      } else if (g.kind === 'ligature' && g.components) {
+        const comps = g.components.map(c => charToOt.get(c));
+        if (comps.every(x => x != null)) ligatures.push({ sub: comps, by: ot });
+      }
+    });
+    // opentype.js requires features in ALPHABETICAL order: liga < salt < ssNN.
+    for (const l of ligatures) font.substitution.addLigature('liga', l);
+    for (const [base, alts] of altsByBase) font.substitution.addAlternate('salt', { sub: base, by: alts });
+    singles.sort((a, b) => a.feature.localeCompare(b.feature));
+    for (const s of singles) font.substitution.addSingle(s.feature, { sub: s.sub, by: s.by });
+  } catch (e) { /* GSUB is best-effort; never block the export */ }
+
   const buffer = font.toArrayBuffer();
   fs.writeFileSync(filePath, Buffer.from(buffer));
   return { glyphCount: count };
