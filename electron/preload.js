@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('fm', {
   },
   source: {
     import: () => ipcRenderer.invoke('source:import'),
+    reimport: (filePath) => ipcRenderer.invoke('source:reimport', filePath),
     read: (filePath) => ipcRenderer.invoke('source:read', filePath),
     watch: (filePath) => ipcRenderer.invoke('source:watch', filePath)
   },

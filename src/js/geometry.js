@@ -3,6 +3,71 @@
 
 export function dist(ax, ay, bx, by) { return Math.hypot(ax - bx, ay - by); }
 
+// Shoelace signed area over on-curve points (y-up): >0 = counter-clockwise.
+export function signedArea(contour) {
+  const p = contour.points; let a = 0;
+  for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i].x * q.y - q.x * p[i].y; }
+  return a / 2;
+}
+
+export function pointInPolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+
+// Even-odd hit test for a whole shape (so clicks inside a counter miss it).
+export function pointInShape(shape, x, y) {
+  let count = 0;
+  for (const c of shape.contours) if (c.points.length >= 3 && pointInPolygon(x, y, c.points)) count++;
+  return count % 2 === 1;
+}
+
+// Break a compound outline into separate pieces: each outer contour plus the
+// holes nested inside it becomes one piece. This is the "release compound path"
+// that lets a single imported word (e.g. "glypho") split into per-letter shapes
+// you can drag onto glyphs individually.
+export function breakApart(contours) {
+  if (contours.length <= 1) return [{ contours: contours.map(cloneC) }];
+  const polys = contours.map(c => c.points);
+  const depth = contours.map((c, i) => {
+    let d = 0; const s = c.points[0];
+    for (let j = 0; j < contours.length; j++) {
+      if (j === i || contours[j].points.length < 3) continue;
+      if (pointInPolygon(s.x, s.y, polys[j])) d++;
+    }
+    return d;
+  });
+  const pieces = [];
+  const outerToPiece = new Map();
+  contours.forEach((c, i) => {
+    if (depth[i] % 2 === 0) { outerToPiece.set(i, pieces.length); pieces.push({ contours: [cloneC(c)] }); }
+  });
+  contours.forEach((c, i) => {
+    if (depth[i] % 2 === 0) return; // it's an outer, already placed
+    // Attach hole to the smallest-area outer that contains it.
+    let best = -1, bestA = Infinity; const s = c.points[0];
+    contours.forEach((o, j) => {
+      if (j === i || depth[j] % 2 !== 0 || !pointInPolygon(s.x, s.y, polys[j])) return;
+      const a = Math.abs(signedArea(o)); if (a < bestA) { bestA = a; best = j; }
+    });
+    if (best >= 0) pieces[outerToPiece.get(best)].contours.push(cloneC(c));
+    else pieces.push({ contours: [cloneC(c)] });
+  });
+  return pieces.length ? pieces : [{ contours: contours.map(cloneC) }];
+}
+
+function cloneC(c) {
+  return { closed: c.closed, points: c.points.map(p => ({
+    x: p.x, y: p.y, type: p.type,
+    handleIn: p.handleIn ? { ...p.handleIn } : null,
+    handleOut: p.handleOut ? { ...p.handleOut } : null,
+  })) };
+}
+
 // ---- Point / contour construction ---------------------------------------
 export function makePoint(x, y, type = 'corner') {
   return { x, y, type, handleIn: null, handleOut: null };

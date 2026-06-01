@@ -192,6 +192,21 @@ body { display: flex; flex-direction: column; }
   color: var(--text-dim); background: rgba(0,0,0,.3); padding:2px 7px; border-radius:5px;
 }
 
+/* ---------- Workboard action bar ---------- */
+.wb-actions {
+  position: absolute; top: 8px; right: 8px; z-index: 6;
+  display: flex; gap: 6px;
+}
+.wb-btn {
+  padding: 6px 11px; border-radius: var(--radius-pill);
+  background: var(--panel); border: 1px solid var(--panel-border);
+  box-shadow: inset 0 1px 0 var(--glass-highlight), var(--shadow);
+  -webkit-backdrop-filter: blur(var(--glass-blur)); backdrop-filter: blur(var(--glass-blur));
+  font-weight: 600; font-size: 11.5px; transition: var(--transition);
+}
+.wb-btn:hover { background: var(--accent-soft); transform: translateY(-1px); }
+.wb-btn:active { transform: translateY(0); }
+
 /* ---------- Chartboard ---------- */
 .chart-grid {
   position:absolute; inset:0; overflow:auto; padding:10px;

@@ -5,6 +5,20 @@ const fs = require('fs');
 const projectIO = require('./projectIO');
 const fontExport = require('./fontExport');
 const fileWatcher = require('./fileWatcher');
+const aiImport = require('./aiImport');
+
+// Load a vector source: .ai/.pdf/.eps are parsed to shapes in Node (they need
+// zlib/zstd + Buffer); .svg is handed back as text for the renderer to parse.
+function loadVector(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const buf = fs.readFileSync(filePath);
+  if (ext === '.ai' || ext === '.pdf' || ext === '.eps') {
+    let shapes = [];
+    try { shapes = aiImport.parseAI(buf); } catch (e) { shapes = []; }
+    return { ext, shapes };
+  }
+  return { ext, content: buf.toString('utf8') };
+}
 
 const isDev = process.argv.includes('--dev');
 let mainWindow = null;
@@ -101,15 +115,20 @@ ipcMain.handle('source:import', async () => {
   });
   if (canceled || !filePaths.length) return { ok: false };
   const filePath = filePaths[0];
-  let content = '';
-  try {
-    content = fs.readFileSync(filePath, 'utf8');
-  } catch (err) {
-    return { ok: false, error: String(err) };
-  }
+  let v;
+  try { v = loadVector(filePath); } catch (err) { return { ok: false, error: String(err) }; }
   // Start watching this file for external edits (the "source changed" feature).
   fileWatcher.watch(filePath);
-  return { ok: true, filePath, content, ext: path.extname(filePath).toLowerCase() };
+  return { ok: true, filePath, ext: v.ext, content: v.content, shapes: v.shapes };
+});
+
+// Re-load a source (after an external edit, or when re-opening a project).
+ipcMain.handle('source:reimport', async (_e, filePath) => {
+  try {
+    const v = loadVector(filePath);
+    fileWatcher.watch(filePath);
+    return { ok: true, filePath, ext: v.ext, content: v.content, shapes: v.shapes };
+  } catch (err) { return { ok: false, error: String(err) }; }
 });
 
 ipcMain.handle('source:read', async (_e, filePath) => {

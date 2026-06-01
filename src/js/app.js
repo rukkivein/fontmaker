@@ -1,4 +1,4 @@
-import { store } from './store.js';
+import { store, uid } from './store.js';
 import { createProject, deletePointsAllMasters } from './project.js';
 import { ALPHABET_ANCHOR } from './data.js';
 import { buildMenubar } from './menus.js';
@@ -122,36 +122,35 @@ async function importSource() {
   if (!hasNative) return toast('Import requires the desktop app');
   const res = await window.fm.source.import();
   if (!res.ok) return;
-  loadShapesFromSource(res.content, res.filePath, res.ext);
+  const n = applyVector(res);
+  if (!n) return;
   // Reveal the workboard so the import is visible.
   store.ui.visibleBoards.workboard = true;
   store.ui.activeBoard = 'workboard';
   layout.render();
-  toast(`Imported ${baseName(res.filePath)} — drag shapes onto glyphs`);
+  requestAnimationFrame(() => workboard.fitToShapes());
+  toast(`Imported ${baseName(res.filePath)} — ${n} shape${n === 1 ? '' : 's'}. Break Apart, then drag onto a glyph →`, { timeout: 4000 });
 }
 
-function loadShapesFromSource(content, filePath, ext) {
-  let shapes = [];
-  try { shapes = parseSVG(content); } catch (e) { shapes = []; }
-  if (!shapes.length) {
-    const isAi = ext === '.ai' || !/<svg[\s>]/i.test(content || '');
-    if (isAi) {
-      infoDialog('Couldn’t read vectors',
-        `Adobe <b>.ai</b> files are PDF-based and don’t contain plain vector paths we can read directly.<br><br>` +
-        `In Illustrator: <b>File ▸ Save As…</b> (or <b>Export ▸ Export As…</b>) and choose <b>SVG</b>, then import that .svg here.<br><br>` +
-        `SVG keeps your exact paths, anchor points and curves.`);
-    } else {
-      toast('No shapes found in this file');
-    }
-    return; // nothing to add
+// Unifies .ai/.pdf/.eps (already parsed to shapes in the main process) and
+// .svg (parsed here). Replaces any prior shapes from the same source so the
+// "source changed → update" flow swaps cleanly.
+function applyVector(res) {
+  let shapes = res.shapes;
+  if (!shapes) { try { shapes = parseSVG(res.content || ''); } catch { shapes = []; } }
+  if (!shapes || !shapes.length) {
+    const isAi = ['.ai', '.eps', '.pdf'].includes(res.ext);
+    infoDialog('Couldn’t read vectors', isAi
+      ? `No readable paths were found in this file. If it’s an older or flattened export, try re-saving from Illustrator with <b>Create PDF Compatible File</b> on, or export <b>SVG</b>.`
+      : `No shapes found in this file.`);
+    return 0;
   }
   store.commit('Import source', (p) => {
     const work = ensureWork(p);
-    // Replace any prior shapes from the same source (for re-import/update).
-    work.shapes = work.shapes.filter(s => s.source !== filePath);
-    let ox = 0;
-    for (const s of shapes) { s.source = filePath; work.shapes.push(s); ox += 40; }
+    work.shapes = work.shapes.filter(s => s.source !== res.filePath);
+    for (const s of shapes) { s.source = res.filePath; if (!s.id) s.id = uid('shape'); work.shapes.push(s); }
   });
+  return shapes.length;
 }
 
 async function doExport({ format, metadata }) {
@@ -167,12 +166,12 @@ function onSourceChanged({ type, filePath }) {
   prompt(`Source changed: ${baseName(filePath)} — update?`, [
     { label: 'Ignore' },
     { label: 'Update', primary: true, onClick: async () => {
-      const r = await window.fm.source.read(filePath);
-      if (r.ok) {
-        loadShapesFromSource(r.content, filePath, filePath.slice(filePath.lastIndexOf('.')));
+      const res = await window.fm.source.reimport(filePath);
+      if (res.ok) {
+        const n = applyVector(res);
         if (!store.ui.visibleBoards.workboard) { store.ui.visibleBoards.workboard = true; layout.render(); }
         else workboard.draw();
-        toast('Source updated');
+        if (n) toast(`Source updated — ${n} shape${n === 1 ? '' : 's'}`);
       }
     } },
   ]);
