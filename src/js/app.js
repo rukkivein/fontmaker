@@ -84,6 +84,12 @@ function dispatch(action) {
     case 'window:workboard': return toggleBoard('workboard');
     case 'window:chartboard': return toggleBoard('chartboard');
     case 'window:toggleTheme': return toggleTheme();
+    case 'window:glyphboardLight': {
+      store.ui.glyphboardLight = !store.ui.glyphboardLight;
+      layout.render(); glyphboard.requestDraw();
+      toast(store.ui.glyphboardLight ? 'Glyphboard: light surface' : 'Glyphboard: dark surface');
+      return;
+    }
 
     case 'help:shortcuts': return infoDialog('Keyboard Shortcuts', SHORTCUTS_HTML);
     case 'help:about': return infoDialog('About FontMaker',

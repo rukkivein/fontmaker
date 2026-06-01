@@ -23,6 +23,7 @@ class Layout {
     vis.forEach((b, i) => {
       const board = document.createElement('section');
       board.className = 'board' + (store.ui.activeBoard === b.id ? ' active' : '');
+      if (b.id === 'glyphboard' && store.ui.glyphboardLight) board.classList.add('surface-light');
       board.dataset.board = b.id;
       board.style.flex = (store.ui.layout[shortKey(b.id)] || 1) + ' 1 0';
       board.appendChild(this.buildHead(b));

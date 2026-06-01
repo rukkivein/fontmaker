@@ -37,6 +37,18 @@ app.whenReady().then(async () => {
   await new Promise(r => setTimeout(r, 300));
   await shot('03-glyphboard-light.png');
 
+  // Back to dark, but with the "light glyphboard surface" mode on.
+  await win.webContents.executeJavaScript(`(async()=>{
+    document.documentElement.setAttribute('data-theme','dark');
+    const {store}=await import('./js/store.js');
+    store.ui.glyphboardLight=true;
+    const {layout}=await import('./js/layout.js'); layout.render();
+    const {glyphboard}=await import('./js/glyphboard.js');
+    await new Promise(r=>setTimeout(r,200)); glyphboard.requestDraw();
+  })()`);
+  await new Promise(r => setTimeout(r, 500));
+  await shot('04-glyphboard-light-surface.png');
+
   console.log('shots written to', outDir);
   app.exit(0);
 });

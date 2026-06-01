@@ -86,6 +86,20 @@ export class Glyphboard {
     this._raf = requestAnimationFrame(() => { this._raf = 0; this.draw(); });
   }
 
+  // Color lookup. Honors the "light glyphboard surface" mode by overriding the
+  // dark theme's tokens with a light set for this board only.
+  colorFn() {
+    const css = getComputedStyle(document.documentElement);
+    if (!store.ui.glyphboardLight) return (n) => css.getPropertyValue(n).trim();
+    const LIGHT = {
+      '--grid-line': 'rgba(0,0,0,0.10)', '--grid-metric': 'rgba(55,62,74,0.42)', '--grid-movable': '#c97d18',
+      '--ghost': 'rgba(0,0,0,0.13)', '--contour': '#14161a', '--accent': '#3a3f47', '--accent-2': '#7a7f88',
+      '--point': '#3a3f47', '--point-sel': '#c97d18', '--handle': '#8a6fb0', '--bg-3': '#eceef1',
+      '--text-faint': '#8a8f97', '--text-dim': '#5c6066', '--board-active': '#3a3f47',
+    };
+    return (n) => LIGHT[n] !== undefined ? LIGHT[n] : css.getPropertyValue(n).trim();
+  }
+
   // ---- Rendering --------------------------------------------------------
   draw() {
     const glyph = this.curGlyph();
@@ -105,8 +119,7 @@ export class Glyphboard {
     const W = canvas.width / dpr, H = canvas.height / dpr;
     ctx.clearRect(0, 0, W, H);
 
-    const css = getComputedStyle(document.documentElement);
-    const col = (n) => css.getPropertyValue(n).trim();
+    const col = this.colorFn();
 
     const isActive = mid === (store.ui.ghostMasterId || store.ui.activeMasterId);
     pane.classList.toggle('active', isActive && store.ui.activeBoard === 'glyphboard');
@@ -270,14 +283,22 @@ export class Glyphboard {
           ctx.globalAlpha = 0.9; ctx.fillStyle = col('--handle');
           ctx.beginPath(); ctx.arc(hs.sx, hs.sy, 2.6, 0, Math.PI * 2); ctx.fill();
         }
-        // On-curve point
+        // On-curve point — selected anchors get a soft glow (Apple-ish detail).
         ctx.globalAlpha = 1;
         ctx.fillStyle = sel ? col('--point-sel') : col('--point');
+        if (sel) { ctx.save(); ctx.shadowColor = col('--point-sel'); ctx.shadowBlur = 9; }
         if (p.type === 'smooth') {
           ctx.beginPath(); ctx.arc(s.sx, s.sy, sel ? 4.2 : 3.4, 0, Math.PI * 2); ctx.fill();
         } else {
           const r = sel ? 4 : 3.2;
           ctx.fillRect(s.sx - r, s.sy - r, r * 2, r * 2);
+        }
+        if (sel) {
+          ctx.restore();
+          // bright inner core
+          ctx.fillStyle = '#fff'; ctx.globalAlpha = 0.9;
+          ctx.beginPath(); ctx.arc(s.sx, s.sy, 1.4, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
         }
       }
     }

@@ -31,7 +31,8 @@ const MENUS = [
     ['Workboard', 'window:workboard', '⌘2'],
     ['Chartboard', 'window:chartboard', '⌘3'],
     '-',
-    ['Toggle Theme', 'window:toggleTheme', '⇧⌘T'],
+    ['Toggle Theme (Dark / Light)', 'window:toggleTheme', '⇧⌘T'],
+    ['Glyphboard Light Surface', 'window:glyphboardLight'],
   ]},
   { label: 'Help', items: [
     ['Keyboard Shortcuts', 'help:shortcuts'],

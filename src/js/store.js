@@ -8,6 +8,7 @@ const state = {
   project: null,      // the document (masters, glyphs, grid, metrics, meta)
   ui: {
     theme: 'dark',
+    glyphboardLight: false,        // dark app, but light glyphboard surface
     activeBoard: 'chartboard',     // which board the user last focused
     visibleBoards: { glyphboard: false, workboard: false, chartboard: true },
     tool: 'position',
