@@ -5,7 +5,8 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "test": "node test/structural.test.mjs && node test/export.test.js && node test/winding.test.js"
   },
   "author": "",
   "license": "MIT",

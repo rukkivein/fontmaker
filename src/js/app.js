@@ -1,5 +1,5 @@
 import { store } from './store.js';
-import { createProject } from './project.js';
+import { createProject, deletePointsAllMasters } from './project.js';
 import { ALPHABET_ANCHOR } from './data.js';
 import { buildMenubar } from './menus.js';
 import { buildToolbar, selectTool } from './toolbar.js';
@@ -97,7 +97,13 @@ function dispatch(action) {
 async function openProject() {
   if (!hasNative) return toast('Open requires the desktop app');
   const res = await window.fm.project.open();
-  if (res.ok) { setupProject(res.project, res.filePath); toast('Opened ' + baseName(res.filePath)); }
+  if (res.ok) {
+    setupProject(res.project, res.filePath);
+    // Re-arm "source changed" watching for any vector sources this project used.
+    const sources = new Set((res.project.work?.shapes || []).map(s => s.source).filter(Boolean));
+    for (const sp of sources) window.fm.source.watch(sp);
+    toast('Opened ' + baseName(res.filePath));
+  }
 }
 
 async function saveProject(forceDialog) {
@@ -318,18 +324,11 @@ function deleteSelection() {
     });
     store.ui.workSelection = []; workboard.draw(); return;
   }
-  const sel = store.ui.selection.points;
+  const sel = store.ui.selection.points.slice();
   if (!sel.length) return;
-  const glyph = store.project.glyphs[store.ui.selectedGlyph];
-  const layer = glyph.layers[store.ui.activeMasterId];
-  store.commit('Delete points', () => {
-    const byC = new Map();
-    for (const { ci, pi } of sel) { if (!byC.has(ci)) byC.set(ci, []); byC.get(ci).push(pi); }
-    for (const [ci, pis] of byC) {
-      pis.sort((a, b) => b - a).forEach(pi => layer.contours[ci].points.splice(pi, 1));
-    }
-    layer.contours = layer.contours.filter(c => c.points.length >= 2);
-  });
+  // Deleting points is structural → remove the matching points from every
+  // master so layers stay interpolation-compatible.
+  store.commit('Delete points', (p) => deletePointsAllMasters(p, store.ui.selectedGlyph, sel));
   store.ui.selection.points = [];
   afterEdit(true);
 }
@@ -338,7 +337,8 @@ function baseName(p) { return p ? p.split(/[\\/]/).pop() : ''; }
 
 const SHORTCUTS_HTML = `
   <b>Tools</b>: V Position · A Point · M Area · B Brush · P Pin Mesh · S Simplify · U Add Shape · C Axis<br>
-  <b>Tab</b>: toggle grid edit mode · <b>Esc</b>: deselect · <b>Del</b>: delete selection<br>
+  <b>Alt-click</b> outline (Point/Axis): insert a point — added to <i>all masters</i> at the matching spot<br>
+  <b>Tab</b>: toggle grid edit mode · <b>Esc</b>: deselect · <b>Del</b>: delete selection (from all masters)<br>
   <b>Space-drag</b>: pan · <b>Ctrl/⌘ + wheel</b>: zoom<br>
   <b>⌘1/2/3</b>: Glyphboard / Workboard / Chartboard · <b>⌘F</b>: find glyph<br>
   <b>⌘S</b> save · <b>⇧⌘S</b> save as · <b>⌘E</b> export · <b>⌘Z/Y</b> undo/redo`;

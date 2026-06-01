@@ -1,8 +1,10 @@
 import { store } from './store.js';
 import {
-  hitPoint, hitHandle, makeRect, makeCircle, makeRoundRect, cubicPoint, smoothPoint,
+  hitPoint, hitHandle, makeRect, makeCircle, makeRoundRect, cubicPoint, smoothPoint, nearestSegment,
 } from './geometry.js';
-import { propagateToLinked } from './project.js';
+import {
+  propagateToLinked, addContourAllMasters, deletePointsAllMasters, insertPointAllMasters,
+} from './project.js';
 
 // Per-tool persistent control values.
 export function toolState(id) {
@@ -50,12 +52,23 @@ function moveSelected(env, dx, dy) {
   }
 }
 
+// Adding a whole contour is a STRUCTURAL change → applies to every master, so
+// masters never diverge in point count. (Geometric tweaks stay per-master.)
 function addShapeToLayer(env, contour) {
-  env.layer.contours.push(contour);
-  if (env.globals.linkMasters) {
-    propagateToLinked(env.project, env.glyphIndex, env.masterId,
-      (other) => other.contours.push(JSON.parse(JSON.stringify(contour))));
-  }
+  addContourAllMasters(env.project, env.glyphIndex, contour);
+}
+
+// Insert an on-curve point where the user Alt-clicks the outline — propagated
+// to all masters via de Casteljau so each master keeps its own shape but gains
+// a matching point (e.g. turning V→W adds the same points to V, unseen).
+function tryInsertPoint(env, pt) {
+  const seg = nearestSegment(env.layer, pt.x, pt.y, env.tol(8));
+  if (!seg) return false;
+  store.beginGesture('Insert point');
+  insertPointAllMasters(env.project, env.glyphIndex, seg.ci, seg.seg, seg.t);
+  setSel([{ ci: seg.ci, pi: seg.seg + 1 }]);
+  store.notify('edit');
+  return true;
 }
 
 // nearest point on outline within radius (returns {ci,pi,dist} for closest pt)
@@ -118,6 +131,10 @@ TOOLS.point = {
   },
   onDown(env, pt, e) {
     const tol = env.tol(7);
+    // Alt-click on the outline inserts a point (in all masters).
+    if (e.altKey && !hitPoint(env.layer, pt.x, pt.y, tol)) {
+      if (tryInsertPoint(env, pt)) { this._moving = false; return; }
+    }
     const hit = hitPoint(env.layer, pt.x, pt.y, tol);
     if (hit) {
       if (e.shiftKey) addSel(hit.ci, hit.pi);
@@ -217,7 +234,7 @@ TOOLS.brush = {
     if (!this._down) return;
     const st = toolState('brush');
     const r = st.size; const dx = pt.x - this._last.x, dy = pt.y - this._last.y;
-    maybeSubdivideUnder(env.layer, pt, r, st.optimize);
+    maybeSubdivideUnder(env, pt, r, st.optimize);
     for (const { ci, pi, d } of pointsInRadius(env.layer, pt.x, pt.y, r)) {
       const p = env.layer.contours[ci].points[pi];
       const fall = falloff(d / r, st.hardness);
@@ -304,23 +321,30 @@ TOOLS.simplify = {
     const st = toolState('simplify');
     const r = st.size;
     const strength = st.amount / 100;
+    // 1) Smooth handles under the brush (geometric — active master only).
     for (const c of env.layer.contours) {
-      // Smooth points under the brush.
       for (let pi = 0; pi < c.points.length; pi++) {
         const p = c.points[pi];
-        if (Math.hypot(p.x - pt.x, p.y - pt.y) > r) continue;
-        smoothPoint(c, pi, 0.16 + 0.25 * strength * falloff(Math.hypot(p.x - pt.x, p.y - pt.y) / r, st.hardness));
+        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+        if (d > r) continue;
+        smoothPoint(c, pi, 0.16 + 0.25 * strength * falloff(d / r, st.hardness));
       }
-      // Remove near-collinear redundant points when amount is high.
-      if (strength > 0.5 && c.points.length > 4) {
-        for (let pi = c.points.length - 1; pi >= 0; pi--) {
+    }
+    // 2) Remove near-collinear redundant points (STRUCTURAL — all masters),
+    //    a few per frame so counts stay synced without runaway deletion.
+    if (strength > 0.5) {
+      const removals = [];
+      env.layer.contours.forEach((c, ci) => {
+        if (c.points.length <= 4) return;
+        for (let pi = 0; pi < c.points.length; pi++) {
           const n = c.points.length;
           const prev = c.points[(pi - 1 + n) % n], cur = c.points[pi], next = c.points[(pi + 1) % n];
           if (Math.hypot(cur.x - pt.x, cur.y - pt.y) > r) continue;
           const area = Math.abs((next.x - prev.x) * (cur.y - prev.y) - (cur.x - prev.x) * (next.y - prev.y));
-          if (area < 800 * strength && c.points.length > 4) c.points.splice(pi, 1);
+          if (area < 800 * strength) removals.push({ ci, pi });
         }
-      }
+      });
+      if (removals.length) deletePointsAllMasters(env.project, env.glyphIndex, removals.slice(0, 2));
     }
   },
   onRender(ctx, env, { col }) { drawBrushRing(ctx, env, this._cursor, toolState('simplify').size, col); },
@@ -375,10 +399,14 @@ TOOLS.axis = {
     return [{ type: 'toggle', label: 'Handles', value: st.chain, text: 'Chain (mirror handles)',
       onChange: v => { st.chain = v; } }];
   },
-  onDown(env, pt) {
+  onDown(env, pt, e) {
     const tol = env.tol(8);
     const h = hitHandle(env.layer, pt.x, pt.y, tol);
     if (h) { store.beginGesture('Edit handle'); this._h = h; return; }
+    // Alt-click on a segment inserts a matching point across all masters.
+    if (e && e.altKey && !hitPoint(env.layer, pt.x, pt.y, tol)) {
+      if (tryInsertPoint(env, pt)) { this._h = null; return; }
+    }
     // Click on an on-curve point with no handles: extrude handles from it.
     const p = hitPoint(env.layer, pt.x, pt.y, tol);
     if (p) {
@@ -418,19 +446,23 @@ function drawBrushRing(ctx, env, cursor, size, col) {
   ctx.beginPath(); ctx.arc(c.sx, c.sy, size * env.view.scale, 0, Math.PI * 2); ctx.stroke();
   ctx.restore();
 }
-function maybeSubdivideUnder(layer, pt, r, optimize) {
+// Brush "add points to preserve form": when a segment under the brush gets too
+// long/stretched, split it — STRUCTURALLY across all masters so counts stay in
+// sync (this is what keeps the unseen V in step with the W you're shaping).
+function maybeSubdivideUnder(env, pt, r, optimize) {
   if (optimize <= 0) return;
+  const layer = env.layer;
   const maxLen = (1 - optimize / 100) * 300 + 40; // higher optimize => shorter allowed segs
-  for (const c of layer.contours) {
+  for (let ci = 0; ci < layer.contours.length; ci++) {
+    const c = layer.contours[ci];
     for (let i = c.points.length - 1; i >= 0; i--) {
       const n = c.points.length;
+      if (!c.closed && i === n - 1) continue;
       const a = c.points[i], b = c.points[(i + 1) % n];
       const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
       if (Math.hypot(mid.x - pt.x, mid.y - pt.y) > r) continue;
       if (Math.hypot(b.x - a.x, b.y - a.y) > maxLen && c.points.length < 200) {
-        const c1 = a.handleOut || a, c2 = b.handleIn || b;
-        const np = cubicPoint(a, c1, c2, b, 0.5);
-        c.points.splice(i + 1, 0, { x: np.x, y: np.y, type: 'smooth', handleIn: null, handleOut: null });
+        insertPointAllMasters(env.project, env.glyphIndex, ci, i, 0.5);
       }
     }
   }

@@ -35,11 +35,58 @@ function contourToCommands(path, contour) {
   if (contour.closed) path.close();
 }
 
+// Shoelace signed area over on-curve points (y-up): >0 = counter-clockwise.
+function signedArea(contour) {
+  const p = contour.points; let a = 0;
+  for (let i = 0; i < p.length; i++) {
+    const q = p[(i + 1) % p.length];
+    a += p[i].x * q.y - q.x * p[i].y;
+  }
+  return a / 2;
+}
+function pointInPolygon(x, y, poly) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y, xj = poly[j].x, yj = poly[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) inside = !inside;
+  }
+  return inside;
+}
+function reverseContour(c) {
+  const pts = c.points.slice().reverse().map(p => ({
+    x: p.x, y: p.y, type: p.type,
+    handleIn: p.handleOut ? { ...p.handleOut } : null,   // swap in/out on reversal
+    handleOut: p.handleIn ? { ...p.handleIn } : null,
+  }));
+  return { closed: c.closed, points: pts };
+}
+
+// Set winding so the font's non-zero fill rule punches counters correctly:
+// outer contours CCW, holes CW (CFF/OTF convention). Nesting depth is found by
+// point-in-polygon containment — even depth = outer, odd = hole. Without this,
+// letters like O, A, e export filled solid even though they look right on screen
+// (where we draw with even-odd). This mirrors how Glyphr Studio computes winding.
+function normalizeWinding(contours) {
+  const polys = contours.map(c => c.points);
+  return contours.map((c, i) => {
+    if (c.points.length < 3) return c;
+    const sample = c.points[0];
+    let depth = 0;
+    for (let j = 0; j < contours.length; j++) {
+      if (j === i || contours[j].points.length < 3) continue;
+      if (pointInPolygon(sample.x, sample.y, polys[j])) depth++;
+    }
+    const wantCCW = depth % 2 === 0;   // outer => CCW, hole => CW
+    const isCCW = signedArea(c) > 0;
+    return isCCW === wantCCW ? c : reverseContour(c);
+  });
+}
+
 function glyphToPath(glyph, masterId) {
   const path = new opentype.Path();
   const layer = glyph.layers && glyph.layers[masterId];
   if (layer && layer.contours) {
-    for (const c of layer.contours) contourToCommands(path, c);
+    for (const c of normalizeWinding(layer.contours)) contourToCommands(path, c);
   }
   return path;
 }

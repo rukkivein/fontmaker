@@ -80,6 +80,8 @@ function masterGhostMenu(anchor) {
   closeAnyPopover();
   const pop = document.createElement('div');
   pop.className = 'dropdown'; pop.id = 'master-ghost-pop';
+  // Clicks inside the menu must not reach the document close-handler.
+  pop.addEventListener('pointerdown', (e) => e.stopPropagation());
   const r = anchor.getBoundingClientRect();
   pop.style.top = (r.bottom + 4) + 'px';
   pop.style.left = Math.min(r.left, window.innerWidth - 250) + 'px';

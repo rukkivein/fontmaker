@@ -118,6 +118,12 @@ ipcMain.handle('source:read', async (_e, filePath) => {
   }
 });
 
+// Re-arm watching for a source (used after a project is re-opened).
+ipcMain.handle('source:watch', async (_e, filePath) => {
+  fileWatcher.watch(filePath);
+  return { ok: true };
+});
+
 /* ------------------------------------------------------------------ *
  *  IPC: Font export (OTF / TTF / variable / web)
  * ------------------------------------------------------------------ */

@@ -1,7 +1,7 @@
 import { store } from './store.js';
 import { Viewport } from './viewport.js';
 import { layerBounds, ensureLayer } from './geometry.js';
-import { propagateToLinked } from './project.js';
+import { setLayerAllMasters } from './project.js';
 import { chartboard } from './chartboard.js';
 import { toast } from './toast.js';
 
@@ -30,14 +30,10 @@ export function assignShapeToGlyph(project, shape, glyphIndex, masterId, link) {
       handleOut: p.handleOut ? { x: tx(p.handleOut.x), y: ty(p.handleOut.y) } : null,
     })),
   }));
-  const layer = ensureLayer(glyph, masterId);
-  layer.contours = place();
+  // Assign the same outline to every master so they start compatible; the
+  // designer then reshapes each master while point counts stay in lock-step.
+  setLayerAllMasters(project, glyphIndex, place());
   glyph.advanceWidth = Math.round(b.w * scale + lsb * 2);
-  if (link) {
-    propagateToLinked(project, glyphIndex, masterId, (other) => {
-      other.contours = place();
-    });
-  }
 }
 
 export class Workboard {

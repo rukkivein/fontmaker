@@ -84,6 +84,61 @@ export function insertPointAllMasters(project, glyphIndex, ci, segIndex, t) {
 
 function lerpPt(p, q, t) { return { x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t }; }
 
+// ---- Structural invariant ------------------------------------------------
+// All master layers of a glyph must share identical structure (same contour
+// count, same point counts, same order) so interpolation/ghosts always work.
+// These helpers mutate EVERY master together; geometric (move) edits stay
+// per-master. This mirrors how Glyphs/UFO designspace keep layers compatible.
+
+function cloneContour(c) {
+  return {
+    closed: c.closed,
+    points: c.points.map(p => ({
+      x: p.x, y: p.y, type: p.type,
+      handleIn: p.handleIn ? { ...p.handleIn } : null,
+      handleOut: p.handleOut ? { ...p.handleOut } : null,
+    })),
+  };
+}
+
+// Add a contour to all masters (identical geometry; user reshapes per master).
+export function addContourAllMasters(project, glyphIndex, contour) {
+  const glyph = project.glyphs[glyphIndex];
+  for (const m of project.masters) ensureLayer(glyph, m.id).contours.push(cloneContour(contour));
+}
+
+// Replace every master's outline with the same set of contours (used when a
+// workboard shape is assigned — starts all masters identical & compatible).
+export function setLayerAllMasters(project, glyphIndex, contours) {
+  const glyph = project.glyphs[glyphIndex];
+  for (const m of project.masters) ensureLayer(glyph, m.id).contours = contours.map(cloneContour);
+}
+
+// Remove the same point indices from every master, then drop any contour that
+// collapses below 2 points (in all masters together).
+export function deletePointsAllMasters(project, glyphIndex, removals) {
+  const glyph = project.glyphs[glyphIndex];
+  const byC = new Map();
+  for (const { ci, pi } of removals) { if (!byC.has(ci)) byC.set(ci, new Set()); byC.get(ci).add(pi); }
+  for (const m of project.masters) {
+    const layer = ensureLayer(glyph, m.id);
+    for (const [ci, pis] of byC) {
+      const c = layer.contours[ci]; if (!c) continue;
+      [...pis].sort((a, b) => b - a).forEach(pi => c.points.splice(pi, 1));
+    }
+  }
+  // Determine which contour indices are now too small (check master 0) and
+  // remove that index everywhere to keep structures aligned.
+  const ref = ensureLayer(glyph, project.masters[0].id);
+  const dropIdx = [];
+  ref.contours.forEach((c, ci) => { if (c.points.length < 2) dropIdx.push(ci); });
+  dropIdx.sort((a, b) => b - a);
+  for (const m of project.masters) {
+    const layer = ensureLayer(glyph, m.id);
+    for (const ci of dropIdx) layer.contours.splice(ci, 1);
+  }
+}
+
 // Apply the same geometric delta to linked masters (used when "link masters"
 // is on, so an edit in one is mirrored in others).
 export function propagateToLinked(project, glyphIndex, sourceMasterId, mutateLayer) {

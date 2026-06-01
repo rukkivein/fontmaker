@@ -103,6 +103,29 @@ export function hitHandle(layer, x, y, tol) {
   return null;
 }
 
+// Nearest segment on the outline to (x,y) within maxDist, with its param t.
+// Used by Alt-click "insert point" so a click on the curve splits it.
+export function nearestSegment(layer, x, y, maxDist) {
+  if (!layer) return null;
+  let best = null;
+  for (let ci = 0; ci < layer.contours.length; ci++) {
+    const c = layer.contours[ci], pts = c.points, n = pts.length;
+    const segs = c.closed ? n : n - 1;
+    for (let i = 0; i < segs; i++) {
+      const a = pts[i], b = pts[(i + 1) % n];
+      const c1 = a.handleOut || a, c2 = b.handleIn || b;
+      const STEPS = 16;
+      for (let s = 0; s <= STEPS; s++) {
+        const t = s / STEPS;
+        const p = cubicPoint(a, c1, c2, b, t);
+        const d = Math.hypot(p.x - x, p.y - y);
+        if (d <= maxDist && (!best || d < best.dist)) best = { ci, seg: i, t, dist: d };
+      }
+    }
+  }
+  return best;
+}
+
 // Nearest point on any contour outline (for brush/liquify radius queries).
 export function cubicPoint(p0, p1, p2, p3, t) {
   const mt = 1 - t;

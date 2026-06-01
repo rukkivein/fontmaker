@@ -10,7 +10,8 @@ contextBridge.exposeInMainWorld('fm', {
   },
   source: {
     import: () => ipcRenderer.invoke('source:import'),
-    read: (filePath) => ipcRenderer.invoke('source:read', filePath)
+    read: (filePath) => ipcRenderer.invoke('source:read', filePath),
+    watch: (filePath) => ipcRenderer.invoke('source:watch', filePath)
   },
   font: {
     export: (project, format, metadata) => ipcRenderer.invoke('font:export', { project, format, metadata })

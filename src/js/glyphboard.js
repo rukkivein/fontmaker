@@ -240,13 +240,16 @@ export class Glyphboard {
       }
       if (c.closed) ctx.closePath();
     }
-    ctx.fillStyle = ghost ? 'transparent' : col('--contour');
-    ctx.globalAlpha = ghost ? 0.5 : 0.92;
-    if (!ghost) ctx.fill('evenodd');
-    ctx.lineWidth = ghost ? 1 : 1.2;
-    ctx.strokeStyle = ghost ? col('--text-faint') : col('--accent');
-    ctx.globalAlpha = ghost ? 0.45 : 0.9;
-    ctx.stroke();
+    if (ghost) {
+      // Other-master ghost: faint fill + dashed outline in the secondary accent.
+      ctx.fillStyle = col('--accent-2'); ctx.globalAlpha = 0.10; ctx.fill('evenodd');
+      ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+      ctx.strokeStyle = col('--accent-2'); ctx.globalAlpha = 0.6; ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.fillStyle = col('--contour'); ctx.globalAlpha = 0.92; ctx.fill('evenodd');
+      ctx.lineWidth = 1.2; ctx.strokeStyle = col('--accent'); ctx.globalAlpha = 0.9; ctx.stroke();
+    }
     ctx.restore();
 
     if (ghost) return;

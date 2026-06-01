@@ -72,15 +72,43 @@ src/                      renderer (UI + editor)
 Ghost on/off · Grids on/off · **Link masters** (mirror edits) · **Variable test**
 (animated interpolation between masters) · **Master ghosts** menu.
 
-### Masters & variable-ready editing
-Every edit on a master is captured for undo. With *Link masters* on, edits mirror to
-all masters. Inserting a point is propagated to **all** masters (via de Casteljau
-splits) so layers stay interpolation-compatible without distorting existing designs.
+### Masters & the structural invariant
+All master layers of a glyph are kept **structurally identical** (same contour and
+point counts, same order) so interpolation and ghosts always work — the model the
+Glyphs app / UFO designspace rely on. Therefore **structural edits apply to every
+master at once**, while geometric tweaks stay per-master:
+
+- **Add Shape / assign-from-workboard** → written to *all* masters (identical start).
+- **Alt-click** the outline (Point or Axis tool) → inserts a point in *all* masters,
+  each placed on *its own* curve via a de Casteljau split, so shapes are preserved.
+  (Turning a master's V into a W adds the same points to the unseen V too.)
+- **Delete** points → removed from *all* masters.
+- **Brush** point-densifying and **Simplify** point-removal also propagate, keeping
+  counts in lock-step. *Link masters* additionally mirrors geometric moves.
 
 ### Export
-OTF / TTF / WOFF with a metadata dialog (family, style, designer, version,
-copyright, license) and a destination chooser. Variable export currently uses the
-default master as a base (true `fvar`/`gvar` generation is the next step).
+OTF with a metadata dialog (family, style, designer, version, copyright, license)
+and a destination chooser. Contour **winding is normalized on export** (outer CCW,
+holes CW) so counters in O, A, e, etc. punch correctly even though the editor draws
+with the even-odd rule. TTF/WOFF currently write OpenType-CFF bytes; true `glyf`
+TrueType, WOFF wrapping and variable `fvar`/`gvar` are the next steps.
+
+## References studied
+- **Glyphr Studio 2** (open source, JS + opentype.js — same stack): confirmed the
+  real-time **winding-direction** approach for fills/holes, now implemented here.
+- **paper.js `PathItem.Boolean`**: the standard for a real Illustrator-style
+  Pathfinder (unite/subtract/intersect) + overlap removal — the planned integration.
+- FontForge / UFO designspace: master compatibility & interpolation model.
+
+## Known limitations (honest list)
+- Pathfinder (boolean ops) and a path-level Simplify command are not in yet (only a
+  Simplify *brush*); overlapping shapes aren't unioned before export.
+- TTF/WOFF/variable export are placeholders over OTF-CFF (see above).
+- Grid lines highlight in edit mode but aren't draggable yet; per-glyph grid
+  overrides aren't stored.
+- Accented glyphs are independent outlines (no components); Arabic/Hebrew/Japanese
+  are code points only (no shaping / GSUB / GPOS).
+- Undo snapshots the whole project per gesture (fine for now, heavy at huge scale).
 
 ---
 
