@@ -14,8 +14,8 @@
   --txt: #d0d0d0;         /* gray-700 — primary text */
   --txt2: #8d8d8d;        /* gray-500 — secondary */
   --txt3: #6a6a6a;        /* gray-400 — muted */
-  --accent: #4096f3;      /* blue-500 — Spectrum accent */
-  --accent-h: #5eaaf7;    /* blue-600 — accent hover (lighter in dark UI) */
+  --accent: #1473e6;      /* Adobe / Illustrator blue (sampled from the design) */
+  --accent-h: #2680eb;    /* accent hover */
   --brand-red: #c0271d;   /* RuneType stamp red */
 }
 /* Brand display face (settings. / profile.) */
@@ -164,8 +164,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .rfield > input::placeholder { color: #6f6f6f; }
 .rfield > input:focus { outline: none; border-color: #777; }
 .masters { display: flex; align-items: center; gap: 8px; background: #2b2b2b; border: 1px solid #4a4a4a; border-radius: 6px; padding: 4px 6px; position: relative; }
-.m-plus { flex: 0 0 auto; width: 26px; height: 26px; padding: 0; background: var(--accent); border: none; border-radius: 6px; color: #fff; font-size: 17px; line-height: 1; }
-.m-plus:hover { background: var(--accent-h); }
+.m-plus { flex: 0 0 auto; padding: 0; background: transparent; border: none; display: flex; }
+.m-plus img { width: 28px; height: auto; display: block; }
+.m-plus:hover { filter: brightness(1.1); }
 .m-name { flex: 1 1 auto; min-width: 0; background: transparent; border: none; color: #eee; font-size: 13px; padding: 4px 2px; }
 .m-name:focus { outline: none; }
 .m-ddbtn { flex: 0 0 auto; width: 26px; height: 26px; padding: 0; background: #3a3a3a; border: 1px solid #555; border-radius: 6px; color: #bbb; }
@@ -210,5 +211,5 @@ button:disabled { opacity: 0.4; cursor: default; }
 .rune-item.on .ri-t { color: #fff; }
 .ri-d { font-size: 11px; color: #8c8c8c; margin-top: 2px; }
 .rune-item.on .ri-d { color: rgba(255,255,255,.8); }
-.ri-btn { flex: 0 0 auto; width: 30px; height: 30px; padding: 0; border-radius: 8px; border: none; font-size: 16px; line-height: 1; background: var(--accent); color: #fff; }
-.rune-item.on .ri-btn { background: rgba(0,0,0,.55); }
+.ri-btn { flex: 0 0 auto; width: 30px; height: auto; cursor: pointer; display: block; }
+.ri-btn:hover { filter: brightness(1.1); }

@@ -83,7 +83,8 @@ function renderRightList() {
     var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '');
     var txt = document.createElement('div'); txt.className = 'ri-txt';
     txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d">' + (it.desc || it.note || '') + '</div>';
-    var btn = document.createElement('button'); btn.className = 'ri-btn'; btn.textContent = on ? '✕' : '+';
+    var btn = document.createElement('img'); btn.className = 'ri-btn';
+    btn.src = on ? 'assets/btn-x.png' : 'assets/btn-plus.png';
     btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     row.appendChild(txt); row.appendChild(btn); box.appendChild(row);
   });
