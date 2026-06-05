@@ -168,9 +168,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .rfield > input::placeholder { color: #6f6f6f; }
 .rfield > input:focus { outline: none; border-color: #777; }
 .masters { display: flex; align-items: center; gap: 8px; background: #2b2b2b; border: 1px solid #4a4a4a; border-radius: 6px; padding: 4px 6px; position: relative; }
-.m-plus { flex: 0 0 auto; padding: 0; background: transparent; border: none; display: flex; }
-.m-plus img { width: 28px; height: auto; display: block; }
-.m-plus:hover { filter: brightness(1.1); }
+.m-plus { flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: none; cursor: pointer; background: url('../assets/btn-plus.svg') no-repeat center / contain; }
+.m-plus:hover { background-image: url('../assets/btn-plus-hover.svg'); }
 .m-name { flex: 1 1 auto; min-width: 0; background: transparent; border: none; color: #eee; font-size: 13px; padding: 4px 2px; }
 .m-name:focus { outline: none; }
 .m-ddbtn { flex: 0 0 auto; padding: 4px 6px; background: transparent; border: none; display: flex; align-items: center; }
@@ -180,7 +179,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .m-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 5px 7px; font-size: 12px; color: #ddd; border-radius: 4px; }
 .m-row:hover { background: rgba(255,255,255,.05); }
 .m-tag { font-size: 9px; color: #777; }
-.m-x { width: 18px; height: 18px; padding: 0; font-size: 10px; background: #444; border: none; border-radius: 4px; color: #ddd; }
+.m-x { width: 18px; height: 18px; padding: 0; border: none; cursor: pointer; background: url('../assets/btn-x.svg') no-repeat center / contain; }
+.m-x:hover { background-image: url('../assets/btn-x-hover.svg'); }
 .rune-sec { padding: 10px 14px 2px; }
 .hword { font-family: 'Delight', sans-serif; font-weight: 900; font-size: 30px; line-height: .9; color: #e9e9e9; letter-spacing: -0.5px; }
 .hword.sm { font-size: 24px; }
@@ -222,5 +222,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ri-d { font-size: 11px; color: #8c8c8c; margin-top: 2px; }
 .ri-d.chars { font-size: 13px; color: #b6b6b6; letter-spacing: 1px; margin-top: 3px; }
 .rune-item.on .ri-d { color: rgba(255,255,255,.85); }
-.ri-btn { flex: 0 0 auto; width: 30px; height: auto; cursor: pointer; display: block; }
-.ri-btn:hover { filter: brightness(1.1); }
+.ri-btn { flex: 0 0 auto; width: 30px; height: 30px; cursor: pointer; background-repeat: no-repeat; background-position: center; background-size: contain; }
+.ri-btn.is-plus { background-image: url('../assets/btn-plus.svg'); }
+.ri-btn.is-plus:hover { background-image: url('../assets/btn-plus-hover.svg'); }
+.ri-btn.is-x { background-image: url('../assets/btn-x.svg'); }
+.ri-btn.is-x:hover { background-image: url('../assets/btn-x-hover.svg'); }

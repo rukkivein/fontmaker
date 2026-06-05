@@ -43,7 +43,7 @@ function renderMasters() {
     var row = document.createElement('div'); row.className = 'm-row';
     var nm = document.createElement('span'); nm.textContent = m.name; row.appendChild(nm);
     if (i > 0) {
-      var x = document.createElement('button'); x.className = 'm-x'; x.textContent = '✕';
+      var x = document.createElement('button'); x.className = 'm-x'; x.title = 'Remove master';
       x.addEventListener('click', function (e) { e.stopPropagation(); draft.masters.splice(i, 1); renderMasters(); renderProfile(); });
       row.appendChild(x);
     } else { var tag = document.createElement('span'); tag.className = 'm-tag'; tag.textContent = 'default'; row.appendChild(tag); }
@@ -82,8 +82,7 @@ function renderRightList() {
     var sub = isLang ? charsets.sampleChars(it.key, 10) : (it.note || '');
     var txt = document.createElement('div'); txt.className = 'ri-txt';
     txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
-    var btn = document.createElement('img'); btn.className = 'ri-btn';
-    btn.src = on ? 'assets/btn-x.png' : 'assets/btn-plus.png';
+    var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
     btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     row.appendChild(txt); row.appendChild(btn); box.appendChild(row);
   });
