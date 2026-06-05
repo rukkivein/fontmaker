@@ -132,7 +132,22 @@ function collectGlyphs(alphabetKeys, opts) {
   return out;
 }
 
+// The "classic" sets every common font ships — flagged important in the UI.
+const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'symbols'];
+
+// A short sample of the characters a set brings (shown instead of prose).
+function sampleChars(key, n) {
+  const a = ALPHABET_BY_KEY[key];
+  if (!a) return '';
+  n = n || 9;
+  const gs = a.glyphs().filter(g => g.unicode !== 32);
+  const step = gs.length > n ? Math.floor(gs.length / n) : 1;
+  const out = [];
+  for (let i = 0; i < gs.length && out.length < n; i += step) out.push(gs[i].char);
+  return out.join(' ');
+}
+
 module.exports = {
-  ALPHABETS, ALPHABET_BY_KEY, GRIDS, GRID_BY_KEY, MASTER_TYPES,
-  collectGlyphs,
+  ALPHABETS, ALPHABET_BY_KEY, GRIDS, GRID_BY_KEY, MASTER_TYPES, ESSENTIAL,
+  collectGlyphs, sampleChars,
 };

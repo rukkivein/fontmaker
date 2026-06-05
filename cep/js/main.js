@@ -27,12 +27,8 @@ function evalScript(code) { return new Promise(function (r) { cs.evalScript(code
 // Holds settings only; nothing is generated until Start Creating.
 var draft = null;
 function newDraft() {
-  return {
-    masters: [{ name: 'Regular' }],
-    lang: { latinUpper: true, latinLower: true, numbers: true, punct: true },
-    grid: { metrics: true },
-    toggle: 'lang',
-  };
+  // Nothing pre-selected; the classic sets are merely flagged important (red).
+  return { masters: [{ name: 'Regular' }], lang: {}, grid: {}, toggle: 'lang' };
 }
 
 function buildPage1() {
@@ -69,8 +65,8 @@ function setToggle(which) {
   draft.toggle = which;
   $('tg-lang').classList.toggle('active', which === 'lang');
   $('tg-grid').classList.toggle('active', which === 'grid');
-  $('tg-lang').querySelector('.pill-ar').textContent = which === 'lang' ? '◀' : '▶';
-  $('tg-grid').querySelector('.pill-ar').textContent = which === 'grid' ? '◀' : '▶';
+  $('tg-lang').querySelector('.pill-ar').classList.toggle('flip', which === 'lang');
+  $('tg-grid').querySelector('.pill-ar').classList.toggle('flip', which === 'grid');
   renderRightList(); updatePillLabels();
 }
 function curItems() { return draft.toggle === 'lang' ? charsets.ALPHABETS : charsets.GRIDS; }
@@ -78,11 +74,14 @@ function curSel() { return draft.toggle === 'lang' ? draft.lang : draft.grid; }
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
   var sel = curSel();
+  var isLang = draft.toggle === 'lang';
   curItems().forEach(function (it) {
     var on = !!sel[it.key];
-    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '');
+    var essential = isLang && charsets.ESSENTIAL.indexOf(it.key) >= 0;
+    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (essential ? ' essential' : '');
+    var sub = isLang ? charsets.sampleChars(it.key, 10) : (it.note || '');
     var txt = document.createElement('div'); txt.className = 'ri-txt';
-    txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d">' + (it.desc || it.note || '') + '</div>';
+    txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
     var btn = document.createElement('img'); btn.className = 'ri-btn';
     btn.src = on ? 'assets/btn-x.png' : 'assets/btn-plus.png';
     btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
