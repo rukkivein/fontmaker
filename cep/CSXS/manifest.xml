@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <ExtensionManifest Version="11.0" ExtensionBundleId="com.fontmaker.illustrator"
-    ExtensionBundleVersion="0.1.0" ExtensionBundleName="FontMaker"
+    ExtensionBundleVersion="0.1.0" ExtensionBundleName="RuneType Glyphmaker"
     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <ExtensionList>
     <Extension Id="com.fontmaker.illustrator.panel" Version="0.1.0" />
@@ -35,9 +35,9 @@
         </Lifecycle>
         <UI>
           <Type>Panel</Type>
-          <Menu>FontMaker</Menu>
+          <Menu>RuneType™ Glyphmaker</Menu>
           <Geometry>
-            <Size><Height>760</Height><Width>560</Width></Size>
+            <Size><Height>760</Height><Width>660</Width></Size>
             <MinSize><Height>440</Height><Width>400</Width></MinSize>
             <MaxSize><Height>2400</Height><Width>1100</Width></MaxSize>
           </Geometry>

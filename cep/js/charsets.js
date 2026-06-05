@@ -77,6 +77,11 @@ const ALPHABETS = [
     glyphs: () => chars('+<>=~^|').concat(cp(0x2212, 0x00D7, 0x00F7, 0x2260, 0x00B1, 0x2264, 0x2265,
       0x0025, 0x2030, 0x221A, 0x221E, 0x2248, 0x00B5, 0x03C0)) },
 ];
+// Display order: the classic/essential sets first, then by rough popularity.
+const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'symbols',
+  'cyrillic', 'greek', 'arabic', 'hebrew', 'hanzi', 'hiragana', 'katakana', 'latinVietnamese',
+  'devanagari', 'thai', 'hangul', 'armenian', 'georgian', 'fractions', 'math'];
+ALPHABETS.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
 const ALPHABET_BY_KEY = {};
 ALPHABETS.forEach(a => { ALPHABET_BY_KEY[a.key] = a; });
 

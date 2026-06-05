@@ -80,8 +80,9 @@ function renderRightList() {
     var essential = isLang && charsets.ESSENTIAL.indexOf(it.key) >= 0;
     var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (essential ? ' essential' : '');
     var sub = isLang ? charsets.sampleChars(it.key, 10) : (it.note || '');
+    var rec = essential ? ' <span class="ri-rec">Recommended</span>' : '';
     var txt = document.createElement('div'); txt.className = 'ri-txt';
-    txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
+    txt.innerHTML = '<div class="ri-t">' + it.label + rec + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
     var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
     btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     row.appendChild(txt); row.appendChild(btn); box.appendChild(row);
