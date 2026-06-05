@@ -33,7 +33,15 @@ function newDraft() {
 
 function buildPage1() {
   if (!draft) draft = newDraft();
-  renderMasters(); setToggle(draft.toggle); renderProfile();
+  renderMasters(); updateMasterAdd(); setToggle(draft.toggle); renderProfile();
+}
+
+// The + is disabled until a non-empty, non-duplicate master name is typed
+// (so you can't add a second "Regular" or an empty master).
+function updateMasterAdd() {
+  var name = $('m-name').value.trim();
+  var dup = draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); });
+  $('m-add').disabled = !name || dup;
 }
 
 // --- masters ---
@@ -56,7 +64,7 @@ function onAddMaster() {
   if (draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); })) return;
   draft.masters.push({ name: name });
   $('m-name').value = '';
-  renderMasters(); renderProfile();
+  renderMasters(); renderProfile(); updateMasterAdd();
   $('m-list').classList.remove('hidden');
 }
 
@@ -84,8 +92,10 @@ function renderRightList() {
     var txt = document.createElement('div'); txt.className = 'ri-txt';
     txt.innerHTML = '<div class="ri-t">' + it.label + rec + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
     var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
-    btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
-    row.appendChild(txt); row.appendChild(btn); box.appendChild(row);
+    row.appendChild(txt); row.appendChild(btn);
+    // The whole box is the selection target (click anywhere to toggle).
+    row.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    box.appendChild(row);
   });
 }
 function selectedLabels(which) {
@@ -365,6 +375,7 @@ function boot() {
   // page 1 (RuneType)
   $('m-add').addEventListener('click', onAddMaster);
   $('m-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') onAddMaster(); });
+  $('m-name').addEventListener('input', updateMasterAdd);
   $('m-ddbtn').addEventListener('click', function () { $('m-list').classList.toggle('hidden'); });
   $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
   $('tg-grid').addEventListener('click', function () { setToggle('grid'); });
