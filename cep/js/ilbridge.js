@@ -40,10 +40,12 @@ function buildContour(pp, closed, mapPt) {
   return { closed: closed !== false && n > 1, points };
 }
 
-// Convert one Illustrator PathItem to a contour. Y is flipped by default
-// (free-floating selection art; later re-scaled to cap height on assign).
+// Convert one Illustrator PathItem to a contour. Illustrator's ExtendScript DOM
+// is Y-UP (artboardRect has top > bottom), same as the font model, so by default
+// we do NOT flip — flipping is what made placed letters come out upside down.
+// Pass { flipY: true } only for a host whose coordinates are Y-down.
 function contourFromPathItem(pathItem, opts) {
-  const flipY = !opts || opts.flipY !== false;
+  const flipY = !!(opts && opts.flipY);
   const mapPt = (x, y) => ({ x: x, y: flipY ? -y : y });
   return buildContour(pathItem.pathPoints, pathItem.closed !== false, mapPt);
 }

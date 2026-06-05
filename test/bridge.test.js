@@ -30,11 +30,11 @@ const rect = path([
 const c = contourFromPathItem(rect);
 ok(c.points.length === 4, 'contour has 4 points');
 ok(c.closed === true, 'contour is closed');
-ok(c.points[0].y === -100, 'Y flipped (IL y=100 → model y=-100)');
-ok(c.points[0].handleOut && c.points[0].handleOut.x === 160 && c.points[0].handleOut.y === -100,
-   'rightDirection → handleOut (flipped Y)');
+ok(c.points[0].y === 100, 'Y not flipped (Illustrator DOM is Y-up, like the font)');
+ok(c.points[0].handleOut && c.points[0].handleOut.x === 160 && c.points[0].handleOut.y === 100,
+   'rightDirection → handleOut (Y-up)');
 ok(c.points[0].handleIn === null, 'no leftDirection → handleIn null');
-ok(c.points[3].handleIn && c.points[3].handleIn.y === -640, 'leftDirection → handleIn (flipped Y)');
+ok(c.points[3].handleIn && c.points[3].handleIn.y === 640, 'leftDirection → handleIn (Y-up)');
 
 // --- the jsx returns a flat {paths:[...]}; contoursFromSelection consumes it ---
 const fromJsx = contoursFromSelection([rect]);
