@@ -1,8 +1,10 @@
 'use strict';
-// Project model helpers for the UXP plugin. CommonJS + pure (no host APIs) so
-// the same code runs in UXP and under Node tests. Mirrors the Electron app's
+// Project model helpers for the CEP panel. CommonJS + pure (no host APIs) so the
+// same code runs in the panel and under Node tests. Mirrors the Electron app's
 // project shape (src/js/project.js) and its cap-height assignment logic
 // (src/js/workboard.js) closely enough that core/fontEngine.js consumes it.
+
+const charsets = require('./charsets.js');
 
 const UPM = 1000;
 const DEFAULT_METRICS = { ascender: 800, capHeight: 700, xHeight: 500, baseline: 0, descender: -200 };
@@ -23,14 +25,7 @@ function glyphName(ch) {
   return 'uni' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
 }
 
-// Ordered default character set shown in the panel grid.
-function defaultChars() {
-  const up = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  const lo = 'abcdefghijklmnopqrstuvwxyz'.split('');
-  const dg = '0123456789'.split('');
-  const pu = '.,:;!?-\'"()&@'.split('');
-  return [].concat(up, lo, dg, pu);
-}
+const DEFAULT_ALPHABETS = ['latinUpper', 'latinLower', 'numbers', 'punct'];
 
 function emptyLayers(masters) {
   const o = {};
@@ -38,29 +33,59 @@ function emptyLayers(masters) {
   return o;
 }
 
+let _mid = 0;
+function makeMaster(name, type) {
+  return { id: 'm' + (_mid++), name: name || type || 'Regular', type: type || 'Regular' };
+}
+
+// Build a new font from the New Font dialog choices.
+//   { familyName, styleName, version, designer, masterName, masterType,
+//     alphabets:[keys], upperOnly, lowerOnly, grid:key, chars?(legacy) }
 function createProject(opts) {
   opts = opts || {};
-  const masters = (opts.masterNames && opts.masterNames.length ? opts.masterNames : ['Regular'])
-    .map((name, i) => ({ id: 'm' + i, name: name }));
-  const chars = opts.chars || defaultChars();
-  const glyphs = chars.map(ch => ({
-    name: glyphName(ch),
-    char: ch,
-    unicode: ch.codePointAt(0),
+  const masters = [makeMaster(opts.masterName, opts.masterType)];
+
+  let items;
+  if (opts.chars) {
+    items = opts.chars.map(ch => ({ char: ch, unicode: ch.codePointAt(0) }));
+  } else {
+    const keys = (opts.alphabets && opts.alphabets.length) ? opts.alphabets : DEFAULT_ALPHABETS;
+    items = charsets.collectGlyphs(keys, { upperOnly: opts.upperOnly, lowerOnly: opts.lowerOnly });
+  }
+  const glyphs = items.map(it => ({
+    name: glyphName(it.char),
+    char: it.char,
+    unicode: it.unicode,
     advanceWidth: Math.round(UPM * 0.6),
     layers: emptyLayers(masters),
   }));
+
+  const gridDef = charsets.GRID_BY_KEY[opts.grid] || charsets.GRID_BY_KEY.metrics;
+  const grid = gridDef.build(UPM);
+
   return {
     schema: 1,
     meta: {
       familyName: opts.familyName || 'Untitled', styleName: opts.styleName || 'Regular',
-      designer: '', manufacturer: '', version: '1.000', copyright: '', license: '',
+      designer: opts.designer || '', manufacturer: '',
+      version: opts.version || '1.000', copyright: '', license: '',
     },
     unitsPerEm: UPM,
-    metrics: Object.assign({}, DEFAULT_METRICS),
+    metrics: Object.assign({}, grid.metrics || DEFAULT_METRICS),
+    gridKey: gridDef.key,
+    grid,
+    alphabets: (opts.alphabets && opts.alphabets.length) ? opts.alphabets.slice() : DEFAULT_ALPHABETS.slice(),
     masters,
     glyphs,
   };
+}
+
+// Add a master to an existing font: every glyph gets an empty layer in it.
+function addMaster(project, name, type) {
+  const m = makeMaster(name, type);
+  project.masters.push(m);
+  for (const g of project.glyphs) g.layers[m.id] = { contours: [] };
+  return m;
 }
 
 // Bounding box of a set of contours (anchors only — adequate for placement).
@@ -76,9 +101,10 @@ function contoursBounds(contours) {
 }
 
 // Scale contours to cap height, sit on the baseline, add sidebearings, then
-// write the identical outline into EVERY master (variable-compatible start).
-// Mirrors workboard.assignShapeToGlyph.
-function assignContoursToGlyph(project, contours, glyphIndex) {
+// write the outline. With masterId, only that master's layer is written (so each
+// master can be drawn independently); without it, every master gets the same
+// outline (a variable-compatible starting point). Mirrors workboard logic.
+function assignContoursToGlyph(project, contours, glyphIndex, masterId) {
   const glyph = project.glyphs[glyphIndex];
   const b = contoursBounds(contours);
   if (!b) return false;
@@ -94,12 +120,15 @@ function assignContoursToGlyph(project, contours, glyphIndex) {
       handleOut: p.handleOut ? { x: tx(p.handleOut.x), y: ty(p.handleOut.y) } : null,
     })),
   }));
-  for (const m of project.masters) glyph.layers[m.id] = { contours: place() };
+  const targets = masterId ? project.masters.filter(m => m.id === masterId) : project.masters;
+  if (masterId && targets.length === 0) return false;
+  for (const m of targets) glyph.layers[m.id] = { contours: place() };
   glyph.advanceWidth = Math.round(b.w * scale + LSB * 2);
   return true;
 }
 
 module.exports = {
-  UPM, DEFAULT_METRICS, glyphName, defaultChars,
-  createProject, contoursBounds, assignContoursToGlyph,
+  UPM, DEFAULT_METRICS, glyphName,
+  createProject, addMaster, contoursBounds, assignContoursToGlyph,
+  charsets,
 };

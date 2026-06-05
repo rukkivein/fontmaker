@@ -1,135 +1,226 @@
 'use strict';
 /* FontMaker CEP panel controller (Adobe Illustrator).
- * Draw letters in Illustrator; this panel assigns the selected artwork to glyph
- * slots (scaled to cap height, written to every master) and exports a real OTF
- * via the shared host-agnostic engine. Geometry is read through ExtendScript
- * (jsx/fontmaker.jsx) and converted with the same shared/ilbridge.js used by the
- * tests, then built with core/fontEngine.js. CEP runs Node, so require/fs/Buffer
- * are native. */
+ * Page 1 (New Font): name/designer/version, master type, multi-select character
+ * sets, case filter, construction grid. Page 2 (Workspace): one tab per open
+ * font, master sub-tabs, assign selected Illustrator artwork to glyph slots
+ * (scaled to cap height) and export a real OTF via the shared host-agnostic core.
+ * Geometry is read through ExtendScript; CEP runs Node so require/fs/Buffer are
+ * native. */
 
 var cs = new CSInterface();
 var ROOT = cs.getSystemPath(SystemPath.EXTENSION);
 
-// Node modules (absolute paths — robust across CEP require quirks).
 var ilbridge = require(ROOT + '/js/ilbridge.js');
 var glyphset = require(ROOT + '/js/glyphset.js');
+var charsets = require(ROOT + '/js/charsets.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
 
-// --- state ---
-var project = glyphset.createProject({ familyName: 'My Typeface' });
-var selectedIndex = -1;
+// ---- state ----
+var fonts = [];          // array of project objects (each may have several masters)
+var activeFont = -1;     // index into fonts
+var selectedSlot = -1;   // glyph index within the active font
 
-// --- dom ---
 function $(id) { return document.getElementById(id); }
-var grid = $('grid'), statusEl = $('status'), assignBtn = $('assignBtn');
-var assignTarget = $('assignTarget'), exportBtn = $('exportBtn'), filledCount = $('filledCount');
-
-function setStatus(msg, kind) { statusEl.textContent = msg; statusEl.className = 'status' + (kind ? ' ' + kind : ''); }
-
+function show(view) {
+  $('view-new').classList.toggle('hidden', view !== 'new');
+  $('view-work').classList.toggle('hidden', view !== 'work');
+}
 function evalScript(code) {
-  return new Promise(function (resolve) { cs.evalScript(code, function (r) { resolve(r); }); });
+  return new Promise(function (res) { cs.evalScript(code, function (r) { res(r); }); });
 }
 
-function isFilled(g) {
-  var layer = g.layers[project.masters[0].id];
-  return !!(layer && layer.contours && layer.contours.length);
-}
-function refreshCounts() {
-  var n = project.glyphs.filter(isFilled).length;
-  filledCount.textContent = n + (n === 1 ? ' glyph' : ' glyphs');
-  exportBtn.disabled = n === 0;
-}
-function buildGrid() {
-  grid.textContent = '';
-  project.glyphs.forEach(function (g, i) {
-    var cell = document.createElement('div');
-    cell.className = 'cell';
-    cell.textContent = g.char === ' ' ? '␣' : g.char;
-    cell.addEventListener('click', function () { selectGlyph(i); });
-    grid.appendChild(cell);
+// ============ PAGE 1 — New Font ============
+function buildNewFontForm() {
+  var mt = $('nf-mastertype');
+  mt.innerHTML = '';
+  charsets.MASTER_TYPES.forEach(function (t) {
+    var o = document.createElement('option'); o.value = t; o.textContent = t; mt.appendChild(o);
   });
-  syncGrid();
-}
-function syncGrid() {
-  var cells = grid.children;
-  for (var i = 0; i < cells.length; i++) {
-    var cls = 'cell';
-    if (isFilled(project.glyphs[i])) cls += ' filled';
-    if (i === selectedIndex) cls += ' selected';
-    cells[i].className = cls;
-  }
-  refreshCounts();
-}
-function selectGlyph(i) {
-  selectedIndex = i;
-  var g = project.glyphs[i];
-  assignTarget.textContent = g.char === ' ' ? 'space' : g.char;
-  assignBtn.disabled = false;
-  syncGrid();
-}
 
-// --- assign selection -> glyph ---
-function onAssign() {
-  if (selectedIndex < 0) return;
-  setStatus('Reading selection…');
-  evalScript('fmReadSelection()').then(function (raw) {
-    var res;
-    try { res = JSON.parse(raw); } catch (e) { setStatus('Bridge returned bad data.', 'err'); return; }
-    if (!res || !res.ok) { setStatus((res && res.error) || 'Could not read selection.', 'err'); return; }
-    // res.paths matches the shape shared/ilbridge.js expects → reuse it (Y flip + handles).
-    var contours = ilbridge.contoursFromSelection(res.paths);
-    if (!contours.length) { setStatus('Selection has no usable outlines.', 'err'); return; }
-    var ok = glyphset.assignContoursToGlyph(project, contours, selectedIndex);
-    if (!ok) { setStatus('Could not place selection.', 'err'); return; }
-    var g = project.glyphs[selectedIndex];
-    var pts = contours.reduce(function (n, c) { return n + c.points.length; }, 0);
-    setStatus('Assigned ' + contours.length + ' contour(s), ' + pts + ' pts → "' + g.char + '".', 'ok');
-    syncGrid();
+  var box = $('nf-alphabets'); box.innerHTML = '';
+  var defaults = { latinUpper: 1, latinLower: 1, numbers: 1, punct: 1 };
+  charsets.ALPHABETS.forEach(function (a) {
+    var lab = document.createElement('label'); lab.className = 'check';
+    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = a.key;
+    if (defaults[a.key]) cb.checked = true;
+    var span = document.createElement('span');
+    span.innerHTML = a.label + (a.note ? ' <i class="muted">' + a.note + '</i>' : '');
+    lab.appendChild(cb); lab.appendChild(span); box.appendChild(lab);
+  });
+
+  var grids = $('nf-grids'); grids.innerHTML = '';
+  charsets.GRIDS.forEach(function (g, i) {
+    var card = document.createElement('label'); card.className = 'gridcard';
+    var rb = document.createElement('input'); rb.type = 'radio'; rb.name = 'grid'; rb.value = g.key;
+    if (i === 0) rb.checked = true;
+    var t = document.createElement('div'); t.className = 'gridcard-t'; t.textContent = g.label;
+    var n = document.createElement('div'); n.className = 'gridcard-n'; n.textContent = g.note;
+    card.appendChild(rb); card.appendChild(t); card.appendChild(n); grids.appendChild(card);
   });
 }
 
-// --- export OTF ---
-function metadata() {
+function readNewFontForm() {
+  var alphabets = [];
+  var boxes = $('nf-alphabets').querySelectorAll('input[type=checkbox]');
+  for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) alphabets.push(boxes[i].value);
+  var caseVal = (document.querySelector('input[name=case]:checked') || {}).value || 'both';
+  var grid = (document.querySelector('input[name=grid]:checked') || {}).value || 'metrics';
   return {
-    familyName: ($('familyName').value || 'My Typeface').trim(),
-    styleName: ($('styleName').value || 'Regular').trim(),
-    designer: ($('designer').value || '').trim(),
-    masterId: project.masters[0].id, version: '1.000',
+    familyName: $('nf-family').value.trim() || 'Untitled',
+    designer: $('nf-designer').value.trim(),
+    version: $('nf-version').value.trim() || '1.000',
+    masterType: $('nf-mastertype').value,
+    masterName: $('nf-mastertype').value,
+    alphabets: alphabets,
+    upperOnly: caseVal === 'upper',
+    lowerOnly: caseVal === 'lower',
+    grid: grid,
   };
 }
+
+function onCreateFont() {
+  var opts = readNewFontForm();
+  if (!opts.alphabets.length) { $('nf-status').textContent = 'Pick at least one character set.'; $('nf-status').className = 'status err'; return; }
+  var project = glyphset.createProject(opts);
+  project._activeMaster = 0;
+  fonts.push(project);
+  activeFont = fonts.length - 1;
+  selectedSlot = -1;
+  $('nf-status').textContent = '';
+  show('work');
+  renderWorkspace();
+}
+
+// ============ PAGE 2 — Workspace ============
+function curFont() { return fonts[activeFont]; }
+function curMaster() { var f = curFont(); return f.masters[f._activeMaster || 0]; }
+
+function isFilled(g, masterId) {
+  var l = g.layers[masterId];
+  return !!(l && l.contours && l.contours.length);
+}
+
+function renderTabs() {
+  var tabs = $('w-tabs'); tabs.innerHTML = '';
+  fonts.forEach(function (f, i) {
+    var t = document.createElement('div');
+    t.className = 'tab' + (i === activeFont ? ' active' : '');
+    t.textContent = f.meta.familyName;
+    t.addEventListener('click', function () { activeFont = i; selectedSlot = -1; renderWorkspace(); });
+    tabs.appendChild(t);
+  });
+}
+
+function renderMasters() {
+  var mt = $('w-masters'); mt.innerHTML = '';
+  var f = curFont();
+  f.masters.forEach(function (m, i) {
+    var b = document.createElement('div');
+    b.className = 'mtab' + (i === (f._activeMaster || 0) ? ' active' : '');
+    b.textContent = m.name;
+    b.title = 'Master: ' + m.type;
+    b.addEventListener('click', function () { f._activeMaster = i; renderWorkspace(); });
+    mt.appendChild(b);
+  });
+  var add = document.createElement('div');
+  add.className = 'mtab add'; add.textContent = '＋'; add.title = 'Add master';
+  add.addEventListener('click', onAddMaster);
+  mt.appendChild(add);
+}
+
+function onAddMaster() {
+  var types = charsets.MASTER_TYPES;
+  var f = curFont();
+  // cycle to the next unused type as a sensible default name
+  var used = {}; f.masters.forEach(function (m) { used[m.type] = 1; });
+  var pick = types.filter(function (t) { return !used[t]; })[0] || 'Other';
+  var m = glyphset.addMaster(f, pick, pick);
+  f._activeMaster = f.masters.length - 1;
+  renderWorkspace();
+  setStatus('Added master "' + m.name + '".', 'ok');
+}
+
+function renderGrid() {
+  var grid = $('grid'); grid.innerHTML = '';
+  var f = curFont(); var mid = curMaster().id;
+  f.glyphs.forEach(function (g, i) {
+    var cell = document.createElement('div');
+    cell.className = 'cell' + (isFilled(g, mid) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+    cell.textContent = g.char === ' ' ? '␣' : g.char;
+    cell.addEventListener('click', function () { selectedSlot = i; renderGrid(); updateAssign(); });
+    grid.appendChild(cell);
+  });
+  var filled = f.glyphs.filter(function (g) { return isFilled(g, mid); }).length;
+  $('filledCount').textContent = filled + ' / ' + f.glyphs.length;
+  $('exportBtn').disabled = filled === 0;
+}
+
+function updateAssign() {
+  var ok = selectedSlot >= 0;
+  $('assignBtn').disabled = !ok;
+  if (ok) { var g = curFont().glyphs[selectedSlot]; $('assignTarget').textContent = g.char === ' ' ? 'space' : g.char; }
+  else $('assignTarget').textContent = '—';
+}
+
+function setStatus(msg, kind) { $('status').textContent = msg; $('status').className = 'status' + (kind ? ' ' + kind : ''); }
+
+function renderWorkspace() {
+  renderTabs(); renderMasters(); renderGrid(); updateAssign();
+  setStatus('Editing ' + curFont().meta.familyName + ' · ' + curMaster().name + ' · ' + curFont().glyphs.length + ' slots');
+}
+
+// ---- assign selection -> glyph (active master) ----
+function onAssign() {
+  if (selectedSlot < 0) return;
+  setStatus('Reading selection…');
+  evalScript('fmReadSelection()').then(function (raw) {
+    var res; try { res = JSON.parse(raw); } catch (e) { setStatus('Bridge returned bad data.', 'err'); return; }
+    if (!res || !res.ok) { setStatus((res && res.error) || 'Could not read selection.', 'err'); return; }
+    var contours = ilbridge.contoursFromSelection(res.paths);
+    if (!contours.length) { setStatus('Selection has no usable outlines.', 'err'); return; }
+    var ok = glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMaster().id);
+    if (!ok) { setStatus('Could not place selection.', 'err'); return; }
+    var g = curFont().glyphs[selectedSlot];
+    var pts = contours.reduce(function (n, c) { return n + c.points.length; }, 0);
+    setStatus('Assigned ' + contours.length + ' contour(s), ' + pts + ' pts → "' + g.char + '" (' + curMaster().name + ').', 'ok');
+    renderGrid();
+  });
+}
+
+// ---- export OTF (active master) ----
 function onExport() {
-  var meta = metadata();
-  project.meta.familyName = meta.familyName;
-  project.meta.styleName = meta.styleName;
-  var fileName = (meta.familyName.replace(/\s+/g, '') || 'Font') + '.otf';
+  var f = curFont(), m = curMaster();
+  var meta = {
+    familyName: f.meta.familyName, styleName: m.type || 'Regular',
+    designer: f.meta.designer, version: f.meta.version, masterId: m.id,
+  };
+  var fileName = (f.meta.familyName.replace(/\s+/g, '') || 'Font') + '-' + (m.name || 'Regular') + '.otf';
   setStatus('Choose where to save…');
-  // Ask Illustrator for a save path (native dialog), then write with Node fs.
-  var dlg = '(function(){var f=File.saveDialog("Save font","OTF:*.otf");' +
-            'if(!f)return "";if(f.name.indexOf(".")<0)f=new File(f.fsName+".otf");return f.fsName;})()';
+  var dlg = '(function(){var f=File.saveDialog("Save font","OTF:*.otf");if(!f)return "";' +
+            'if(f.name.indexOf(".")<0)f=new File(f.fsName+".otf");return f.fsName;})()';
   evalScript(dlg).then(function (p) {
     if (!p) { setStatus('Export cancelled.'); return; }
     try {
       setStatus('Building font…');
-      var built = fontEngine.buildFont(project, 'otf', meta);
+      var built = fontEngine.buildFont(f, 'otf', meta);
       fs.writeFileSync(p, Buffer.from(new Uint8Array(built.buffer)));
       setStatus('Exported ' + built.glyphCount + ' glyphs → ' + p, 'ok');
-    } catch (e) {
-      setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err');
-    }
+    } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
   });
 }
 
-// --- boot ---
+// ---- boot ----
 function boot() {
-  buildGrid();
-  assignBtn.addEventListener('click', onAssign);
-  exportBtn.addEventListener('click', onExport);
-  evalScript('fmPing()').then(function (raw) {
-    var info; try { info = JSON.parse(raw); } catch (e) { info = null; }
-    if (info && info.ok) setStatus('Ready · ' + info.app + ' ' + info.version + (info.doc ? ' · ' + info.doc : '') + ' · ' + project.glyphs.length + ' slots');
-    else setStatus('Ready · ' + project.glyphs.length + ' slots (host bridge not confirmed)');
+  buildNewFontForm();
+  show('new');
+  $('nf-create').addEventListener('click', onCreateFont);
+  $('nf-cancel').addEventListener('click', function () { if (fonts.length) { show('work'); renderWorkspace(); } });
+  $('w-newfont').addEventListener('click', function () {
+    $('nf-cancel').classList.remove('hidden'); buildNewFontForm(); show('new');
   });
+  $('assignBtn').addEventListener('click', onAssign);
+  $('exportBtn').addEventListener('click', onExport);
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();

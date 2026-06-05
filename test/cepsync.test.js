@@ -15,6 +15,8 @@ ok(read('cep/js/ilbridge.js') === read('shared/ilbridge.js'),
    'cep/js/ilbridge.js matches shared/ilbridge.js (run `npm run cep:sync`)');
 ok(read('cep/js/glyphset.js') === read('shared/glyphset.js'),
    'cep/js/glyphset.js matches shared/glyphset.js');
+ok(read('cep/js/charsets.js') === read('shared/charsets.js'),
+   'cep/js/charsets.js matches shared/charsets.js');
 ok(read('cep/js/lib/fontEngine.js') === transformFontEngine(read('core/fontEngine.js')),
    'cep/js/lib/fontEngine.js is in sync with core/fontEngine.js');
 ok(read('cep/js/lib/fontEngine.js').indexOf("require('./opentype.js')") !== -1,

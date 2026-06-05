@@ -28,6 +28,7 @@ function sync() {
   const out = {};
   out.ilbridge = write('cep/js/ilbridge.js', read('shared/ilbridge.js'));
   out.glyphset = write('cep/js/glyphset.js', read('shared/glyphset.js'));
+  out.charsets = write('cep/js/charsets.js', read('shared/charsets.js'));
   out.fontEngine = write('cep/js/lib/fontEngine.js', transformFontEngine(read('core/fontEngine.js')));
   out.opentype = write('cep/js/lib/opentype.js', read('node_modules/opentype.js/dist/opentype.js'));
   return out;

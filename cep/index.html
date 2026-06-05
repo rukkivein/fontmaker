@@ -7,17 +7,53 @@
   <title>FontMaker</title>
 </head>
 <body>
-  <div id="app">
+<div id="app">
+
+  <!-- ============ PAGE 1 — New Font ============ -->
+  <div id="view-new" class="view">
+    <header class="bar">
+      <span class="brand">Font<b>Maker</b></span><span class="sub">New Font</span>
+      <button id="nf-cancel" class="mini hidden">Cancel</button>
+    </header>
+    <div class="scroll">
+      <div class="grp">
+        <div class="row"><label>Name</label><input id="nf-family" type="text" value="My Typeface" /></div>
+        <div class="row"><label>Designer</label><input id="nf-designer" type="text" placeholder="optional" /></div>
+        <div class="row"><label>Version</label><input id="nf-version" type="text" value="1.000" /></div>
+        <div class="row"><label>Master</label>
+          <select id="nf-mastertype"></select>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-title">Character sets <span class="muted">multi-select</span></div>
+        <div id="nf-alphabets" class="checks"></div>
+        <div class="case">
+          <label class="radio"><input type="radio" name="case" value="both" checked /> Both cases</label>
+          <label class="radio"><input type="radio" name="case" value="upper" /> Uppercase only</label>
+          <label class="radio"><input type="radio" name="case" value="lower" /> Lowercase only</label>
+        </div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-title">Construction grid</div>
+        <div id="nf-grids" class="grids"></div>
+      </div>
+    </div>
+    <footer class="foot">
+      <div id="nf-status" class="status"></div>
+      <button id="nf-create" class="export">Create Font</button>
+    </footer>
+  </div>
+
+  <!-- ============ PAGE 2 — Workspace ============ -->
+  <div id="view-work" class="view hidden">
     <header class="bar">
       <span class="brand">Font<b>Maker</b></span>
-      <span class="sub">Illustrator → Font</span>
+      <button id="w-newfont" class="mini">＋ Font</button>
     </header>
-
-    <section class="panel">
-      <div class="row"><label>Family</label><input id="familyName" type="text" value="My Typeface" /></div>
-      <div class="row"><label>Style</label><input id="styleName" type="text" value="Regular" /></div>
-      <div class="row"><label>Designer</label><input id="designer" type="text" placeholder="optional" /></div>
-    </section>
+    <div id="w-tabs" class="tabs"></div>
+    <div id="w-masters" class="mtabs"></div>
 
     <section class="assign">
       <div class="hint">Select artwork in Illustrator, click a slot, then Assign.</div>
@@ -27,14 +63,16 @@
     <section class="gridwrap"><div id="grid" class="grid"></div></section>
 
     <footer class="foot">
-      <div id="status" class="status">Loading…</div>
+      <div id="status" class="status">Ready.</div>
       <div class="actions">
         <span id="filledCount" class="count">0 glyphs</span>
         <button id="exportBtn" class="export" disabled>Export OTF</button>
       </div>
     </footer>
   </div>
-  <script src="js/CSInterface.js"></script>
-  <script src="js/main.js"></script>
+
+</div>
+<script src="js/CSInterface.js"></script>
+<script src="js/main.js"></script>
 </body>
 </html>

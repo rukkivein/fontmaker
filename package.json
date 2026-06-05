@@ -7,7 +7,8 @@
     "start": "electron .",
     "dev": "electron . --dev",
     "cep:sync": "node scripts/sync-cep.js",
-    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js && node test/bridge.test.js && node test/cepsync.test.js"
+    "cep:install": "node scripts/sync-cep.js && node scripts/install-cep.js",
+    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js && node test/bridge.test.js && node test/charsets.test.js && node test/cepsync.test.js"
   },
   "author": "",
   "license": "MIT",
