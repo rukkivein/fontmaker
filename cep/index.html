@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' data: file:;" />
+  <link rel="stylesheet" href="css/styles.css" />
+  <title>FontMaker</title>
+</head>
+<body>
+  <div id="app">
+    <header class="bar">
+      <span class="brand">Font<b>Maker</b></span>
+      <span class="sub">Illustrator → Font</span>
+    </header>
+
+    <section class="panel">
+      <div class="row"><label>Family</label><input id="familyName" type="text" value="My Typeface" /></div>
+      <div class="row"><label>Style</label><input id="styleName" type="text" value="Regular" /></div>
+      <div class="row"><label>Designer</label><input id="designer" type="text" placeholder="optional" /></div>
+    </section>
+
+    <section class="assign">
+      <div class="hint">Select artwork in Illustrator, click a slot, then Assign.</div>
+      <button id="assignBtn" class="primary" disabled>Assign selection → <b id="assignTarget">—</b></button>
+    </section>
+
+    <section class="gridwrap"><div id="grid" class="grid"></div></section>
+
+    <footer class="foot">
+      <div id="status" class="status">Loading…</div>
+      <div class="actions">
+        <span id="filledCount" class="count">0 glyphs</span>
+        <button id="exportBtn" class="export" disabled>Export OTF</button>
+      </div>
+    </footer>
+  </div>
+  <script src="js/CSInterface.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
