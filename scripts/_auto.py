@@ -50,14 +50,41 @@ def type_text(text):
     print('typed', repr(text))
 
 KEYS = {'enter': 0x0D, 'return': 0x0D, 'tab': 0x09, 'esc': 0x1B, 'escape': 0x1B,
-        'space': 0x20, 'backspace': 0x08, 'delete': 0x2E}
+        'space': 0x20, 'backspace': 0x08, 'delete': 0x2E, 'ctrl': 0x11, 'shift': 0x10,
+        'alt': 0x12, 'n': 0x4E, 'a': 0x41, 'm': 0x4D, 'o': 0x4F, 'l': 0x4C, '0': 0x30}
+
+def _vk(name):
+    if len(name) == 1:
+        v = win32api.VkKeyScan(name) & 0xff
+        return v
+    return KEYS.get(name.lower())
 
 def key(name):
-    code = KEYS.get(name.lower())
+    code = _vk(name)
     if code is None: print('unknown key', name); return
     win32api.keybd_event(code, 0, 0, 0)
     win32api.keybd_event(code, 0, win32con.KEYEVENTF_KEYUP, 0)
     print('key', name)
+
+def combo(*names):
+    # hold all but last, press last, release in reverse
+    codes = [_vk(n) for n in names]
+    for c in codes[:-1]: win32api.keybd_event(c, 0, 0, 0)
+    win32api.keybd_event(codes[-1], 0, 0, 0)
+    time.sleep(0.03)
+    win32api.keybd_event(codes[-1], 0, win32con.KEYEVENTF_KEYUP, 0)
+    for c in reversed(codes[:-1]): win32api.keybd_event(c, 0, win32con.KEYEVENTF_KEYUP, 0)
+    print('combo', '+'.join(names))
+
+def drag(x1, y1, x2, y2):
+    move(x1, y1); time.sleep(0.1)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN, 0, 0, 0, 0); time.sleep(0.1)
+    steps = 18
+    for i in range(1, steps + 1):
+        move(x1 + (x2 - x1) * i / steps, y1 + (y2 - y1) * i / steps); time.sleep(0.02)
+    time.sleep(0.1)
+    win32api.mouse_event(win32con.MOUSEEVENTF_LEFTUP, 0, 0, 0, 0)
+    print('drag', x1, y1, '->', x2, y2)
 
 def foreground(substr):
     found = []
@@ -85,5 +112,7 @@ if __name__ == '__main__':
     elif cmd == 'move': move(float(sys.argv[2]), float(sys.argv[3]))
     elif cmd == 'type': type_text(sys.argv[2])
     elif cmd == 'key': key(sys.argv[2])
+    elif cmd == 'combo': combo(*sys.argv[2:])
+    elif cmd == 'drag': drag(float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]))
     elif cmd == 'foreground': foreground(sys.argv[2])
     else: print('unknown cmd', cmd)
