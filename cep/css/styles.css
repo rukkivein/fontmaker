@@ -16,7 +16,12 @@
   --txt3: #6a6a6a;        /* gray-400 — muted */
   --accent: #4096f3;      /* blue-500 — Spectrum accent */
   --accent-h: #5eaaf7;    /* blue-600 — accent hover (lighter in dark UI) */
+  --brand-red: #c0271d;   /* RuneType stamp red */
 }
+/* Brand display face (settings. / profile.) */
+@font-face { font-family: 'Delight'; font-weight: 900; src: url('../assets/fonts/Delight-Black.otf') format('opentype'); }
+@font-face { font-family: 'Delight'; font-weight: 700; src: url('../assets/fonts/Delight-Bold.otf') format('opentype'); }
+@font-face { font-family: 'Delight'; font-weight: 500; src: url('../assets/fonts/Delight-Medium.otf') format('opentype'); }
 * { box-sizing: border-box; }
 html, body {
   margin: 0; padding: 0; height: 100%;
@@ -170,8 +175,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .m-tag { font-size: 9px; color: #777; }
 .m-x { width: 18px; height: 18px; padding: 0; font-size: 10px; background: #444; border: none; border-radius: 4px; color: #ddd; }
 .rune-sec { padding: 16px 16px 4px; }
-.hword { height: 34px; width: auto; display: block; }
-.hword.sm { height: 28px; }
+.hword { font-family: 'Delight', sans-serif; font-weight: 900; font-size: 42px; line-height: .9; color: #e9e9e9; letter-spacing: -0.5px; }
+.hword.sm { font-size: 34px; }
+.hword .dot { color: var(--brand-red); }
 .sec-desc { font-size: 11px; color: #8a8a8a; margin-top: 6px; line-height: 1.4; max-width: 70%; }
 .ul { width: 100%; height: 7px; object-fit: cover; opacity: .85; margin-top: 6px; }
 .ul-sm { width: 70%; }

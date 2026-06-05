@@ -59,6 +59,7 @@ function onAddMaster() {
   if (!name) return;
   if (draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); })) return;
   draft.masters.push({ name: name });
+  $('m-name').value = '';
   renderMasters(); renderProfile();
   $('m-list').classList.remove('hidden');
 }
