@@ -8,8 +8,8 @@ function ok(c, m) { assert.ok(c, m); console.log('✓ ' + m); }
 
 // --- alphabets ---
 ok(charsets.ALPHABETS.length >= 12, 'has 12+ alphabets (' + charsets.ALPHABETS.length + ')');
-ok(charsets.ALPHABET_BY_KEY.latinExt.glyphs().some(g => g.char === 'ş'),
-   'Latin Extended includes Turkish ş');
+ok(charsets.ALPHABET_BY_KEY.latinCentral.glyphs().some(g => g.char === 'ş'),
+   'Latin Extended-A includes Turkish ş');
 ok(charsets.ALPHABET_BY_KEY.hanzi.glyphs().length > 50, 'Hanzi set is non-trivial');
 ok(charsets.ALPHABET_BY_KEY.katakana.glyphs().some(g => g.char === 'ア'), 'Katakana present');
 
@@ -49,8 +49,18 @@ ok(pg.grids.length === 3, 'three grids resolved & stored');
 ok(pg.gridKeys.join(',') === 'metrics,broadnib,golden', 'grid order preserved');
 ok(pg.metrics.capHeight === pg.grids[0].metrics.capHeight, 'metrics come from the first grid');
 
-// --- Latin Extended is comprehensive (multilingual) ---
-ok(charsets.ALPHABET_BY_KEY.latinExt.glyphs().length > 180, 'Latin Extended is multilingual (' + charsets.ALPHABET_BY_KEY.latinExt.glyphs().length + ')');
+// --- standards-grounded coverage ---
+ok(charsets.ALPHABET_BY_KEY.latinCentral.glyphs().length === 128, 'Latin Extended-A is the full block (128)');
+ok(charsets.ALPHABET_BY_KEY.cyrillic.glyphs().some(g => g.char === 'Ё'), 'Cyrillic includes Ё');
+ok(charsets.ALPHABET_BY_KEY.greek.glyphs().some(g => g.char === 'Ω'), 'Greek includes Ω');
+ok(charsets.ALPHABET_BY_KEY.latinVietnamese.glyphs().some(g => g.char === 'ệ'), 'Vietnamese includes ệ');
+// every set must yield a unique, valid glyph list
+charsets.ALPHABETS.forEach(a => {
+  const gs = a.glyphs();
+  const uniq = new Set(gs.map(g => g.unicode));
+  assert.ok(gs.length > 0 && uniq.size === gs.length, a.key + ' is non-empty and internally deduped');
+});
+ok(true, 'all alphabet sets are non-empty and internally deduped');
 
 // --- addMaster fans out empty layers ---
 const m2 = glyphset.addMaster(p, 'Wide', 'Extended');

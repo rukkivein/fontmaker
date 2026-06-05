@@ -11,6 +11,10 @@ function range(fromCp, toCp) {
 function chars(str) {
   return Array.from(str).map(ch => ({ char: ch, unicode: ch.codePointAt(0) }));
 }
+function cp(/* ...codepoints */) {
+  return Array.prototype.slice.call(arguments).map(u => ({ char: String.fromCodePoint(u), unicode: u }));
+}
+function ex(arr, drop) { const s = new Set(drop); return arr.filter(g => !s.has(g.unicode)); }
 
 // Common Hanzi subset (~85 most-frequent) — representative, not exhaustive.
 const HANZI_COMMON =
@@ -19,33 +23,49 @@ const HANZI_COMMON =
 
 // ---- Alphabets (multi-select) -------------------------------------------
 // `cased` marks sets that honor the uppercase/lowercase-only toggles.
+// Standards-grounded character sets, modelled on the Google Fonts glyphset
+// hierarchy (Latin Core / Plus, Cyrillic, Greek, Vietnamese, …) and Unicode
+// blocks. `cased` marks sets honoring an (optional) upper/lower-only filter.
 const ALPHABETS = [
   { key: 'latinUpper', label: 'Latin Uppercase', cased: 'upper',
-    desc: 'A–Z capitals', glyphs: () => chars('ABCDEFGHIJKLMNOPQRSTUVWXYZ') },
+    desc: 'A–Z · GF Latin Core', glyphs: () => chars('ABCDEFGHIJKLMNOPQRSTUVWXYZ') },
   { key: 'latinLower', label: 'Latin Lowercase', cased: 'lower',
-    desc: 'a–z lowercase', glyphs: () => chars('abcdefghijklmnopqrstuvwxyz') },
-  { key: 'latinExt', label: 'Latin Extended', desc: 'Accented & multilingual Latin',
-    // Latin-1 Supplement letters (À–ÿ, minus × ÷) + Latin Extended-A (Ā–ſ):
-    // covers Western/Central/Northern/Eastern European, Turkish, Baltic, etc.
-    glyphs: () => range(0x00C0, 0x00FF).filter(g => g.unicode !== 0x00D7 && g.unicode !== 0x00F7)
-      .concat(range(0x0100, 0x017F)) },
-  { key: 'cyrillic', label: 'Cyrillic', desc: 'Russian & Slavic scripts',
-    glyphs: () => range('А'.codePointAt(0), 'я'.codePointAt(0)) },
-  { key: 'greek', label: 'Greek', desc: 'Α–Ω, α–ω',
-    glyphs: () => [].concat(range('Α'.codePointAt(0), 'Ω'.codePointAt(0)), range('α'.codePointAt(0), 'ω'.codePointAt(0))) },
+    desc: 'a–z · GF Latin Core', glyphs: () => chars('abcdefghijklmnopqrstuvwxyz') },
+  { key: 'latinWest', label: 'Latin Western', desc: 'Western European accents (Latin-1)',
+    glyphs: () => ex(range(0x00C0, 0x00FF), [0x00D7, 0x00F7]) },
+  { key: 'latinCentral', label: 'Latin Extended-A', desc: 'Central/Eastern European incl. Turkish',
+    glyphs: () => range(0x0100, 0x017F) },
+  { key: 'latinVietnamese', label: 'Vietnamese', desc: 'Precomposed Vietnamese vowels',
+    glyphs: () => range(0x1EA0, 0x1EF9).concat(cp(0x01A0, 0x01A1, 0x01AF, 0x01B0, 0x0110, 0x0111)) },
+  { key: 'cyrillic', label: 'Cyrillic', desc: 'Russian & Slavic · GF Cyrillic',
+    glyphs: () => range(0x0410, 0x044F).concat(cp(0x0401, 0x0451)) },
+  { key: 'greek', label: 'Greek', desc: 'Monotonic Greek · GF Greek',
+    glyphs: () => cp(0x0386, 0x0388, 0x0389, 0x038A, 0x038C, 0x038E, 0x038F).concat(ex(range(0x0391, 0x03CE), [0x03A2])) },
   { key: 'arabic', label: 'Arabic', desc: 'Basic Arabic letters',
     glyphs: () => chars('ابتثجحخدذرزسشصضطظعغفقكلمنهوي') },
   { key: 'hebrew', label: 'Hebrew', desc: 'Hebrew alphabet',
     glyphs: () => chars('אבגדהוזחטיכךלמםנןסעפףצץקרשת') },
-  { key: 'katakana', label: 'Japanese (Katakana)', desc: 'カタカナ',
-    glyphs: () => chars('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン') },
   { key: 'hiragana', label: 'Japanese (Hiragana)', desc: 'ひらがな',
     glyphs: () => chars('あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん') },
+  { key: 'katakana', label: 'Japanese (Katakana)', desc: 'カタカナ',
+    glyphs: () => chars('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン') },
   { key: 'hanzi', label: 'Chinese (Hanzi)', desc: 'Common Han characters',
     glyphs: () => chars(HANZI_COMMON) },
-  { key: 'numbers', label: 'Numbers', desc: '0–9', glyphs: () => chars('0123456789') },
-  { key: 'punct', label: 'Symbols', desc: 'Punctuation & symbols',
-    glyphs: () => [].concat(chars('.,:;!?\'"()[]{}-–—/\\&@#%+*=<>'), [{ char: ' ', unicode: 32 }]) },
+  { key: 'numbers', label: 'Numbers', desc: '0–9 lining figures',
+    glyphs: () => chars('0123456789') },
+  { key: 'fractions', label: 'Fractions & Numerals', desc: 'Fractions, super/subscripts · GF Latin Plus',
+    glyphs: () => chars('½¼¾').concat(cp(0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E, 0x2044,
+      0x00B9, 0x00B2, 0x00B3, 0x2070, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079))
+      .concat(range(0x2080, 0x2089)) },
+  { key: 'punct', label: 'Punctuation', desc: 'Punctuation, quotes & dashes',
+    glyphs: () => chars('.,;:!?\'"()[]{}-/\\').concat(cp(0x2013, 0x2014, 0x2026, 0x2018, 0x2019,
+      0x201C, 0x201D, 0x00AB, 0x00BB, 0x2039, 0x203A, 0x2022, 0x00B7, 0x00A1, 0x00BF), [{ char: ' ', unicode: 32 }]) },
+  { key: 'symbols', label: 'Symbols & Currency', desc: 'Currency, ©®™ & reference marks',
+    glyphs: () => chars('&@#*').concat(cp(0x0024, 0x20AC, 0x00A3, 0x00A5, 0x00A2, 0x20BA, 0x00A4,
+      0x00A9, 0x00AE, 0x2122, 0x00A7, 0x00B6, 0x00B0, 0x2020, 0x2021)) },
+  { key: 'math', label: 'Math', desc: 'Operators · GF Latin Plus',
+    glyphs: () => chars('+<>=~^|').concat(cp(0x2212, 0x00D7, 0x00F7, 0x2260, 0x00B1, 0x2264, 0x2265,
+      0x0025, 0x2030, 0x221A, 0x221E, 0x2248, 0x00B5, 0x03C0)) },
 ];
 const ALPHABET_BY_KEY = {};
 ALPHABETS.forEach(a => { ALPHABET_BY_KEY[a.key] = a; });
