@@ -15,7 +15,8 @@
   --txt2: #8d8d8d;        /* gray-500 — secondary */
   --txt3: #6a6a6a;        /* gray-400 — muted */
   --accent: #1473e6;      /* Adobe / Illustrator blue (sampled from the design) */
-  --accent-h: #2680eb;    /* accent hover */
+  --accent-h: #0d66d0;    /* accent hover — Illustrator DARKENS blue on hover */
+  --invert-fill: #d6d6d6; /* outline-button hover fill (text inverts to dark) */
   --brand-red: #c0271d;   /* RuneType stamp red */
 }
 /* Brand display face (settings. / profile.) */
@@ -196,8 +197,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .pill.active .pill-ar { filter: brightness(2.2); }
 .pill > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .pill.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-.pill:hover { border-color: #8a8a8a; }
-.pill.active:hover { background: var(--accent-h); }
+.pill:not(.active):hover { background: var(--invert-fill); color: #1d1d1d; border-color: var(--invert-fill); }
+.pill:not(.active):hover .pill-ar { filter: brightness(0.2); }
+.pill.active:hover { background: var(--accent-h); border-color: var(--accent-h); }
 .prof-head { display: flex; align-items: flex-end; gap: 10px; margin-top: 6px; }
 .prof-sub { font-size: 10px; color: #8a8a8a; line-height: 1.25; }
 .prof-body { flex: 1 1 auto; overflow: hidden; margin-top: 8px; min-height: 0; }
@@ -207,7 +209,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .rune-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; flex: 0 0 auto; }
 .rune-btn { width: 100%; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .rune-btn.outline { background: transparent; color: #eaeaea; border: 2px solid #6a6a6a; }
-.rune-btn.outline:hover { border-color: #8a8a8a; }
+.rune-btn.outline:hover { background: var(--invert-fill); color: #1d1d1d; border-color: var(--invert-fill); }
 .rune-btn.blue { background: var(--accent); color: #fff; border: 2px solid var(--accent); }
 .rune-btn.blue:hover { background: var(--accent-h); border-color: var(--accent-h); }
 .rune-list { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
