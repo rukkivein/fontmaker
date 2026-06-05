@@ -76,3 +76,118 @@ function fmPing() {
   var name = (app.documents.length > 0) ? app.activeDocument.name : '';
   return '{"ok":true,"app":"' + app.name + '","version":"' + app.version + '","doc":"' + name + '"}';
 }
+
+/* ===================== Project / artboard generation =====================
+ * "Create Font" builds the whole Illustrator project up front: one artboard per
+ * glyph, the selected construction grids drawn on a locked reference layer, a
+ * low-opacity ghost letter (Arial) to trace, and an unlocked "Artwork" layer to
+ * draw on. SCALE maps font units → points so everything is consistent. */
+var FM_SCALE = 0.25; // points per font unit
+
+function fmColor(g) { var c = new RGBColor(); c.red = g; c.green = g; c.blue = g; return c; }
+function fmStroke(layer, pts, gray, width, dashed) {
+  var p = layer.pathItems.add();
+  p.setEntirePath(pts);
+  p.filled = false; p.stroked = true;
+  p.strokeColor = fmColor(gray);
+  p.strokeWidth = width || 0.5;
+  if (dashed) p.strokeDashes = [3, 3];
+  p.name = 'fm-guide';
+  return p;
+}
+
+function fmDrawGrids(layer, grids, M, left, right, bottom) {
+  function fy(u) { return bottom + (u - M.descender) * FM_SCALE; }
+  var w = right - left;
+  // Always: horizontal metric lines (baseline a touch darker).
+  fmStroke(layer, [[left, fy(M.descender)], [right, fy(M.descender)]], 205, 0.5);
+  fmStroke(layer, [[left, fy(M.ascender)], [right, fy(M.ascender)]], 205, 0.5);
+  fmStroke(layer, [[left, fy(M.capHeight)], [right, fy(M.capHeight)]], 190, 0.5);
+  fmStroke(layer, [[left, fy(M.xHeight)], [right, fy(M.xHeight)]], 190, 0.5);
+  fmStroke(layer, [[left, fy(0)], [right, fy(0)]], 130, 0.75); // baseline
+  // Side bearings (light verticals).
+  fmStroke(layer, [[left, fy(M.descender)], [left, fy(M.ascender)]], 220, 0.4);
+  fmStroke(layer, [[right, fy(M.descender)], [right, fy(M.ascender)]], 220, 0.4);
+
+  for (var gi = 0; gi < grids.length; gi++) {
+    var g = grids[gi];
+    if (g.kind === 'emsquare') {
+      var cell = (g.cell || 62) * FM_SCALE;
+      for (var x = left + cell; x < right; x += cell) fmStroke(layer, [[x, fy(M.descender)], [x, fy(M.ascender)]], 230, 0.3);
+      for (var y = fy(M.descender) + cell; y < fy(M.ascender); y += cell) fmStroke(layer, [[left, y], [right, y]], 230, 0.3);
+    } else if (g.kind === 'broadnib') {
+      var ang = (g.penAngle || 30) * Math.PI / 180, dy = Math.tan(ang);
+      var step = (M.capHeight) * FM_SCALE / 3;
+      for (var sx = left - w; sx < right + w; sx += step) {
+        var x1 = sx, y1 = fy(M.descender), x2 = sx + (fy(M.ascender) - fy(M.descender)) / Math.max(dy, 0.01), y2 = fy(M.ascender);
+        fmStroke(layer, [[x1, y1], [x2, y2]], 224, 0.3);
+      }
+    } else if (g.kind === 'golden') {
+      var phi = 1.618, px = left + w / phi;
+      fmStroke(layer, [[px, fy(M.descender)], [px, fy(M.ascender)]], 218, 0.4);
+      fmStroke(layer, [[left + w - w / phi, fy(M.descender)], [left + w - w / phi, fy(M.ascender)]], 224, 0.35);
+    } else if (g.kind === 'superellipse') {
+      var ov = (g.overshoot || 12) * FM_SCALE;
+      fmStroke(layer, [[left, fy(0) - ov], [right, fy(0) - ov]], 225, 0.35, true);
+      fmStroke(layer, [[left, fy(M.capHeight) + ov], [right, fy(M.capHeight) + ov]], 225, 0.35, true);
+      fmStroke(layer, [[left, fy(M.xHeight) + ov], [right, fy(M.xHeight) + ov]], 225, 0.35, true);
+    }
+  }
+}
+
+function fmGhost(layer, ch, left, right, bottom, M) {
+  function fy(u) { return bottom + (u - M.descender) * FM_SCALE; }
+  if (ch === ' ' || ch === '') return;
+  try {
+    var tf = layer.textFrames.add();
+    tf.contents = ch;
+    var attr = tf.textRange.characterAttributes;
+    attr.size = M.capHeight * FM_SCALE;
+    try { attr.textFont = app.textFonts.getByName('ArialMT'); }
+    catch (e1) { try { attr.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
+    tf.left = left + (right - left) * 0.18;
+    tf.top = fy(M.capHeight);
+    tf.opacity = 12;
+    tf.name = 'fm-ghost';
+  } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
+}
+
+function fmCreateProject(arg) {
+  try {
+    var cfg = eval('(' + arg + ')');
+    var M = cfg.metrics, glyphs = cfg.glyphs, grids = cfg.grids || [];
+    var span = (M.ascender - M.descender);
+    var AH = span * FM_SCALE;
+    var AW = Math.round(AH * 0.72);
+    var GAP = Math.round(AH * 0.16);
+    var COLS = 8;
+    var rows = Math.ceil(glyphs.length / COLS);
+
+    var docW = 200 + COLS * (AW + GAP);
+    var docH = 200 + rows * (AH + GAP);
+    var doc = app.documents.add(DocumentColorSpace.RGB, docW, docH);
+
+    var refLayer = doc.layers.add(); refLayer.name = 'Reference (locked)';
+    var artLayer = doc.layers.add(); artLayer.name = 'Artwork';
+    artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
+
+    for (var i = 0; i < glyphs.length; i++) {
+      var col = i % COLS, row = Math.floor(i / COLS);
+      var left = 100 + col * (AW + GAP);
+      var top = -100 - row * (AH + GAP);
+      var right = left + AW, bottom = top - AH;
+      var ab;
+      if (i === 0) { ab = doc.artboards[0]; ab.artboardRect = [left, top, right, bottom]; }
+      else { doc.artboards.add([left, top, right, bottom]); ab = doc.artboards[doc.artboards.length - 1]; }
+      try { ab.name = glyphs[i].name; } catch (eN) {}
+      fmDrawGrids(refLayer, grids, M, left, right, bottom);
+      fmGhost(refLayer, glyphs[i].char, left, right, bottom, M);
+    }
+    refLayer.locked = true;
+    doc.activeLayer = artLayer;
+    try { app.executeMenuCommand('fitall'); } catch (eF) {}
+    return '{"ok":true,"artboards":' + glyphs.length + ',"doc":"' + doc.name + '"}';
+  } catch (e) {
+    return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}';
+  }
+}
