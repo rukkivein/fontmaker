@@ -135,21 +135,72 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
   }
 }
 
-function fmGhost(layer, ch, left, right, bottom, M) {
+var FM_DESCENDERS = 'gjpqyµç';
+function fmGhost(layer, ch, left, right, bottom, M, upm) {
   function fy(u) { return bottom + (u - M.descender) * FM_SCALE; }
   if (ch === ' ' || ch === '') return;
   try {
     var tf = layer.textFrames.add();
     tf.contents = ch;
     var attr = tf.textRange.characterAttributes;
-    attr.size = M.capHeight * FM_SCALE;
+    // Point size = the em in points, so Arial's own cap/x-height land on the
+    // grid lines (the grid metrics are chosen to match typical proportions).
+    attr.size = upm * FM_SCALE;
     try { attr.textFont = app.textFonts.getByName('ArialMT'); }
     catch (e1) { try { attr.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
-    tf.left = left + (right - left) * 0.18;
-    tf.top = fy(M.capHeight);
-    tf.opacity = 12;
+    tf.opacity = 11;
     tf.name = 'fm-ghost';
+    // Align by ink bounds: baseline = bbox bottom for most letters; nudge down
+    // by a descender's depth for letters that sit below the baseline.
+    var gb = tf.geometricBounds; // [l, t, r, b] (y up)
+    var baseY = fy(0);
+    var hasDesc = FM_DESCENDERS.indexOf(ch) !== -1;
+    var targetBottom = hasDesc ? (baseY - 0.21 * upm * FM_SCALE) : baseY;
+    var cx = left + (right - left) / 2;
+    var dx = cx - (gb[0] + gb[2]) / 2;
+    var dy = targetBottom - gb[3];
+    tf.translate(dx, dy);
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
+}
+
+// Collect PathItems on a container whose ink center lies inside an artboard rect.
+function fmCollectInRect(container, rect, out) {
+  var items = container.pageItems;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i], t = it.typename;
+    if (t === 'GroupItem') { fmCollectInRect(it, rect, out); continue; }
+    var bag = [];
+    if (t === 'PathItem') bag = [it];
+    else if (t === 'CompoundPathItem') { for (var c = 0; c < it.pathItems.length; c++) bag.push(it.pathItems[c]); }
+    for (var b = 0; b < bag.length; b++) {
+      var p = bag[b];
+      if (!p.pathPoints || p.pathPoints.length < 2) continue;
+      var gb = p.geometricBounds; // [l,t,r,btm] y-up
+      var cx = (gb[0] + gb[2]) / 2, cy = (gb[1] + gb[3]) / 2;
+      if (cx >= rect[0] && cx <= rect[2] && cy <= rect[1] && cy >= rect[3]) out.push(p);
+    }
+  }
+}
+
+// Public: read the artwork on the ACTIVE artboard (the glyph being worked on)
+// for live sync. Returns the artboard index, its rect, FM_SCALE and the paths.
+function fmReadActive() {
+  try {
+    if (app.documents.length === 0) return '{"ok":false,"error":"no document"}';
+    var doc = app.activeDocument;
+    var idx = doc.artboards.getActiveArtboardIndex();
+    var ab = doc.artboards[idx];
+    var r = ab.artboardRect;
+    var layer = null;
+    for (var i = 0; i < doc.layers.length; i++) if (doc.layers[i].name === 'Artwork') { layer = doc.layers[i]; break; }
+    var paths = [];
+    if (layer) fmCollectInRect(layer, r, paths);
+    var parts = [];
+    for (var k = 0; k < paths.length; k++) parts.push(fmSerializePath(paths[k]));
+    return '{"ok":true,"index":' + idx + ',"scale":' + FM_SCALE +
+           ',"rect":[' + r[0] + ',' + r[1] + ',' + r[2] + ',' + r[3] + ']' +
+           ',"paths":[' + parts.join(',') + ']}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 
 function fmCreateProject(arg) {
@@ -181,7 +232,7 @@ function fmCreateProject(arg) {
       else { doc.artboards.add([left, top, right, bottom]); ab = doc.artboards[doc.artboards.length - 1]; }
       try { ab.name = glyphs[i].name; } catch (eN) {}
       fmDrawGrids(refLayer, grids, M, left, right, bottom);
-      fmGhost(refLayer, glyphs[i].char, left, right, bottom, M);
+      fmGhost(refLayer, glyphs[i].char, left, right, bottom, M, cfg.unitsPerEm || 1000);
     }
     refLayer.locked = true;
     doc.activeLayer = artLayer;

@@ -86,7 +86,7 @@ function onCreateFont() {
     masterType: $('nf-mastertype').value, masterName: $('nf-mastertype').value,
     alphabets: alphabets, grids: grids,
   });
-  fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1;
+  fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
   $('nf-status').textContent = '';
   show('work'); renderWorkspace();
   generateIllustratorProject(project);
@@ -125,7 +125,7 @@ function renderTabs() {
     var t = document.createElement('div');
     t.className = 'tab' + (i === activeFont ? ' active' : '');
     t.textContent = f.meta.familyName + ' · ' + f.masters[0].type;
-    t.addEventListener('click', function () { activeFont = i; selectedSlot = -1; renderWorkspace(); });
+    t.addEventListener('click', function () { activeFont = i; selectedSlot = -1; lastSig = {}; renderWorkspace(); });
     tabs.appendChild(t);
   });
 }
@@ -230,6 +230,31 @@ function applyTesterCtl() {
   t.style.fontFeatureSettings = $('t-kern').value === 'none' ? '"kern" 0' : '"kern" 1';
 }
 
+// ---- live sync: poll the active artboard, update that glyph live ----
+var POLL_MS = 700, polling = false, lastSig = {}, testerTimer = null;
+function startPolling() { if (polling) return; polling = true; setInterval(pollActive, POLL_MS); }
+function scheduleTester() { if (testerTimer) clearTimeout(testerTimer); testerTimer = setTimeout(refreshTester, 1200); }
+
+function pollActive() {
+  if (!fonts.length || $('view-work').classList.contains('hidden')) return;
+  evalScript('fmReadActive()').then(function (raw) {
+    var res; try { res = JSON.parse(raw); } catch (e) { return; }
+    if (!res || !res.ok || !res.paths || !res.paths.length) return;
+    var f = curFont(), idx = res.index;
+    if (idx < 0 || idx >= f.glyphs.length) return;
+    var contours = ilbridge.contoursFromArtboard(res.paths, res.rect, res.scale, f.metrics.descender);
+    if (!contours.length) return;
+    var adv = (res.rect[2] - res.rect[0]) / res.scale;
+    glyphset.setGlyphContours(f, idx, curMasterId(), contours, adv);
+    var sig = glyphset.layerSignature(f.glyphs[idx], curMasterId());
+    if (sig === lastSig[idx]) return;
+    lastSig[idx] = sig;
+    renderGrid();
+    setStatus('Live · "' + f.glyphs[idx].char + '" updated from artboard', 'ok');
+    scheduleTester();
+  });
+}
+
 // ---- export OTF ----
 function onExport() {
   var f = curFont(), m = f.masters[0];
@@ -258,6 +283,7 @@ function boot() {
   $('assignBtn').addEventListener('click', onAssign);
   $('exportBtn').addEventListener('click', onExport);
   ['t-size', 't-track', 't-kern'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
+  startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();

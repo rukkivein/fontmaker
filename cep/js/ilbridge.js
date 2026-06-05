@@ -19,28 +19,46 @@ function isSmooth(pp) {
   return String(t).toLowerCase().indexOf('smooth') !== -1;
 }
 
-// Convert one Illustrator PathItem to a single contour {closed, points:[...]}.
-function contourFromPathItem(pathItem, opts) {
-  const flipY = !opts || opts.flipY !== false; // default: flip
-  const sy = flipY ? -1 : 1;
-  const pp = pathItem.pathPoints;
+// Build a contour from Illustrator pathPoints using a coordinate mapper
+// mapPt(x, y) -> {x, y}. Keeps anchor/handle logic in one place.
+function buildContour(pp, closed, mapPt) {
   const n = pp ? pp.length : 0;
   const points = [];
   for (let i = 0; i < n; i++) {
     const a = pp[i];
-    const ax = a.anchor[0], ay = a.anchor[1] * sy;
-    const lx = a.leftDirection[0], ly = a.leftDirection[1] * sy;
-    const rx = a.rightDirection[0], ry = a.rightDirection[1] * sy;
-    const hasIn = Math.abs(lx - ax) > EPS || Math.abs(ly - ay) > EPS;
-    const hasOut = Math.abs(rx - ax) > EPS || Math.abs(ry - ay) > EPS;
+    const A = mapPt(a.anchor[0], a.anchor[1]);
+    const I = mapPt(a.leftDirection[0], a.leftDirection[1]);
+    const O = mapPt(a.rightDirection[0], a.rightDirection[1]);
+    const hasIn = Math.abs(I.x - A.x) > EPS || Math.abs(I.y - A.y) > EPS;
+    const hasOut = Math.abs(O.x - A.x) > EPS || Math.abs(O.y - A.y) > EPS;
     points.push({
-      x: ax, y: ay,
-      type: isSmooth(a) ? 'smooth' : 'corner',
-      handleIn: hasIn ? { x: lx, y: ly } : null,
-      handleOut: hasOut ? { x: rx, y: ry } : null,
+      x: A.x, y: A.y, type: isSmooth(a) ? 'smooth' : 'corner',
+      handleIn: hasIn ? { x: I.x, y: I.y } : null,
+      handleOut: hasOut ? { x: O.x, y: O.y } : null,
     });
   }
-  return { closed: pathItem.closed !== false && n > 1, points };
+  return { closed: closed !== false && n > 1, points };
+}
+
+// Convert one Illustrator PathItem to a contour. Y is flipped by default
+// (free-floating selection art; later re-scaled to cap height on assign).
+function contourFromPathItem(pathItem, opts) {
+  const flipY = !opts || opts.flipY !== false;
+  const mapPt = (x, y) => ({ x: x, y: flipY ? -y : y });
+  return buildContour(pathItem.pathPoints, pathItem.closed !== false, mapPt);
+}
+
+// Convert artwork read from a glyph's artboard into font-unit contours, mapping
+// directly off the grid (no bbox re-scaling): x from the left edge, y from the
+// baseline, using the same FM_SCALE the grid was drawn with. Illustrator
+// artboard space is Y-up like the font model, so no flip here.
+function contoursFromArtboard(paths, rect, scale, descender) {
+  const L = rect[0], B = rect[3];
+  const baseY = B + (0 - descender) * scale;
+  const mapPt = (x, y) => ({ x: (x - L) / scale, y: (y - baseY) / scale });
+  return (paths || [])
+    .map(p => buildContour(p.pathPoints, p.closed !== false, mapPt))
+    .filter(c => c.points.length >= 2);
 }
 
 // Walk a selection (or any container) and gather every PathItem, descending
@@ -75,4 +93,4 @@ function contoursFromSelection(selection, opts) {
   return contours;
 }
 
-module.exports = { contourFromPathItem, collectPathItems, contoursFromSelection, isSmooth };
+module.exports = { contourFromPathItem, collectPathItems, contoursFromSelection, contoursFromArtboard, isSmooth };

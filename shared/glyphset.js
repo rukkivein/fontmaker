@@ -133,8 +133,43 @@ function assignContoursToGlyph(project, contours, glyphIndex, masterId) {
   return true;
 }
 
+function cloneContours(contours) {
+  return contours.map(c => ({
+    closed: c.closed,
+    points: c.points.map(p => ({
+      x: p.x, y: p.y, type: p.type,
+      handleIn: p.handleIn ? { x: p.handleIn.x, y: p.handleIn.y } : null,
+      handleOut: p.handleOut ? { x: p.handleOut.x, y: p.handleOut.y } : null,
+    })),
+  }));
+}
+
+// Write contours that are ALREADY in font units (from artboard live-sync)
+// straight into a master's layer, no re-scaling. advanceWidth defaults to the
+// artwork's right extent + a small side bearing.
+function setGlyphContours(project, glyphIndex, masterId, contours, advanceWidth) {
+  const glyph = project.glyphs[glyphIndex];
+  if (!glyph || !glyph.layers[masterId]) return false;
+  glyph.layers[masterId] = { contours: cloneContours(contours) };
+  if (advanceWidth != null) glyph.advanceWidth = Math.round(advanceWidth);
+  else { const b = contoursBounds(contours); if (b) glyph.advanceWidth = Math.round(b.maxX + LSB); }
+  return true;
+}
+
+// A cheap signature of a master layer's geometry, to detect live changes.
+function layerSignature(glyph, masterId) {
+  const l = glyph.layers[masterId];
+  if (!l || !l.contours.length) return '';
+  let s = '';
+  for (const c of l.contours) {
+    s += (c.closed ? 'C' : 'O') + c.points.length + ':';
+    for (const p of c.points) s += Math.round(p.x) + ',' + Math.round(p.y) + ';';
+  }
+  return s;
+}
+
 module.exports = {
   UPM, DEFAULT_METRICS, glyphName,
   createProject, addMaster, contoursBounds, assignContoursToGlyph,
-  charsets,
+  setGlyphContours, layerSignature, charsets,
 };

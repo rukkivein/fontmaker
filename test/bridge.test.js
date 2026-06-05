@@ -6,7 +6,7 @@
 // proves everything the CEP panel relies on, minus the live host + file I/O.
 const assert = require('assert');
 const opentype = require('opentype.js');
-const { contourFromPathItem, collectPathItems, contoursFromSelection } = require('../shared/ilbridge.js');
+const { contourFromPathItem, collectPathItems, contoursFromSelection, contoursFromArtboard } = require('../shared/ilbridge.js');
 const glyphset = require('../shared/glyphset.js');
 const { buildFont } = require('../core/fontEngine.js');
 
@@ -65,5 +65,29 @@ const font = opentype.parse(buffer);
 const A = font.charToGlyph('A');
 ok(A && A.path.commands.length > 0, 'reloaded font: A has ' + A.path.commands.length + ' path commands');
 ok(A.advanceWidth > 0, 'A has a positive advance width (' + A.advanceWidth + ')');
+
+// --- artboard live-sync mapping (Y-up, baseline-relative, no flip) ---
+// rect [left, top, right, bottom]; scale 0.25 pt/unit; descender -200.
+// baseline doc-Y = bottom + (0 - descender)*scale = 0 + 200*0.25 = 50.
+var abRect = [100, 250, 280, 0];
+var abPath = { closed: true, pathPoints: [
+  pp([100, 50]), pp([250, 50]), pp([250, 225]), pp([100, 225]),
+] };
+var abContours = contoursFromArtboard([abPath], abRect, 0.25, -200);
+ok(abContours.length === 1, 'contoursFromArtboard returns one contour');
+var ap = abContours[0].points;
+ok(ap[0].x === 0 && ap[0].y === 0, 'artboard origin maps to baseline/left (0,0)');
+ok(ap[2].x === 600 && ap[2].y === 700, 'top-right maps to font units (600,700) — Y up, not flipped');
+
+// setGlyphContours writes font-unit contours straight in + sets advance.
+var proj2 = glyphset.createProject({ alphabets: ['latinUpper'] });
+var ai = proj2.glyphs.findIndex(g => g.char === 'B');
+var mid = proj2.masters[0].id;
+ok(glyphset.setGlyphContours(proj2, ai, mid, abContours, 700), 'setGlyphContours writes a layer');
+ok(proj2.glyphs[ai].layers[mid].contours[0].points[2].y === 700, 'contours stored unscaled');
+ok(proj2.glyphs[ai].advanceWidth === 700, 'advance width set');
+var sig1 = glyphset.layerSignature(proj2.glyphs[ai], mid);
+ok(sig1.length > 0, 'layerSignature non-empty for a filled glyph');
+ok(glyphset.layerSignature(proj2.glyphs[proj2.glyphs.findIndex(g => g.char === 'C')], mid) === '', 'empty glyph → empty signature');
 
 console.log('\nHost bridge pipeline OK');
