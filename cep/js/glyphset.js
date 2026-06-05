@@ -60,8 +60,14 @@ function createProject(opts) {
     layers: emptyLayers(masters),
   }));
 
-  const gridDef = charsets.GRID_BY_KEY[opts.grid] || charsets.GRID_BY_KEY.metrics;
-  const grid = gridDef.build(UPM);
+  // One or more construction grids may be selected (they can overlay). The
+  // first selected grid drives the font's metrics.
+  let gridKeys = opts.grids && opts.grids.length ? opts.grids.slice() : (opts.grid ? [opts.grid] : ['metrics']);
+  const grids = gridKeys
+    .map(k => charsets.GRID_BY_KEY[k])
+    .filter(Boolean)
+    .map(def => Object.assign({ key: def.key, label: def.label }, def.build(UPM)));
+  if (!grids.length) grids.push(Object.assign({ key: 'metrics', label: 'Metrics Grid' }, charsets.GRID_BY_KEY.metrics.build(UPM)));
 
   return {
     schema: 1,
@@ -71,9 +77,9 @@ function createProject(opts) {
       version: opts.version || '1.000', copyright: '', license: '',
     },
     unitsPerEm: UPM,
-    metrics: Object.assign({}, grid.metrics || DEFAULT_METRICS),
-    gridKey: gridDef.key,
-    grid,
+    metrics: Object.assign({}, grids[0].metrics || DEFAULT_METRICS),
+    gridKeys: grids.map(g => g.key),
+    grids,
     alphabets: (opts.alphabets && opts.alphabets.length) ? opts.alphabets.slice() : DEFAULT_ALPHABETS.slice(),
     masters,
     glyphs,

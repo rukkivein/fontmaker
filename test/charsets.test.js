@@ -38,10 +38,19 @@ const p = glyphset.createProject({
 });
 ok(p.glyphs.length === 36, 'project built A–Z + 0–9');
 ok(p.meta.version === '2.000', 'version stored');
-ok(p.gridKey === 'emsquare', 'grid key stored');
-ok(p.grid.kind === 'emsquare', 'resolved grid object stored');
+ok(p.gridKeys[0] === 'emsquare', 'grid key stored');
+ok(p.grids[0].kind === 'emsquare', 'resolved grid object stored');
 ok(p.masters[0].type === 'Condensed' && p.masters[0].name === 'Thin', 'master name+type set');
 ok(p.alphabets.indexOf('latinUpper') >= 0, 'alphabets recorded on project');
+
+// --- multiple overlaid grids ---
+const pg = glyphset.createProject({ alphabets: ['latinUpper'], grids: ['metrics', 'broadnib', 'golden'] });
+ok(pg.grids.length === 3, 'three grids resolved & stored');
+ok(pg.gridKeys.join(',') === 'metrics,broadnib,golden', 'grid order preserved');
+ok(pg.metrics.capHeight === pg.grids[0].metrics.capHeight, 'metrics come from the first grid');
+
+// --- Latin Extended is comprehensive (multilingual) ---
+ok(charsets.ALPHABET_BY_KEY.latinExt.glyphs().length > 180, 'Latin Extended is multilingual (' + charsets.ALPHABET_BY_KEY.latinExt.glyphs().length + ')');
 
 // --- addMaster fans out empty layers ---
 const m2 = glyphset.addMaster(p, 'Wide', 'Extended');

@@ -37,9 +37,9 @@
           <Type>Panel</Type>
           <Menu>FontMaker</Menu>
           <Geometry>
-            <Size><Height>640</Height><Width>340</Width></Size>
-            <MinSize><Height>360</Height><Width>260</Width></MinSize>
-            <MaxSize><Height>2200</Height><Width>900</Width></MaxSize>
+            <Size><Height>1040</Height><Width>620</Width></Size>
+            <MinSize><Height>520</Height><Width>420</Width></MinSize>
+            <MaxSize><Height>2400</Height><Width>1100</Width></MaxSize>
           </Geometry>
         </UI>
       </DispatchInfo>

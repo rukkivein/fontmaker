@@ -1,176 +1,174 @@
 'use strict';
 /* FontMaker CEP panel controller (Adobe Illustrator).
- * Page 1 (New Font): name/designer/version, master type, multi-select character
- * sets, case filter, construction grid. Page 2 (Workspace): one tab per open
- * font, master sub-tabs, assign selected Illustrator artwork to glyph slots
- * (scaled to cap height) and export a real OTF via the shared host-agnostic core.
- * Geometry is read through ExtendScript; CEP runs Node so require/fs/Buffer are
- * native. */
+ * Page 1 (New Font): name/version, master type, multi-select character sets
+ * (dropdown), and one or more overlaid construction grids. Page 2 (Workspace):
+ * a tab per open font, assign selected Illustrator artwork to glyph slots
+ * (scaled to cap height), a live font tester, and OTF export. Geometry is read
+ * via ExtendScript; CEP runs Node so require/fs/Buffer are native. */
 
 var cs = new CSInterface();
 var ROOT = cs.getSystemPath(SystemPath.EXTENSION);
-
 var ilbridge = require(ROOT + '/js/ilbridge.js');
 var glyphset = require(ROOT + '/js/glyphset.js');
 var charsets = require(ROOT + '/js/charsets.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
 
-// ---- state ----
-var fonts = [];          // array of project objects (each may have several masters)
-var activeFont = -1;     // index into fonts
-var selectedSlot = -1;   // glyph index within the active font
+var fonts = [];          // open fonts (each is a single-master project)
+var activeFont = -1;
+var selectedSlot = -1;
+var faceSeq = 0;         // unique @font-face family per rebuild
 
 function $(id) { return document.getElementById(id); }
-function show(view) {
-  $('view-new').classList.toggle('hidden', view !== 'new');
-  $('view-work').classList.toggle('hidden', view !== 'work');
-}
-function evalScript(code) {
-  return new Promise(function (res) { cs.evalScript(code, function (r) { res(r); }); });
-}
+function show(v) { $('view-new').classList.toggle('hidden', v !== 'new'); $('view-work').classList.toggle('hidden', v !== 'work'); }
+function evalScript(code) { return new Promise(function (r) { cs.evalScript(code, function (x) { r(x); }); }); }
 
 // ============ PAGE 1 — New Font ============
 function buildNewFontForm() {
-  var mt = $('nf-mastertype');
-  mt.innerHTML = '';
-  charsets.MASTER_TYPES.forEach(function (t) {
-    var o = document.createElement('option'); o.value = t; o.textContent = t; mt.appendChild(o);
-  });
+  var mt = $('nf-mastertype'); mt.innerHTML = '';
+  charsets.MASTER_TYPES.forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; mt.appendChild(o); });
 
-  var box = $('nf-alphabets'); box.innerHTML = '';
+  var list = $('nf-cs-list'); list.innerHTML = '';
   var defaults = { latinUpper: 1, latinLower: 1, numbers: 1, punct: 1 };
   charsets.ALPHABETS.forEach(function (a) {
     var lab = document.createElement('label'); lab.className = 'check';
     var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = a.key;
     if (defaults[a.key]) cb.checked = true;
+    cb.addEventListener('change', updateCsSummary);
     var span = document.createElement('span');
     span.innerHTML = a.label + (a.note ? ' <i class="muted">' + a.note + '</i>' : '');
-    lab.appendChild(cb); lab.appendChild(span); box.appendChild(lab);
+    lab.appendChild(cb); lab.appendChild(span); list.appendChild(lab);
   });
+  updateCsSummary();
 
   var grids = $('nf-grids'); grids.innerHTML = '';
   charsets.GRIDS.forEach(function (g, i) {
     var card = document.createElement('label'); card.className = 'gridcard';
-    var rb = document.createElement('input'); rb.type = 'radio'; rb.name = 'grid'; rb.value = g.key;
-    if (i === 0) rb.checked = true;
+    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.name = 'grid'; cb.value = g.key;
+    if (i === 0) cb.checked = true;
+    cb.addEventListener('change', updateGridWarn);
     var t = document.createElement('div'); t.className = 'gridcard-t'; t.textContent = g.label;
     var n = document.createElement('div'); n.className = 'gridcard-n'; n.textContent = g.note;
-    card.appendChild(rb); card.appendChild(t); card.appendChild(n); grids.appendChild(card);
+    card.appendChild(cb); card.appendChild(t); card.appendChild(n); grids.appendChild(card);
   });
+  updateGridWarn();
 }
 
-function readNewFontForm() {
-  var alphabets = [];
-  var boxes = $('nf-alphabets').querySelectorAll('input[type=checkbox]');
-  for (var i = 0; i < boxes.length; i++) if (boxes[i].checked) alphabets.push(boxes[i].value);
-  var caseVal = (document.querySelector('input[name=case]:checked') || {}).value || 'both';
-  var grid = (document.querySelector('input[name=grid]:checked') || {}).value || 'metrics';
-  return {
-    familyName: $('nf-family').value.trim() || 'Untitled',
-    designer: $('nf-designer').value.trim(),
-    version: $('nf-version').value.trim() || '1.000',
-    masterType: $('nf-mastertype').value,
-    masterName: $('nf-mastertype').value,
-    alphabets: alphabets,
-    upperOnly: caseVal === 'upper',
-    lowerOnly: caseVal === 'lower',
-    grid: grid,
-  };
+function selectedAlphabets() {
+  var out = [], b = $('nf-cs-list').querySelectorAll('input');
+  for (var i = 0; i < b.length; i++) if (b[i].checked) out.push(b[i].value);
+  return out;
+}
+function selectedGrids() {
+  var out = [], b = $('nf-grids').querySelectorAll('input');
+  for (var i = 0; i < b.length; i++) if (b[i].checked) out.push(b[i].value);
+  return out;
+}
+function updateCsSummary() {
+  var keys = selectedAlphabets();
+  var n = charsets.collectGlyphs(keys, {}).length;
+  $('nf-cs-summary').textContent = keys.length ? (keys.length + ' set' + (keys.length > 1 ? 's' : '') + ' · ' + n + ' glyphs') : 'Select…';
+}
+function updateGridWarn() {
+  var n = selectedGrids().length;
+  var w = $('nf-gridwarn');
+  if (n >= 3) { w.textContent = '⚠ ' + n + ' grids overlaid — the canvas may get busy.'; w.classList.remove('hidden'); }
+  else w.classList.add('hidden');
 }
 
 function onCreateFont() {
-  var opts = readNewFontForm();
-  if (!opts.alphabets.length) { $('nf-status').textContent = 'Pick at least one character set.'; $('nf-status').className = 'status err'; return; }
-  var project = glyphset.createProject(opts);
-  project._activeMaster = 0;
-  fonts.push(project);
-  activeFont = fonts.length - 1;
-  selectedSlot = -1;
+  var alphabets = selectedAlphabets();
+  if (!alphabets.length) { $('nf-status').textContent = 'Pick at least one character set.'; $('nf-status').className = 'status err'; return; }
+  var grids = selectedGrids(); if (!grids.length) grids = ['metrics'];
+  var project = glyphset.createProject({
+    familyName: $('nf-family').value.trim() || 'Untitled',
+    version: $('nf-version').value.trim() || '1.000',
+    masterType: $('nf-mastertype').value, masterName: $('nf-mastertype').value,
+    alphabets: alphabets, grids: grids,
+  });
+  fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1;
   $('nf-status').textContent = '';
-  show('work');
-  renderWorkspace();
+  show('work'); renderWorkspace();
 }
 
 // ============ PAGE 2 — Workspace ============
 function curFont() { return fonts[activeFont]; }
-function curMaster() { var f = curFont(); return f.masters[f._activeMaster || 0]; }
-
-function isFilled(g, masterId) {
-  var l = g.layers[masterId];
-  return !!(l && l.contours && l.contours.length);
-}
+function curMasterId() { return curFont().masters[0].id; }
+function isFilled(g) { var l = g.layers[curMasterId()]; return !!(l && l.contours && l.contours.length); }
+function setStatus(m, k) { $('status').textContent = m; $('status').className = 'status' + (k ? ' ' + k : ''); }
 
 function renderTabs() {
   var tabs = $('w-tabs'); tabs.innerHTML = '';
   fonts.forEach(function (f, i) {
     var t = document.createElement('div');
     t.className = 'tab' + (i === activeFont ? ' active' : '');
-    t.textContent = f.meta.familyName;
+    t.textContent = f.meta.familyName + ' · ' + f.masters[0].type;
     t.addEventListener('click', function () { activeFont = i; selectedSlot = -1; renderWorkspace(); });
     tabs.appendChild(t);
   });
 }
 
-function renderMasters() {
-  var mt = $('w-masters'); mt.innerHTML = '';
-  var f = curFont();
-  f.masters.forEach(function (m, i) {
-    var b = document.createElement('div');
-    b.className = 'mtab' + (i === (f._activeMaster || 0) ? ' active' : '');
-    b.textContent = m.name;
-    b.title = 'Master: ' + m.type;
-    b.addEventListener('click', function () { f._activeMaster = i; renderWorkspace(); });
-    mt.appendChild(b);
+// Build an SVG path (screen coords, Y-down) from a glyph's contours.
+function contoursToSVG(contours) {
+  var d = '';
+  contours.forEach(function (c) {
+    var p = c.points; if (!p.length) return;
+    d += 'M' + p[0].x + ' ' + (-p[0].y);
+    var segs = c.closed ? p.length : p.length - 1;
+    for (var i = 0; i < segs; i++) {
+      var a = p[i], b = p[(i + 1) % p.length];
+      var hasO = a.handleOut && (a.handleOut.x !== a.x || a.handleOut.y !== a.y);
+      var hasI = b.handleIn && (b.handleIn.x !== b.x || b.handleIn.y !== b.y);
+      if (hasO || hasI) {
+        var c1 = a.handleOut || a, c2 = b.handleIn || b;
+        d += 'C' + c1.x + ' ' + (-c1.y) + ' ' + c2.x + ' ' + (-c2.y) + ' ' + b.x + ' ' + (-b.y);
+      } else d += 'L' + b.x + ' ' + (-b.y);
+    }
+    if (c.closed) d += 'Z';
   });
-  var add = document.createElement('div');
-  add.className = 'mtab add'; add.textContent = '＋'; add.title = 'Add master';
-  add.addEventListener('click', onAddMaster);
-  mt.appendChild(add);
+  return d;
 }
-
-function onAddMaster() {
-  var types = charsets.MASTER_TYPES;
-  var f = curFont();
-  // cycle to the next unused type as a sensible default name
-  var used = {}; f.masters.forEach(function (m) { used[m.type] = 1; });
-  var pick = types.filter(function (t) { return !used[t]; })[0] || 'Other';
-  var m = glyphset.addMaster(f, pick, pick);
-  f._activeMaster = f.masters.length - 1;
-  renderWorkspace();
-  setStatus('Added master "' + m.name + '".', 'ok');
+function glyphThumb(g) {
+  var contours = g.layers[curMasterId()].contours;
+  var b = glyphset.contoursBounds(contours); if (!b) return null;
+  var pad = Math.max(b.w, b.h) * 0.12 + 1;
+  var vb = (b.minX - pad) + ' ' + (-(b.maxY) - pad) + ' ' + (b.w + pad * 2) + ' ' + (b.h + pad * 2);
+  return '<svg class="thumb" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet">' +
+         '<path d="' + contoursToSVG(contours) + '" fill="#eaeaee"/></svg>';
 }
 
 function renderGrid() {
   var grid = $('grid'); grid.innerHTML = '';
-  var f = curFont(); var mid = curMaster().id;
+  var f = curFont();
   f.glyphs.forEach(function (g, i) {
     var cell = document.createElement('div');
-    cell.className = 'cell' + (isFilled(g, mid) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
-    cell.textContent = g.char === ' ' ? '␣' : g.char;
+    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+    if (isFilled(g)) {
+      var th = glyphThumb(g);
+      cell.innerHTML = (th || '') + '<span class="lab">' + (g.char === ' ' ? '␣' : g.char) + '</span>';
+    } else {
+      cell.textContent = g.char === ' ' ? '␣' : g.char;
+    }
     cell.addEventListener('click', function () { selectedSlot = i; renderGrid(); updateAssign(); });
+    cell.addEventListener('dblclick', function () { selectedSlot = i; updateAssign(); onAssign(); });
     grid.appendChild(cell);
   });
-  var filled = f.glyphs.filter(function (g) { return isFilled(g, mid); }).length;
+  var filled = f.glyphs.filter(isFilled).length;
   $('filledCount').textContent = filled + ' / ' + f.glyphs.length;
   $('exportBtn').disabled = filled === 0;
 }
 
 function updateAssign() {
-  var ok = selectedSlot >= 0;
-  $('assignBtn').disabled = !ok;
-  if (ok) { var g = curFont().glyphs[selectedSlot]; $('assignTarget').textContent = g.char === ' ' ? 'space' : g.char; }
-  else $('assignTarget').textContent = '—';
+  var ok = selectedSlot >= 0; $('assignBtn').disabled = !ok;
+  $('assignTarget').textContent = ok ? (function () { var c = curFont().glyphs[selectedSlot].char; return c === ' ' ? 'space' : c; })() : '—';
 }
-
-function setStatus(msg, kind) { $('status').textContent = msg; $('status').className = 'status' + (kind ? ' ' + kind : ''); }
 
 function renderWorkspace() {
-  renderTabs(); renderMasters(); renderGrid(); updateAssign();
-  setStatus('Editing ' + curFont().meta.familyName + ' · ' + curMaster().name + ' · ' + curFont().glyphs.length + ' slots');
+  renderTabs(); renderGrid(); updateAssign(); refreshTester();
+  setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
 
-// ---- assign selection -> glyph (active master) ----
+// ---- assign selection -> glyph ----
 function onAssign() {
   if (selectedSlot < 0) return;
   setStatus('Reading selection…');
@@ -179,26 +177,44 @@ function onAssign() {
     if (!res || !res.ok) { setStatus((res && res.error) || 'Could not read selection.', 'err'); return; }
     var contours = ilbridge.contoursFromSelection(res.paths);
     if (!contours.length) { setStatus('Selection has no usable outlines.', 'err'); return; }
-    var ok = glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMaster().id);
-    if (!ok) { setStatus('Could not place selection.', 'err'); return; }
+    if (!glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMasterId())) { setStatus('Could not place selection.', 'err'); return; }
     var g = curFont().glyphs[selectedSlot];
     var pts = contours.reduce(function (n, c) { return n + c.points.length; }, 0);
-    setStatus('Assigned ' + contours.length + ' contour(s), ' + pts + ' pts → "' + g.char + '" (' + curMaster().name + ').', 'ok');
-    renderGrid();
+    setStatus('Assigned ' + contours.length + ' contour(s), ' + pts + ' pts → "' + g.char + '".', 'ok');
+    renderGrid(); refreshTester();
   });
 }
 
-// ---- export OTF (active master) ----
+// ---- live font tester (@font-face from the built OTF) ----
+function refreshTester() {
+  var f = curFont(); if (!f) return;
+  var filled = f.glyphs.filter(isFilled).length;
+  var styleEl = $('fm-faces') || (function () { var s = document.createElement('style'); s.id = 'fm-faces'; document.head.appendChild(s); return s; })();
+  if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
+  try {
+    var fam = 'FMTest_' + (++faceSeq);
+    var built = fontEngine.buildFont(f, 'otf', { familyName: fam, styleName: 'Regular', masterId: curMasterId() });
+    var b64 = Buffer.from(new Uint8Array(built.buffer)).toString('base64');
+    styleEl.textContent = '@font-face{font-family:"' + fam + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
+    $('t-text').style.fontFamily = '"' + fam + '"';
+  } catch (e) { /* tester is best-effort */ }
+  applyTesterCtl();
+}
+function applyTesterCtl() {
+  var t = $('t-text');
+  t.style.fontSize = $('t-size').value + 'px';
+  t.style.letterSpacing = ($('t-track').value / 10) + 'px';
+  t.style.fontKerning = $('t-kern').value;
+  t.style.fontFeatureSettings = $('t-kern').value === 'none' ? '"kern" 0' : '"kern" 1';
+}
+
+// ---- export OTF ----
 function onExport() {
-  var f = curFont(), m = curMaster();
-  var meta = {
-    familyName: f.meta.familyName, styleName: m.type || 'Regular',
-    designer: f.meta.designer, version: f.meta.version, masterId: m.id,
-  };
-  var fileName = (f.meta.familyName.replace(/\s+/g, '') || 'Font') + '-' + (m.name || 'Regular') + '.otf';
+  var f = curFont(), m = f.masters[0];
+  var meta = { familyName: f.meta.familyName, styleName: m.type || 'Regular', designer: $('designer').value.trim(), version: f.meta.version, masterId: m.id };
+  var fileName = (f.meta.familyName.replace(/\s+/g, '') || 'Font') + '-' + (m.type || 'Regular') + '.otf';
   setStatus('Choose where to save…');
-  var dlg = '(function(){var f=File.saveDialog("Save font","OTF:*.otf");if(!f)return "";' +
-            'if(f.name.indexOf(".")<0)f=new File(f.fsName+".otf");return f.fsName;})()';
+  var dlg = '(function(){var f=File.saveDialog("Save font","OTF:*.otf");if(!f)return "";if(f.name.indexOf(".")<0)f=new File(f.fsName+".otf");return f.fsName;})()';
   evalScript(dlg).then(function (p) {
     if (!p) { setStatus('Export cancelled.'); return; }
     try {
@@ -212,15 +228,14 @@ function onExport() {
 
 // ---- boot ----
 function boot() {
-  buildNewFontForm();
-  show('new');
+  buildNewFontForm(); show('new');
+  $('nf-cs-btn').addEventListener('click', function () { $('nf-cs-list').classList.toggle('hidden'); });
   $('nf-create').addEventListener('click', onCreateFont);
   $('nf-cancel').addEventListener('click', function () { if (fonts.length) { show('work'); renderWorkspace(); } });
-  $('w-newfont').addEventListener('click', function () {
-    $('nf-cancel').classList.remove('hidden'); buildNewFontForm(); show('new');
-  });
+  $('w-newfont').addEventListener('click', function () { $('nf-cancel').classList.remove('hidden'); buildNewFontForm(); show('new'); });
   $('assignBtn').addEventListener('click', onAssign);
   $('exportBtn').addEventListener('click', onExport);
+  ['t-size', 't-track', 't-kern'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
 else boot();

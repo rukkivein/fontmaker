@@ -28,9 +28,11 @@ const ALPHABETS = [
   { key: 'punct', label: 'Punctuation & Symbols',
     note: '. , : ; ! ? - … & @ …', glyphs: () => [].concat(
       chars('.,:;!?\'"()[]{}-–—/\\&@#%+*=<>'), [{ char: ' ', unicode: 32 }]) },
-  { key: 'latinExt', label: 'Latin Extended (incl. Turkish)',
-    note: 'şçğıöü àéîõ … ŠŽœ', glyphs: () => chars(
-      'ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏİĞŞÑÒÓÔÕÖØÙÚÛÜÝàáâãäåæçèéêëìíîïışğñòóôõöøùúûüýÿŠŽšžŸŒœ') },
+  { key: 'latinExt', label: 'Latin Extended', note: 'Multilingual',
+    // Latin-1 Supplement letters (À–ÿ, minus × ÷) + Latin Extended-A (Ā–ſ):
+    // covers Western/Central/Northern/Eastern European, Turkish, Baltic, etc.
+    glyphs: () => range(0x00C0, 0x00FF).filter(g => g.unicode !== 0x00D7 && g.unicode !== 0x00F7)
+      .concat(range(0x0100, 0x017F)) },
   { key: 'cyrillic', label: 'Cyrillic (Russian)', note: 'А–я',
     glyphs: () => range('А'.codePointAt(0), 'я'.codePointAt(0)) },
   { key: 'greek', label: 'Greek', note: 'Α–Ω α–ω',

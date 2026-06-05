@@ -18,26 +18,22 @@
     <div class="scroll">
       <div class="grp">
         <div class="row"><label>Name</label><input id="nf-family" type="text" value="My Typeface" /></div>
-        <div class="row"><label>Designer</label><input id="nf-designer" type="text" placeholder="optional" /></div>
         <div class="row"><label>Version</label><input id="nf-version" type="text" value="1.000" /></div>
-        <div class="row"><label>Master</label>
-          <select id="nf-mastertype"></select>
+        <div class="row"><label>Master</label><select id="nf-mastertype"></select></div>
+      </div>
+
+      <div class="grp">
+        <div class="grp-title">Character sets</div>
+        <div class="dropdown">
+          <button id="nf-cs-btn" class="dd-btn" type="button"><span id="nf-cs-summary">Select…</span><i class="dd-caret">▾</i></button>
+          <div id="nf-cs-list" class="dd-list hidden"></div>
         </div>
       </div>
 
       <div class="grp">
-        <div class="grp-title">Character sets <span class="muted">multi-select</span></div>
-        <div id="nf-alphabets" class="checks"></div>
-        <div class="case">
-          <label class="radio"><input type="radio" name="case" value="both" checked /> Both cases</label>
-          <label class="radio"><input type="radio" name="case" value="upper" /> Uppercase only</label>
-          <label class="radio"><input type="radio" name="case" value="lower" /> Lowercase only</label>
-        </div>
-      </div>
-
-      <div class="grp">
-        <div class="grp-title">Construction grid</div>
+        <div class="grp-title">Construction grids <span class="muted">overlay allowed</span></div>
         <div id="nf-grids" class="grids"></div>
+        <div id="nf-gridwarn" class="warn hidden"></div>
       </div>
     </div>
     <footer class="foot">
@@ -53,19 +49,30 @@
       <button id="w-newfont" class="mini">＋ Font</button>
     </header>
     <div id="w-tabs" class="tabs"></div>
-    <div id="w-masters" class="mtabs"></div>
 
     <section class="assign">
-      <div class="hint">Select artwork in Illustrator, click a slot, then Assign.</div>
+      <div class="hint">Select artwork in Illustrator, click a slot, then Assign (or double-click a slot).</div>
       <button id="assignBtn" class="primary" disabled>Assign selection → <b id="assignTarget">—</b></button>
     </section>
 
     <section class="gridwrap"><div id="grid" class="grid"></div></section>
 
+    <!-- font tester -->
+    <section id="tester" class="tester">
+      <div class="tester-paper"><input id="t-text" type="text" value="Handgloves 0123" spellcheck="false" /></div>
+      <div class="tester-ctl">
+        <label>Size<input id="t-size" type="range" min="12" max="120" value="44" /></label>
+        <label>Track<input id="t-track" type="range" min="-40" max="120" value="0" /></label>
+        <label>Kern<select id="t-kern"><option value="normal">Optical</option><option value="none">Metric</option></select></label>
+        <label class="dim">Var<input id="t-var" type="range" min="0" max="100" value="50" disabled /></label>
+      </div>
+    </section>
+
     <footer class="foot">
       <div id="status" class="status">Ready.</div>
       <div class="actions">
-        <span id="filledCount" class="count">0 glyphs</span>
+        <input id="designer" class="mini-input" type="text" placeholder="Designer (for export)" />
+        <span id="filledCount" class="count">0</span>
         <button id="exportBtn" class="export" disabled>Export OTF</button>
       </div>
     </footer>
