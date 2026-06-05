@@ -234,3 +234,27 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ri-btn.is-plus:hover { background-image: url('../assets/btn-plus-hover.svg'); }
 .ri-btn.is-x { background-image: url('../assets/btn-x.svg'); }
 .ri-btn.is-x:hover { background-image: url('../assets/btn-x-hover.svg'); }
+
+/* ============ Custom scrollbars (Adobe-ish rounded channel) ============ */
+/* General thin thumb-only bars for the workspace/dropdowns. */
+.scroll::-webkit-scrollbar, .gridwrap::-webkit-scrollbar,
+.dd-list::-webkit-scrollbar, .m-list::-webkit-scrollbar { width: 12px; height: 12px; }
+.scroll::-webkit-scrollbar-thumb, .gridwrap::-webkit-scrollbar-thumb,
+.dd-list::-webkit-scrollbar-thumb, .m-list::-webkit-scrollbar-thumb {
+  background: #565656; border-radius: 999px; border: 3px solid transparent; background-clip: padding-box; min-height: 36px;
+}
+.scroll::-webkit-scrollbar-thumb:hover, .gridwrap::-webkit-scrollbar-thumb:hover {
+  background: #6e6e6e; background-clip: padding-box; border: 3px solid transparent;
+}
+
+/* The shared right list: a visible rounded channel with a lighter pill thumb. */
+.rune-list::-webkit-scrollbar { width: 16px; }
+.rune-list::-webkit-scrollbar-track {
+  background: #2c2c2c; border-radius: 999px; margin: 8px 4px;
+}
+.rune-list::-webkit-scrollbar-thumb {
+  background: #6a6a6a; border-radius: 999px; border: 4px solid transparent; background-clip: padding-box; min-height: 44px;
+}
+.rune-list::-webkit-scrollbar-thumb:hover {
+  background: #7c7c7c; background-clip: padding-box; border: 4px solid transparent;
+}
