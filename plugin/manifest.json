@@ -1,0 +1,28 @@
+{
+  "manifestVersion": 5,
+  "id": "com.fontmaker.illustrator",
+  "name": "FontMaker",
+  "version": "0.1.0",
+  "main": "index.html",
+  "host": [
+    {
+      "app": "ILST",
+      "minVersion": "27.0.0"
+    }
+  ],
+  "requiredPermissions": {
+    "localFileSystem": "request",
+    "allowCodeGenerationFromStrings": false
+  },
+  "entrypoints": [
+    {
+      "type": "panel",
+      "id": "fontmakerPanel",
+      "label": { "default": "FontMaker" },
+      "minimumSize": { "width": 230, "height": 320 },
+      "maximumSize": { "width": 1400, "height": 2400 },
+      "preferredDockedSize": { "width": 320, "height": 640 },
+      "preferredFloatingSize": { "width": 360, "height": 680 }
+    }
+  ]
+}

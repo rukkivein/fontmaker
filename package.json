@@ -6,7 +6,8 @@
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
-    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js"
+    "plugin:sync": "node scripts/sync-plugin.js",
+    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js && node test/uxpbridge.test.js && node test/pluginsync.test.js"
   },
   "author": "",
   "license": "MIT",
