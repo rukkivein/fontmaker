@@ -163,6 +163,30 @@ function fmGhost(layer, ch, left, right, bottom, M, upm) {
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
 }
 
+// Append one artboard (for a new alternate/ligature glyph) with grids + ghost.
+function fmAppendArtboard(arg) {
+  try {
+    if (app.documents.length === 0) return '{"ok":false,"error":"no document"}';
+    var cfg = eval('(' + arg + ')');
+    var doc = app.activeDocument, M = cfg.metrics, grids = cfg.grids || [];
+    var span = (M.ascender - M.descender), AH = span * FM_SCALE, AW = Math.round(AH * 0.72), GAP = Math.round(AH * 0.16), COLS = 8;
+    var idx = doc.artboards.length, col = idx % COLS, row = Math.floor(idx / COLS);
+    var left = 100 + col * (AW + GAP), top = -100 - row * (AH + GAP), right = left + AW, bottom = top - AH;
+    doc.artboards.add([left, top, right, bottom]);
+    var ab = doc.artboards[doc.artboards.length - 1];
+    try { ab.name = cfg.name; } catch (eN) {}
+    var refLayer = null;
+    for (var i = 0; i < doc.layers.length; i++) if (doc.layers[i].name === 'Reference (locked)') { refLayer = doc.layers[i]; break; }
+    if (refLayer) {
+      refLayer.locked = false;
+      fmDrawGrids(refLayer, grids, M, left, right, bottom);
+      fmGhost(refLayer, cfg.ghost || '', left, right, bottom, M, cfg.unitsPerEm || 1000);
+      refLayer.locked = true;
+    }
+    return '{"ok":true,"index":' + idx + '}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+
 // Collect PathItems on a container whose ink center lies inside an artboard rect.
 function fmCollectInRect(container, rect, out) {
   var items = container.pageItems;

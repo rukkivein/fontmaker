@@ -165,11 +165,13 @@ function renderGrid() {
   f.glyphs.forEach(function (g, i) {
     var cell = document.createElement('div');
     cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+    var label = g.char != null ? (g.char === ' ' ? '␣' : g.char) : g.name;
+    if (g.char == null) cell.className += ' named';
     if (isFilled(g)) {
       var th = glyphThumb(g);
-      cell.innerHTML = (th || '') + '<span class="lab">' + (g.char === ' ' ? '␣' : g.char) + '</span>';
+      cell.innerHTML = (th || '') + '<span class="lab">' + label + '</span>';
     } else {
-      cell.textContent = g.char === ' ' ? '␣' : g.char;
+      cell.textContent = label;
     }
     cell.addEventListener('click', function () { selectedSlot = i; renderGrid(); updateAssign(); });
     cell.addEventListener('dblclick', function () { selectedSlot = i; updateAssign(); onAssign(); });
@@ -181,8 +183,39 @@ function renderGrid() {
 }
 
 function updateAssign() {
-  var ok = selectedSlot >= 0; $('assignBtn').disabled = !ok;
-  $('assignTarget').textContent = ok ? (function () { var c = curFont().glyphs[selectedSlot].char; return c === ' ' ? 'space' : c; })() : '—';
+  var ok = selectedSlot >= 0; $('assignBtn').disabled = !ok; $('altBtn').disabled = !ok;
+  $('assignTarget').textContent = ok ? (function () { var g = curFont().glyphs[selectedSlot]; return g.char == null ? g.name : (g.char === ' ' ? 'space' : g.char); })() : '—';
+}
+
+// ---- special glyphs: alternates & ligatures ----
+function appendArtboardFor(idx) {
+  var f = curFont(), g = f.glyphs[idx];
+  var cfg = {
+    metrics: f.metrics, unitsPerEm: f.unitsPerEm,
+    grids: f.grids.map(function (x) { return { kind: x.kind, cell: x.cell, penAngle: x.penAngle, overshoot: x.overshoot }; }),
+    name: g.name, ghost: g.ghost || '',
+  };
+  evalScript('fmAppendArtboard(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!(r && r.ok)) setStatus('Glyph added (artboard not created: ' + ((r && r.error) || '?') + ')', 'err');
+  });
+}
+function onAlt() {
+  if (selectedSlot < 0) return;
+  var idx = glyphset.createAlternate(curFont(), selectedSlot);
+  if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
+  appendArtboardFor(idx);
+  selectedSlot = idx; renderGrid(); updateAssign();
+  setStatus('Created alternate "' + curFont().glyphs[idx].name + '" → its own artboard.', 'ok');
+}
+function onLig() {
+  var str = $('ligInput').value.trim();
+  if (str.length < 2) { setStatus('Type ≥2 characters to ligate (e.g. ft).', 'err'); return; }
+  var idx = glyphset.createLigature(curFont(), str);
+  if (idx < 0) { setStatus('Could not create ligature.', 'err'); return; }
+  appendArtboardFor(idx);
+  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign();
+  setStatus('Created ligature "' + curFont().glyphs[idx].name + '" → its own artboard.', 'ok');
 }
 
 function renderWorkspace() {
@@ -281,6 +314,8 @@ function boot() {
   $('nf-cancel').addEventListener('click', function () { if (fonts.length) { show('work'); renderWorkspace(); } });
   $('w-newfont').addEventListener('click', function () { $('nf-cancel').classList.remove('hidden'); buildNewFontForm(); show('new'); });
   $('assignBtn').addEventListener('click', onAssign);
+  $('altBtn').addEventListener('click', onAlt);
+  $('ligBtn').addEventListener('click', onLig);
   $('exportBtn').addEventListener('click', onExport);
   ['t-size', 't-track', 't-kern'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
   startPolling();

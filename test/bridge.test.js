@@ -90,4 +90,21 @@ var sig1 = glyphset.layerSignature(proj2.glyphs[ai], mid);
 ok(sig1.length > 0, 'layerSignature non-empty for a filled glyph');
 ok(glyphset.layerSignature(proj2.glyphs[proj2.glyphs.findIndex(g => g.char === 'C')], mid) === '', 'empty glyph → empty signature');
 
+// --- alternates & ligatures produce real GSUB ---
+var proj3 = glyphset.createProject({ alphabets: ['latinUpper', 'latinLower'] });
+var bi = proj3.glyphs.findIndex(g => g.char === 'B');
+var altIdx = glyphset.createAlternate(proj3, bi);
+ok(proj3.glyphs[altIdx].name === 'B.ss01', 'alternate named B.ss01');
+ok(proj3.glyphs[altIdx].kind === 'alternate' && proj3.glyphs[altIdx].baseName === 'B', 'alternate carries kind+baseName');
+ok(altIdx === proj3.glyphs.length - 1, 'alternate appended at end (keeps artboard indices aligned)');
+var ligIdx = glyphset.createLigature(proj3, 'ft');
+ok(proj3.glyphs[ligIdx].name === 'f_t', 'ligature named f_t');
+ok(proj3.glyphs[ligIdx].components.join('') === 'ft', 'ligature components are f,t');
+// give base glyphs an outline so the font builds, then check GSUB exists
+[bi, altIdx, proj3.glyphs.findIndex(g => g.char === 'f'), proj3.glyphs.findIndex(g => g.char === 't'), ligIdx]
+  .forEach(i => glyphset.assignContoursToGlyph(proj3, fromJsx, i));
+var built3 = buildFont(proj3, 'otf', { familyName: 'AltTest', masterId: proj3.masters[0].id });
+var font3 = opentype.parse(built3.buffer);
+ok(font3.tables.gsub, 'built font has a GSUB table (alternates/ligatures wired)');
+
 console.log('\nHost bridge pipeline OK');

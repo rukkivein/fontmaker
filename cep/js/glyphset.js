@@ -133,6 +133,44 @@ function assignContoursToGlyph(project, contours, glyphIndex, masterId) {
   return true;
 }
 
+// Create a stylistic alternate of a base glyph (e.g. B → B.ss01). Appended at
+// the end (so artboard↔glyph indices stay aligned), empty in every master,
+// variable-compatible. core/fontEngine emits ssNN + salt GSUB for it.
+function createAlternate(project, baseIndex) {
+  const base = project.glyphs[baseIndex];
+  if (!base) return -1;
+  const re = new RegExp('^' + base.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\.ss(\\d+)$');
+  let max = 0;
+  for (const g of project.glyphs) { const m = g.name && g.name.match(re); if (m) max = Math.max(max, +m[1]); }
+  const ss = String(max + 1).padStart(2, '0');
+  const glyph = {
+    name: base.name + '.ss' + ss, char: null, unicode: null,
+    advanceWidth: base.advanceWidth, layers: emptyLayers(project.masters),
+    kind: 'alternate', baseName: base.name, ghost: base.char,
+  };
+  project.glyphs.push(glyph);
+  return project.glyphs.length - 1;
+}
+
+// Create a ligature glyph from a string of characters (e.g. "ft" → f_t). Its
+// components are the characters; core/fontEngine emits a liga GSUB rule.
+function createLigature(project, str) {
+  const comps = Array.from(str).filter(c => c.trim());
+  if (comps.length < 2) return -1;
+  const name = comps.map(glyphName).join('_');
+  const existing = project.glyphs.findIndex(g => g.name === name);
+  if (existing >= 0) return existing;
+  let adv = 0;
+  for (const c of comps) { const g = project.glyphs.find(x => x.char === c); adv += g ? g.advanceWidth : Math.round(UPM * 0.6); }
+  const glyph = {
+    name, char: null, unicode: null, advanceWidth: adv,
+    layers: emptyLayers(project.masters),
+    kind: 'ligature', components: comps, ghost: comps.join(''),
+  };
+  project.glyphs.push(glyph);
+  return project.glyphs.length - 1;
+}
+
 function cloneContours(contours) {
   return contours.map(c => ({
     closed: c.closed,
@@ -171,5 +209,5 @@ function layerSignature(glyph, masterId) {
 module.exports = {
   UPM, DEFAULT_METRICS, glyphName,
   createProject, addMaster, contoursBounds, assignContoursToGlyph,
-  setGlyphContours, layerSignature, charsets,
+  setGlyphContours, layerSignature, createAlternate, createLigature, charsets,
 };
