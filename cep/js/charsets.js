@@ -20,33 +20,32 @@ const HANZI_COMMON =
 // ---- Alphabets (multi-select) -------------------------------------------
 // `cased` marks sets that honor the uppercase/lowercase-only toggles.
 const ALPHABETS = [
-  { key: 'latinUpper', label: 'Latin — Uppercase', cased: 'upper',
-    note: 'A–Z', glyphs: () => chars('ABCDEFGHIJKLMNOPQRSTUVWXYZ') },
-  { key: 'latinLower', label: 'Latin — Lowercase', cased: 'lower',
-    note: 'a–z', glyphs: () => chars('abcdefghijklmnopqrstuvwxyz') },
-  { key: 'numbers', label: 'Numbers', note: '0–9', glyphs: () => chars('0123456789') },
-  { key: 'punct', label: 'Punctuation & Symbols',
-    note: '. , : ; ! ? - … & @ …', glyphs: () => [].concat(
-      chars('.,:;!?\'"()[]{}-–—/\\&@#%+*=<>'), [{ char: ' ', unicode: 32 }]) },
-  { key: 'latinExt', label: 'Latin Extended', note: 'Multilingual',
+  { key: 'latinUpper', label: 'Latin Uppercase', cased: 'upper',
+    desc: 'A–Z capitals', glyphs: () => chars('ABCDEFGHIJKLMNOPQRSTUVWXYZ') },
+  { key: 'latinLower', label: 'Latin Lowercase', cased: 'lower',
+    desc: 'a–z lowercase', glyphs: () => chars('abcdefghijklmnopqrstuvwxyz') },
+  { key: 'latinExt', label: 'Latin Extended', desc: 'Accented & multilingual Latin',
     // Latin-1 Supplement letters (À–ÿ, minus × ÷) + Latin Extended-A (Ā–ſ):
     // covers Western/Central/Northern/Eastern European, Turkish, Baltic, etc.
     glyphs: () => range(0x00C0, 0x00FF).filter(g => g.unicode !== 0x00D7 && g.unicode !== 0x00F7)
       .concat(range(0x0100, 0x017F)) },
-  { key: 'cyrillic', label: 'Cyrillic (Russian)', note: 'А–я',
+  { key: 'cyrillic', label: 'Cyrillic', desc: 'Russian & Slavic scripts',
     glyphs: () => range('А'.codePointAt(0), 'я'.codePointAt(0)) },
-  { key: 'greek', label: 'Greek', note: 'Α–Ω α–ω',
+  { key: 'greek', label: 'Greek', desc: 'Α–Ω, α–ω',
     glyphs: () => [].concat(range('Α'.codePointAt(0), 'Ω'.codePointAt(0)), range('α'.codePointAt(0), 'ω'.codePointAt(0))) },
-  { key: 'arabic', label: 'Arabic', note: 'ا ب ت …',
+  { key: 'arabic', label: 'Arabic', desc: 'Basic Arabic letters',
     glyphs: () => chars('ابتثجحخدذرزسشصضطظعغفقكلمنهوي') },
-  { key: 'hebrew', label: 'Hebrew', note: 'א ב ג …',
+  { key: 'hebrew', label: 'Hebrew', desc: 'Hebrew alphabet',
     glyphs: () => chars('אבגדהוזחטיכךלמםנןסעפףצץקרשת') },
-  { key: 'hiragana', label: 'Japanese — Hiragana', note: 'あ い う …',
-    glyphs: () => chars('あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん') },
-  { key: 'katakana', label: 'Japanese — Katakana', note: 'ア イ ウ …',
+  { key: 'katakana', label: 'Japanese (Katakana)', desc: 'カタカナ',
     glyphs: () => chars('アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン') },
-  { key: 'hanzi', label: 'Chinese — Common Hanzi', note: '~120 most frequent',
+  { key: 'hiragana', label: 'Japanese (Hiragana)', desc: 'ひらがな',
+    glyphs: () => chars('あいうえおかきくけこさしすせそたちつてとなにぬねのはひふへほまみむめもやゆよらりるれろわをん') },
+  { key: 'hanzi', label: 'Chinese (Hanzi)', desc: 'Common Han characters',
     glyphs: () => chars(HANZI_COMMON) },
+  { key: 'numbers', label: 'Numbers', desc: '0–9', glyphs: () => chars('0123456789') },
+  { key: 'punct', label: 'Symbols', desc: 'Punctuation & symbols',
+    glyphs: () => [].concat(chars('.,:;!?\'"()[]{}-–—/\\&@#%+*=<>'), [{ char: ' ', unicode: 32 }]) },
 ];
 const ALPHABET_BY_KEY = {};
 ALPHABETS.forEach(a => { ALPHABET_BY_KEY[a.key] = a; });

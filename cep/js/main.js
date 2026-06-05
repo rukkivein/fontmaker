@@ -23,71 +23,123 @@ function $(id) { return document.getElementById(id); }
 function show(v) { $('view-new').classList.toggle('hidden', v !== 'new'); $('view-work').classList.toggle('hidden', v !== 'work'); }
 function evalScript(code) { return new Promise(function (r) { cs.evalScript(code, function (x) { r(x); }); }); }
 
-// ============ PAGE 1 — New Font ============
-function buildNewFontForm() {
-  var mt = $('nf-mastertype'); mt.innerHTML = '';
-  charsets.MASTER_TYPES.forEach(function (t) { var o = document.createElement('option'); o.value = t; o.textContent = t; mt.appendChild(o); });
+// ============ PAGE 1 — New Font (RuneType Glyphmaker) ============
+// Holds settings only; nothing is generated until Start Creating.
+var draft = null;
+function newDraft() {
+  return {
+    masters: [{ name: 'Regular' }],
+    lang: { latinUpper: true, latinLower: true, numbers: true, punct: true },
+    grid: { metrics: true },
+    toggle: 'lang',
+  };
+}
 
-  var list = $('nf-cs-list'); list.innerHTML = '';
-  var defaults = { latinUpper: 1, latinLower: 1, numbers: 1, punct: 1 };
-  charsets.ALPHABETS.forEach(function (a) {
-    var lab = document.createElement('label'); lab.className = 'check';
-    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = a.key;
-    if (defaults[a.key]) cb.checked = true;
-    cb.addEventListener('change', updateCsSummary);
-    var span = document.createElement('span');
-    span.innerHTML = a.label + (a.note ? ' <i class="muted">' + a.note + '</i>' : '');
-    lab.appendChild(cb); lab.appendChild(span); list.appendChild(lab);
+function buildPage1() {
+  if (!draft) draft = newDraft();
+  renderMasters(); setToggle(draft.toggle); renderProfile();
+}
+
+// --- masters ---
+function renderMasters() {
+  var list = $('m-list'); list.innerHTML = '';
+  draft.masters.forEach(function (m, i) {
+    var row = document.createElement('div'); row.className = 'm-row';
+    var nm = document.createElement('span'); nm.textContent = m.name; row.appendChild(nm);
+    if (i > 0) {
+      var x = document.createElement('button'); x.className = 'm-x'; x.textContent = '✕';
+      x.addEventListener('click', function (e) { e.stopPropagation(); draft.masters.splice(i, 1); renderMasters(); renderProfile(); });
+      row.appendChild(x);
+    } else { var tag = document.createElement('span'); tag.className = 'm-tag'; tag.textContent = 'default'; row.appendChild(tag); }
+    list.appendChild(row);
   });
-  updateCsSummary();
+}
+function onAddMaster() {
+  var name = $('m-name').value.trim();
+  if (!name) return;
+  if (draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); })) return;
+  draft.masters.push({ name: name });
+  renderMasters(); renderProfile();
+  $('m-list').classList.remove('hidden');
+}
 
-  var grids = $('nf-grids'); grids.innerHTML = '';
-  charsets.GRIDS.forEach(function (g, i) {
-    var card = document.createElement('label'); card.className = 'gridcard';
-    var cb = document.createElement('input'); cb.type = 'checkbox'; cb.name = 'grid'; cb.value = g.key;
-    if (i === 0) cb.checked = true;
-    cb.addEventListener('change', updateGridWarn);
-    var t = document.createElement('div'); t.className = 'gridcard-t'; t.textContent = g.label;
-    var n = document.createElement('div'); n.className = 'gridcard-n'; n.textContent = g.note;
-    card.appendChild(cb); card.appendChild(t); card.appendChild(n); grids.appendChild(card);
+// --- the two toggles + shared right list ---
+function setToggle(which) {
+  draft.toggle = which;
+  $('tg-lang').classList.toggle('active', which === 'lang');
+  $('tg-grid').classList.toggle('active', which === 'grid');
+  $('tg-lang').querySelector('.pill-ar').textContent = which === 'lang' ? '◀' : '▶';
+  $('tg-grid').querySelector('.pill-ar').textContent = which === 'grid' ? '◀' : '▶';
+  renderRightList(); updatePillLabels();
+}
+function curItems() { return draft.toggle === 'lang' ? charsets.ALPHABETS : charsets.GRIDS; }
+function curSel() { return draft.toggle === 'lang' ? draft.lang : draft.grid; }
+function renderRightList() {
+  var box = $('rune-list'); box.innerHTML = '';
+  var sel = curSel();
+  curItems().forEach(function (it) {
+    var on = !!sel[it.key];
+    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '');
+    var txt = document.createElement('div'); txt.className = 'ri-txt';
+    txt.innerHTML = '<div class="ri-t">' + it.label + '</div><div class="ri-d">' + (it.desc || it.note || '') + '</div>';
+    var btn = document.createElement('button'); btn.className = 'ri-btn'; btn.textContent = on ? '✕' : '+';
+    btn.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    row.appendChild(txt); row.appendChild(btn); box.appendChild(row);
   });
-  updateGridWarn();
+}
+function selectedLabels(which) {
+  var sel = which === 'lang' ? draft.lang : draft.grid;
+  var items = which === 'lang' ? charsets.ALPHABETS : charsets.GRIDS;
+  return items.filter(function (it) { return sel[it.key]; }).map(function (it) { return it.label; });
+}
+function updatePillLabels() {
+  var l = selectedLabels('lang'), g = selectedLabels('grid');
+  $('tg-lang-lbl').textContent = l.length ? l.join(', ') : 'Language Support';
+  $('tg-grid-lbl').textContent = g.length ? g.join(', ') : 'Supported Grids';
 }
 
-function selectedAlphabets() {
-  var out = [], b = $('nf-cs-list').querySelectorAll('input');
-  for (var i = 0; i < b.length; i++) if (b[i].checked) out.push(b[i].value);
-  return out;
+// --- profile (responsive: values shrink to never push the actions) ---
+function renderProfile() {
+  var p = $('profile');
+  var fam = ($('nf-family') && $('nf-family').value.trim()) || 'Untitled';
+  var masters = draft.masters.map(function (m) { return m.name; }).join(', ');
+  var langs = selectedLabels('lang').join(', ') || '—';
+  var grids = selectedLabels('grid').join(', ') || '—';
+  p.innerHTML =
+    '<div class="p-h">FONT NAME</div><div class="p-v">' + fam + '</div>' +
+    '<div class="p-h">MASTERS</div><div class="p-v">' + masters + '</div>' +
+    '<div class="p-h">LANGUAGE SUPPORT</div><div class="p-v">' + langs + '</div>' +
+    '<div class="p-h">GRIDS</div><div class="p-v">' + grids + '</div>';
+  fitProfile();
 }
-function selectedGrids() {
-  var out = [], b = $('nf-grids').querySelectorAll('input');
-  for (var i = 0; i < b.length; i++) if (b[i].checked) out.push(b[i].value);
-  return out;
-}
-function updateCsSummary() {
-  var keys = selectedAlphabets();
-  var n = charsets.collectGlyphs(keys, {}).length;
-  $('nf-cs-summary').textContent = keys.length ? (keys.length + ' set' + (keys.length > 1 ? 's' : '') + ' · ' + n + ' glyphs') : 'Select…';
-}
-function updateGridWarn() {
-  var n = selectedGrids().length;
-  var w = $('nf-gridwarn');
-  if (n >= 3) { w.textContent = '⚠ ' + n + ' grids overlaid — the canvas may get busy.'; w.classList.remove('hidden'); }
-  else w.classList.add('hidden');
+function fitProfile() {
+  var p = $('profile'); if (!p) return;
+  var size = 12;
+  p.style.setProperty('--pv', size + 'px');
+  while (p.scrollHeight > p.clientHeight && size > 7) { size -= 0.5; p.style.setProperty('--pv', size + 'px'); }
 }
 
-function onCreateFont() {
-  var alphabets = selectedAlphabets();
-  if (!alphabets.length) { $('nf-status').textContent = 'Pick at least one character set.'; $('nf-status').className = 'status err'; return; }
-  var grids = selectedGrids(); if (!grids.length) grids = ['metrics'];
+// --- import an existing .ai project (just opens the file in Illustrator) ---
+function onImport() {
+  var js = '(function(){var f=File.openDialog("Open a project","Illustrator:*.ai;*.svg");if(!f)return "";app.open(f);return f.fsName;})()';
+  evalScript(js).then(function (p) { /* opened in Illustrator */ });
+}
+
+// --- Start Creating: build the font from the draft, then enter the workspace ---
+function onStartCreating() {
+  var alphabets = Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; });
+  if (!alphabets.length) { setToggle('lang'); return; }
+  var grids = Object.keys(draft.grid).filter(function (k) { return draft.grid[k]; });
+  if (!grids.length) grids = ['metrics'];
+  var m0 = draft.masters[0];
   var project = glyphset.createProject({
-    familyName: $('nf-family').value.trim() || 'Untitled',
-    version: $('nf-version').value.trim() || '1.000',
-    masterType: $('nf-mastertype').value, masterName: $('nf-mastertype').value,
+    familyName: ($('nf-family').value.trim() || 'Untitled'),
+    masterName: m0.name, masterType: m0.name,
     alphabets: alphabets, grids: grids,
   });
+  for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
-  $('nf-status').textContent = '';
+  draft = null;
   show('work'); renderWorkspace();
   generateIllustratorProject(project);
 }
@@ -308,11 +360,18 @@ function onExport() {
 
 // ---- boot ----
 function boot() {
-  buildNewFontForm(); show('new');
-  $('nf-cs-btn').addEventListener('click', function () { $('nf-cs-list').classList.toggle('hidden'); });
-  $('nf-create').addEventListener('click', onCreateFont);
-  $('nf-cancel').addEventListener('click', function () { if (fonts.length) { show('work'); renderWorkspace(); } });
-  $('w-newfont').addEventListener('click', function () { $('nf-cancel').classList.remove('hidden'); buildNewFontForm(); show('new'); });
+  buildPage1(); show('new');
+  // page 1 (RuneType)
+  $('m-add').addEventListener('click', onAddMaster);
+  $('m-name').addEventListener('keydown', function (e) { if (e.key === 'Enter') onAddMaster(); });
+  $('m-ddbtn').addEventListener('click', function () { $('m-list').classList.toggle('hidden'); });
+  $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
+  $('tg-grid').addEventListener('click', function () { setToggle('grid'); });
+  $('nf-family').addEventListener('input', renderProfile);
+  $('nf-import').addEventListener('click', onImport);
+  $('nf-create').addEventListener('click', onStartCreating);
+  $('w-newfont').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
+  // page 2 (workspace)
   $('assignBtn').addEventListener('click', onAssign);
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
