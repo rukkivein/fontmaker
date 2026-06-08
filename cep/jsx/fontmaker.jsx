@@ -216,21 +216,27 @@ function fmOpenGlyph(arg) {
   try {
     var cfg = eval('(' + arg + ')');
     var M = cfg.metrics, grids = cfg.grids || [];
-    var span = (M.ascender - M.descender);
-    var AH = span * FM_SCALE;
+    var AH = (M.ascender - M.descender) * FM_SCALE;
     var AW = Math.round((cfg.advanceWidth || Math.round((M.ascender - M.descender) * 0.6)) * FM_SCALE);
-    // reuse the previous edit doc
-    try { if ($.global.fmEditDoc) { $.global.fmEditDoc.close(SaveOptions.DONOTSAVECHANGES); } } catch (eC) {}
-    $.global.fmEditDoc = null;
 
-    var doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200);
+    // REUSE one edit document (never close it — closing the last doc shows the
+    // Home screen and hides the panel). If our doc is gone, make a new one.
+    var doc = null;
+    try { if ($.global.fmEditDoc && $.global.fmEditDoc.name !== undefined) doc = $.global.fmEditDoc; } catch (eR) { doc = null; }
+    if (doc) { app.activeDocument = doc; }
+    else { doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200); $.global.fmEditDoc = doc; }
+
     var left = 100, top = -100, right = left + AW, bottom = top - AH;
     doc.artboards[0].artboardRect = [left, top, right, bottom];
     try { doc.artboards[0].name = cfg.name; } catch (eN) {}
 
+    // Fresh layers, then drop any leftover layers from the previous glyph.
     var refLayer = doc.layers.add(); refLayer.name = 'Reference (locked)';
-    var artLayer = doc.layers.add(); artLayer.name = 'Artwork';
-    artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
+    var artLayer = doc.layers.add(); artLayer.name = 'Artwork'; artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
+    for (var li = doc.layers.length - 1; li >= 0; li--) {
+      var L = doc.layers[li];
+      if (L !== refLayer && L !== artLayer) { try { L.locked = false; L.remove(); } catch (eX) {} }
+    }
 
     fmDrawGrids(refLayer, grids, M, left, right, bottom);
     fmGhost(refLayer, cfg.ghost || cfg.char || '', left, right, bottom, M, cfg.unitsPerEm || 1000);
@@ -238,7 +244,6 @@ function fmOpenGlyph(arg) {
 
     if (cfg.contours && cfg.contours.length) fmDrawContours(artLayer, cfg.contours, left, bottom, M);
     doc.activeLayer = artLayer;
-    $.global.fmEditDoc = doc;
     try { app.executeMenuCommand('fitall'); } catch (eF) {}
     return '{"ok":true,"name":"' + (cfg.name || '') + '"}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }

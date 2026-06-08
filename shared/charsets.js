@@ -87,7 +87,10 @@ ALPHABETS.forEach(a => { ALPHABET_BY_KEY[a.key] = a; });
 
 // ---- Grid presets (single-select, with purpose notes) -------------------
 const PHI = 1.61803398875;
-const BASE = { ascender: 800, capHeight: 700, xHeight: 500, baseline: 0, descender: -200 };
+// Standard metrics (UPM 1000), normalized from Arial so the Arial ghost lands
+// exactly on the lines: cap 1466/2048→716, x 1062/2048→519, asc 1638/2048→800,
+// desc 410/2048→-200. With a ghost drawn at the em size, cap = 0.716·em = 716.
+const BASE = { ascender: 800, capHeight: 716, xHeight: 519, baseline: 0, descender: -200 };
 
 const GRIDS = [
   { key: 'metrics', label: 'Metrics Grid',

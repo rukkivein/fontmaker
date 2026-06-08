@@ -7,7 +7,9 @@
 const charsets = require('./charsets.js');
 
 const UPM = 1000;
-const DEFAULT_METRICS = { ascender: 800, capHeight: 700, xHeight: 500, baseline: 0, descender: -200 };
+// Arial-normalized standard metrics (UPM 1000) so the Arial ghost sits exactly
+// on the grid lines (cap 716, x 519). See shared/charsets.js BASE.
+const DEFAULT_METRICS = { ascender: 800, capHeight: 716, xHeight: 519, baseline: 0, descender: -200 };
 const LSB = 60; // left side bearing used when placing a shape
 
 // --- glyph naming (subset of the Adobe Glyph List) -----------------------

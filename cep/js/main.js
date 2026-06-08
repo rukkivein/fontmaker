@@ -249,8 +249,9 @@ function renderGrid() {
     } else {
       cell.textContent = label;
     }
-    cell.title = g.name;
-    cell.addEventListener('click', function () { selectedSlot = i; updateAssign(); openGlyph(i); renderGrid(); });
+    cell.title = g.name + ' — double-click to edit';
+    cell.addEventListener('click', function () { selectedSlot = i; updateAssign(); renderGrid(); });
+    cell.addEventListener('dblclick', function () { selectedSlot = i; updateAssign(); openGlyph(i); renderGrid(); });
     grid.appendChild(cell);
   });
   var filled = f.glyphs.filter(isFilled).length;
