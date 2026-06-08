@@ -226,6 +226,8 @@ function fmOpenGlyph(arg) {
     if (doc) { app.activeDocument = doc; }
     else { doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200); $.global.fmEditDoc = doc; }
 
+    // Exactly ONE artboard — never add a new artboard beside an existing one.
+    while (doc.artboards.length > 1) { try { doc.artboards.remove(doc.artboards.length - 1); } catch (eA) { break; } }
     var left = 100, top = -100, right = left + AW, bottom = top - AH;
     doc.artboards[0].artboardRect = [left, top, right, bottom];
     try { doc.artboards[0].name = cfg.name; } catch (eN) {}
@@ -289,42 +291,3 @@ function fmReadActive() {
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 
-function fmCreateProject(arg) {
-  try {
-    var cfg = eval('(' + arg + ')');
-    var M = cfg.metrics, glyphs = cfg.glyphs, grids = cfg.grids || [];
-    var span = (M.ascender - M.descender);
-    var AH = span * FM_SCALE;
-    var AW = Math.round(AH * 0.72);
-    var GAP = Math.round(AH * 0.16);
-    var COLS = 8;
-    var rows = Math.ceil(glyphs.length / COLS);
-
-    var docW = 200 + COLS * (AW + GAP);
-    var docH = 200 + rows * (AH + GAP);
-    var doc = app.documents.add(DocumentColorSpace.RGB, docW, docH);
-
-    var refLayer = doc.layers.add(); refLayer.name = 'Reference (locked)';
-    var artLayer = doc.layers.add(); artLayer.name = 'Artwork';
-    artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
-
-    for (var i = 0; i < glyphs.length; i++) {
-      var col = i % COLS, row = Math.floor(i / COLS);
-      var left = 100 + col * (AW + GAP);
-      var top = -100 - row * (AH + GAP);
-      var right = left + AW, bottom = top - AH;
-      var ab;
-      if (i === 0) { ab = doc.artboards[0]; ab.artboardRect = [left, top, right, bottom]; }
-      else { doc.artboards.add([left, top, right, bottom]); ab = doc.artboards[doc.artboards.length - 1]; }
-      try { ab.name = glyphs[i].name; } catch (eN) {}
-      fmDrawGrids(refLayer, grids, M, left, right, bottom);
-      fmGhost(refLayer, glyphs[i].char, left, right, bottom, M, cfg.unitsPerEm || 1000);
-    }
-    refLayer.locked = true;
-    doc.activeLayer = artLayer;
-    try { app.executeMenuCommand('fitall'); } catch (eF) {}
-    return '{"ok":true,"artboards":' + glyphs.length + ',"doc":"' + doc.name + '"}';
-  } catch (e) {
-    return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}';
-  }
-}

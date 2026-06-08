@@ -160,27 +160,6 @@ function onStartCreating() {
   show('work'); renderWorkspace();
 }
 
-// Build the Illustrator document up front: one artboard per glyph with the
-// selected grids drawn and a ghost letter — "like a script", on Create Font.
-function generateIllustratorProject(project) {
-  setStatus('Creating Illustrator project…');
-  var cfg = {
-    familyName: project.meta.familyName,
-    unitsPerEm: project.unitsPerEm,
-    metrics: project.metrics,
-    grids: project.grids.map(function (g) {
-      return { kind: g.kind, cell: g.cell, divisions: g.divisions, penAngle: g.penAngle, overshoot: g.overshoot };
-    }),
-    glyphs: project.glyphs.map(function (g) { return { char: g.char, name: g.name }; }),
-  };
-  var payload = JSON.stringify(cfg);
-  evalScript('fmCreateProject(' + JSON.stringify(payload) + ')').then(function (raw) {
-    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (r && r.ok) setStatus('Project ready · ' + r.artboards + ' artboards in ' + r.doc, 'ok');
-    else setStatus('Project doc not created: ' + ((r && r.error) || 'unknown') + ' (panel still works)', 'err');
-  });
-}
-
 // ============ PAGE 2 — Workspace ============
 function curFont() { return fonts[activeFont]; }
 function curMasterId() { return curFont().masters[0].id; }
