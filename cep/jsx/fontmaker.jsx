@@ -187,6 +187,63 @@ function fmAppendArtboard(arg) {
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 
+// Draw font-unit contours back into Illustrator (inverse of fmReadActive's map):
+// docX = left + fx*scale, docY = baseline + fy*scale (Y-up, no flip).
+function fmDrawContours(layer, contours, left, bottom, M) {
+  var baseY = bottom + (0 - M.descender) * FM_SCALE;
+  function mx(x) { return left + x * FM_SCALE; }
+  function my(y) { return baseY + y * FM_SCALE; }
+  for (var c = 0; c < contours.length; c++) {
+    var ct = contours[c], pts = ct.points;
+    if (!pts || pts.length < 2) continue;
+    var p = layer.pathItems.add();
+    p.filled = true; p.stroked = false; p.closed = !!ct.closed;
+    for (var i = 0; i < pts.length; i++) {
+      var s = pts[i];
+      var pp = p.pathPoints.add();
+      pp.anchor = [mx(s.x), my(s.y)];
+      pp.leftDirection = s.handleIn ? [mx(s.handleIn.x), my(s.handleIn.y)] : pp.anchor;
+      pp.rightDirection = s.handleOut ? [mx(s.handleOut.x), my(s.handleOut.y)] : pp.anchor;
+      pp.pointType = (s.type === 'smooth') ? PointType.SMOOTH : PointType.CORNER;
+    }
+  }
+}
+
+// Open ONE glyph for editing: a single-artboard document with the selected
+// grids + ghost (and any existing/dragged artwork), reusing one edit doc so we
+// don't spawn a document per click. Edits sync back to the plugin (no file).
+function fmOpenGlyph(arg) {
+  try {
+    var cfg = eval('(' + arg + ')');
+    var M = cfg.metrics, grids = cfg.grids || [];
+    var span = (M.ascender - M.descender);
+    var AH = span * FM_SCALE;
+    var AW = Math.round((cfg.advanceWidth || Math.round((M.ascender - M.descender) * 0.6)) * FM_SCALE);
+    // reuse the previous edit doc
+    try { if ($.global.fmEditDoc) { $.global.fmEditDoc.close(SaveOptions.DONOTSAVECHANGES); } } catch (eC) {}
+    $.global.fmEditDoc = null;
+
+    var doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200);
+    var left = 100, top = -100, right = left + AW, bottom = top - AH;
+    doc.artboards[0].artboardRect = [left, top, right, bottom];
+    try { doc.artboards[0].name = cfg.name; } catch (eN) {}
+
+    var refLayer = doc.layers.add(); refLayer.name = 'Reference (locked)';
+    var artLayer = doc.layers.add(); artLayer.name = 'Artwork';
+    artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
+
+    fmDrawGrids(refLayer, grids, M, left, right, bottom);
+    fmGhost(refLayer, cfg.ghost || cfg.char || '', left, right, bottom, M, cfg.unitsPerEm || 1000);
+    refLayer.locked = true;
+
+    if (cfg.contours && cfg.contours.length) fmDrawContours(artLayer, cfg.contours, left, bottom, M);
+    doc.activeLayer = artLayer;
+    $.global.fmEditDoc = doc;
+    try { app.executeMenuCommand('fitall'); } catch (eF) {}
+    return '{"ok":true,"name":"' + (cfg.name || '') + '"}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+
 // Collect PathItems on a container whose ink center lies inside an artboard rect.
 function fmCollectInRect(container, rect, out) {
   var items = container.pageItems;

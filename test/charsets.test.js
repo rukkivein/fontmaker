@@ -71,4 +71,18 @@ ok(p.glyphs.every(g => g.layers[m2.id] && g.layers[m2.id].contours.length === 0)
 // --- ids are unique across masters/projects ---
 ok(p.masters[0].id !== p.masters[1].id, 'master ids are unique');
 
+// --- glyphs are tagged with their source alphabet (for filtering) ---
+const pf = glyphset.createProject({ alphabets: ['latinUpper', 'latinWest', 'numbers'] });
+ok(pf.glyphs.find(g => g.char === 'A').alphabet === 'latinUpper', 'A tagged latinUpper');
+ok(pf.glyphs.find(g => g.char === 'Ä').alphabet === 'latinWest', 'Ä tagged latinWest');
+ok(pf.glyphs.find(g => g.char === '5').alphabet === 'numbers', '5 tagged numbers');
+
+// --- search: similar-letter matching ---
+const A = pf.glyphs.find(g => g.char === 'A');
+const Adia = pf.glyphs.find(g => g.char === 'Ä');
+ok(glyphset.glyphMatches(A, 'a') && glyphset.glyphMatches(Adia, 'a'), '"a" matches A and Ä (base letter)');
+ok(!glyphset.glyphMatches(A, 'b'), '"b" does not match A');
+ok(glyphset.glyphMatches(A, ''), 'empty query matches everything');
+ok(glyphset.baseLetter('ş') === 's', 'baseLetter strips ş → s');
+
 console.log('\ncharsets / New Font project OK');

@@ -17,6 +17,9 @@ var fs = require('fs');
 var fonts = [];          // open fonts (each is a single-master project)
 var activeFont = -1;
 var selectedSlot = -1;
+var openGlyphIndex = -1; // glyph currently open for editing in Illustrator
+var searchQuery = '';
+var alphaFilter = null;  // alphabet key to filter the grid, or null = all
 var faceSeq = 0;         // unique @font-face family per rebuild
 
 function $(id) { return document.getElementById(id); }
@@ -150,9 +153,11 @@ function onStartCreating() {
   });
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
+  openGlyphIndex = -1; searchQuery = ''; alphaFilter = null;
   draft = null;
+  // No document is created here — the plugin just shows the glyphs. A per-glyph
+  // artboard opens only when you click a letter (openGlyph).
   show('work'); renderWorkspace();
-  generateIllustratorProject(project);
 }
 
 // Build the Illustrator document up front: one artboard per glyph with the
@@ -222,12 +227,20 @@ function glyphThumb(g) {
          '<path d="' + contoursToSVG(contours) + '" fill="#eaeaee"/></svg>';
 }
 
+function glyphVisible(g) {
+  if (alphaFilter && g.alphabet !== alphaFilter) return false;
+  return glyphset.glyphMatches(g, searchQuery);
+}
+
 function renderGrid() {
   var grid = $('grid'); grid.innerHTML = '';
   var f = curFont();
+  var shown = 0;
   f.glyphs.forEach(function (g, i) {
+    if (!glyphVisible(g)) return;
+    shown++;
     var cell = document.createElement('div');
-    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '') + (i === openGlyphIndex ? ' open' : '');
     var label = g.char != null ? (g.char === ' ' ? '␣' : g.char) : g.name;
     if (g.char == null) cell.className += ' named';
     if (isFilled(g)) {
@@ -236,13 +249,55 @@ function renderGrid() {
     } else {
       cell.textContent = label;
     }
-    cell.addEventListener('click', function () { selectedSlot = i; renderGrid(); updateAssign(); });
-    cell.addEventListener('dblclick', function () { selectedSlot = i; updateAssign(); onAssign(); });
+    cell.title = g.name;
+    cell.addEventListener('click', function () { selectedSlot = i; updateAssign(); openGlyph(i); renderGrid(); });
     grid.appendChild(cell);
   });
   var filled = f.glyphs.filter(isFilled).length;
-  $('filledCount').textContent = filled + ' / ' + f.glyphs.length;
+  $('filledCount').textContent = filled + ' / ' + f.glyphs.length + (shown !== f.glyphs.length ? ' · ' + shown + ' shown' : '');
   $('exportBtn').disabled = filled === 0;
+}
+
+// Alphabet filter chips (built from the alphabets present in the font).
+function renderFilters() {
+  var box = $('glyphFilters'); if (!box) return;
+  box.innerHTML = '';
+  var f = curFont();
+  var keys = [];
+  f.glyphs.forEach(function (g) { if (keys.indexOf(g.alphabet) < 0) keys.push(g.alphabet); });
+  function chip(label, key) {
+    var c = document.createElement('div');
+    c.className = 'fchip' + ((alphaFilter === key) ? ' active' : '');
+    c.textContent = label;
+    c.addEventListener('click', function () { alphaFilter = key; renderFilters(); renderGrid(); });
+    box.appendChild(c);
+  }
+  chip('All', null);
+  keys.forEach(function (k) {
+    var a = charsets.ALPHABET_BY_KEY[k];
+    chip(a ? a.label : k, k);
+  });
+}
+
+// Open a glyph for editing in Illustrator (its own artboard, grids + ghost +
+// any existing artwork). Edits stream back via the live-sync poll (no file).
+function openGlyph(i) {
+  if (i === openGlyphIndex) return; // already open
+  openGlyphIndex = i;
+  var f = curFont(), g = f.glyphs[i];
+  var layer = g.layers[curMasterId()];
+  var cfg = {
+    metrics: f.metrics, unitsPerEm: f.unitsPerEm, advanceWidth: g.advanceWidth,
+    name: g.name, char: g.char, ghost: g.ghost || g.char || '',
+    grids: f.grids.map(function (x) { return { kind: x.kind, cell: x.cell, penAngle: x.penAngle, overshoot: x.overshoot }; }),
+    contours: (layer && layer.contours) ? layer.contours : [],
+  };
+  setStatus('Opening "' + (g.char || g.name) + '" for editing…');
+  evalScript('fmOpenGlyph(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (r && r.ok) setStatus('Editing "' + (g.char || g.name) + '" · draws sync back automatically', 'ok');
+    else setStatus('Could not open glyph: ' + ((r && r.error) || '?'), 'err');
+  });
 }
 
 function updateAssign() {
@@ -282,7 +337,7 @@ function onLig() {
 }
 
 function renderWorkspace() {
-  renderTabs(); renderGrid(); updateAssign(); refreshTester();
+  renderTabs(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
   setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
 
@@ -336,7 +391,7 @@ function pollActive() {
   evalScript('fmReadActive()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { return; }
     if (!res || !res.ok || !res.paths || !res.paths.length) return;
-    var f = curFont(), idx = res.index;
+    var f = curFont(), idx = openGlyphIndex; // the glyph currently being edited
     if (idx < 0 || idx >= f.glyphs.length) return;
     var contours = ilbridge.contoursFromArtboard(res.paths, res.rect, res.scale, f.metrics.descender);
     if (!contours.length) return;
@@ -384,6 +439,7 @@ function boot() {
   $('nf-create').addEventListener('click', onStartCreating);
   $('w-newfont').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
   // page 2 (workspace)
+  $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
   $('assignBtn').addEventListener('click', onAssign);
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);

@@ -56,6 +56,7 @@ function createProject(opts) {
     name: glyphName(it.char),
     char: it.char,
     unicode: it.unicode,
+    alphabet: it.alphabet || 'custom',
     advanceWidth: Math.round(UPM * 0.6),
     layers: emptyLayers(masters),
   }));
@@ -206,8 +207,27 @@ function layerSignature(glyph, masterId) {
   return s;
 }
 
+// Strip diacritics so a search for "a" also finds à á â ã ä å ā ă ą …
+function baseLetter(ch) {
+  try { return (ch || '').normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  catch (e) { return ch || ''; }
+}
+// Does a glyph match a search query? Matches the exact char, the same base
+// letter (accents stripped), or the glyph name containing the query.
+function glyphMatches(glyph, query) {
+  const q = (query || '').trim();
+  if (!q) return true;
+  if (glyph.char === q) return true;
+  const gb = baseLetter(glyph.char).toLowerCase();
+  const qb = baseLetter(q).toLowerCase();
+  if (gb && gb === qb) return true;
+  if ((glyph.name || '').toLowerCase().indexOf(q.toLowerCase()) >= 0) return true;
+  return false;
+}
+
 module.exports = {
   UPM, DEFAULT_METRICS, glyphName,
   createProject, addMaster, contoursBounds, assignContoursToGlyph,
-  setGlyphContours, layerSignature, createAlternate, createLigature, charsets,
+  setGlyphContours, layerSignature, createAlternate, createLigature,
+  baseLetter, glyphMatches, charsets,
 };

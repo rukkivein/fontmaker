@@ -131,7 +131,7 @@ function collectGlyphs(alphabetKeys, opts) {
     for (const g of a.glyphs()) {
       if (seen.has(g.unicode)) continue;
       seen.add(g.unicode);
-      out.push(g);
+      out.push({ char: g.char, unicode: g.unicode, alphabet: key });
     }
   }
   return out;
