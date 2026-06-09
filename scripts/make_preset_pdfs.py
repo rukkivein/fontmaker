@@ -114,64 +114,72 @@ def render(preset):
     pg = Page(W, H)
     d = preset['params']; m = preset['metrics']; grids = preset['grids']
     advance = round(UPM * (0.40 + d['width'] / 100.0 * 0.35))
-    span = ASC - DESC
-    boxH = 560.0
-    scale = boxH / span
+    scale = 560.0 / (ASC - DESC)
     ox = (W - advance * scale) / 2.0
     oy = 150.0
     def X(fx): return ox + fx * scale
     def Y(fy): return oy + (fy - DESC) * scale
+    cxp = X(advance / 2.0)
+    cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
+    wf = next((g['wf'] for g in grids if g.get('kind') == 'circle'), 0.86)
+    def L(x1, y1, x2, y2): pg.line(X(x1), Y(y1), X(x2), Y(y2))
+    def circ(lo, hi, wfac):
+        ry = (Y(hi) - Y(lo)) / 2.0
+        pg.ellipse(cxp, (Y(lo) + Y(hi)) / 2.0, ry * wfac, ry)
 
-    pg.text(ox, H - 90, 'RuneType Glyphmaker  —  Grid Preset', 11, 0.45)
+    pg.text(ox, H - 90, 'RuneType Glyphmaker  -  Grid Preset', 11, 0.45)
     pg.text(ox, H - 120, preset['name'], 26, 0.1, bold=True)
     pg.text(ox, H - 138, preset['tier'] + ' preset', 11, 0.45)
     keys = ['xHeight', 'weight', 'contrast', 'aperture', 'roundness', 'penAngle', 'geometry', 'gridDensity']
     pg.text(ox, H - 156, '   '.join('%s %d' % (k, d[k]) for k in keys), 8.5, 0.5)
 
-    # sidebearings (verticals)
-    pg.color(0.6); pg.lw(0.6)
-    pg.line(X(0), Y(DESC), X(0), Y(ASC))
-    pg.line(X(advance), Y(DESC), X(advance), Y(ASC))
-
-    # em grid
-    for g in grids:
-        if g.get('kind') == 'emsquare':
-            cell = g.get('cell', 62); pg.lw(0.35); pg.color(0.85)
-            x = cell
-            while x < advance:
-                pg.line(X(x), Y(DESC), X(x), Y(ASC)); x += cell
-            y = DESC + cell
-            while y < ASC:
-                pg.line(X(0), Y(y), X(advance), Y(y)); y += cell
+    # frame / sidebearings
+    pg.color(0.55); pg.lw(0.6)
+    L(0, DESC, 0, ASC); L(advance, DESC, advance, ASC)
+    # fine em grid
+    pg.lw(0.3); pg.color(0.87)
+    x = cell
+    while x < advance:
+        L(x, DESC, x, ASC); x += cell
+    y = DESC + cell
+    while y < ASC:
+        L(0, y, advance, y); y += cell
+    # columns + thirds inside the cap box
+    pg.lw(0.35); pg.color(0.74)
+    for fx in (advance / 4.0, advance / 2.0, 3 * advance / 4.0):
+        L(fx, 0, fx, CAP)
+    for fy in (CAP / 4.0, CAP / 2.0, 3 * CAP / 4.0):
+        L(0, fy, advance, fy)
+    # diagonal web (corners X + to apex + to bottom midpoint)
+    pg.lw(0.35); pg.color(0.66)
+    L(0, 0, advance, CAP); L(advance, 0, 0, CAP)
+    L(0, 0, advance / 2.0, CAP); L(advance, 0, advance / 2.0, CAP)
+    L(0, CAP, advance / 2.0, 0); L(advance, CAP, advance / 2.0, 0)
     # broad-nib slants
     for g in grids:
         if g.get('kind') == 'broadnib':
-            ang = math.radians(g.get('penAngle', 30)); dy = max(math.tan(ang), 0.01)
-            pg.lw(0.5); pg.color(0.78); step = CAP / 3.0; sx = -advance
+            dy = max(math.tan(math.radians(g.get('penAngle', 30))), 0.01)
+            pg.lw(0.4); pg.color(0.8); sx = -advance
             while sx < advance * 2:
-                pg.line(X(sx), Y(DESC), X(sx + span / dy), Y(ASC)); sx += step
-    # construction circles — outer bowls + inner counters at cap, x-height and
-    # the ascender band, so round letters have a fuller circle grid.
-    wf = 0.86
-    for g in grids:
-        if g.get('kind') == 'circle':
-            wf = g.get('wf', 0.86); pg.lw(0.55); pg.color(0.5)
-            bands = [(0, CAP), (0, m['xHeight']), (m['xHeight'], CAP)]
-            for lo, hi in bands:
-                cy = (Y(lo) + Y(hi)) / 2.0; ry = (Y(hi) - Y(lo)) / 2.0
-                inn = ry * 0.17
-                pg.ellipse(X(advance / 2.0), cy, ry * wf, ry)
-                pg.ellipse(X(advance / 2.0), cy, (ry - inn) * wf, ry - inn)
+                L(sx, DESC, sx + (ASC - DESC) / dy, ASC); sx += CAP / 3.0
+    # circles: big cap ellipse + wide middle ellipse + 3 stacked circles + x circle
+    pg.lw(0.5); pg.color(0.5)
+    circ(0, CAP, wf)
+    pg.ellipse(cxp, Y(CAP / 2.0), advance / 2.0 * scale, CAP / 4.0 * scale)
+    R = CAP / 4.0
+    for cyU in (R, CAP / 2.0, CAP - R):
+        pg.ellipse(cxp, Y(cyU), R * scale, R * scale)
+    circ(0, m['xHeight'], wf)
     # overshoot zones (dashed)
     for g in grids:
         if g.get('kind') == 'superellipse':
-            ov = g.get('overshoot', 12); pg.lw(0.7); pg.color(0.6); pg.dash(True)
+            ov = g.get('overshoot', 12); pg.lw(0.5); pg.color(0.6); pg.dash(True)
             for fy in (0 - ov, CAP + ov, m['xHeight'] + ov):
-                pg.line(X(0), Y(fy), X(advance), Y(fy))
+                L(0, fy, advance, fy)
             pg.dash(False)
-    # metric lines (over the grid, thick & visible)
-    def mline(fy, g, w, label):
-        pg.lw(w); pg.color(g); pg.line(X(0), Y(fy), X(advance), Y(fy))
+    # metric lines + labels (over the web)
+    def mline(fy, gc, w, label):
+        pg.lw(w); pg.color(gc); L(0, fy, advance, fy)
         pg.text(X(advance) + 7, Y(fy) - 3, label, 7.5, 0.4)
     mline(ASC, 0.5, 0.8, 'ascender %d' % ASC)
     mline(CAP, 0.38, 0.9, 'cap height %d' % CAP)
@@ -179,11 +187,9 @@ def render(preset):
     mline(0, 0.08, 1.2, 'baseline 0')
     mline(DESC, 0.5, 0.8, 'descender %d' % DESC)
 
-    # the single construction letter, on the grid, see-through
-    cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
+    # the construction A on top, see-through
     draw_A(pg, X, Y, advance, d, cell)
-
-    pg.text(ox, 90, 'Construction grid from the Font DNA — metric lines, em grid, circles, broad-nib slants & overshoot. The G is drawn to the grid at low opacity.', 8, 0.5)
+    pg.text(ox, 90, 'Construction web from the Font DNA: frame, em grid, diagonals, stacked circles & overshoot. The A is drawn to the grid at low opacity.', 8, 0.5)
     return pg
 
 def main():
