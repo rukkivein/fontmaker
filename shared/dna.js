@@ -50,6 +50,39 @@ const ADVANCED = [
   { name: 'Modular', params: dna({ xHeight: 70, contrast: 0, aperture: 30, roundness: 20, overshoot: 10, terminal: 0, geometry: 100, rhythm: 20, counterSize: 40, modulation: 0, gridDensity: 100 }) },
 ];
 
+// ---- GRID tier: composable grid components (multi-select, overlayable) ----
+// `rec` = part of a sensible grid for an average sans (shown "Recommended").
+const GRID_COMPONENTS = [
+  { key: 'metrics', label: 'Metric Lines', desc: 'baseline · x-height · cap · ascender · descender', rec: true },
+  { key: 'sidebearings', label: 'Side Bearings', desc: 'left & right margins', rec: true },
+  { key: 'emgrid', label: 'Em Grid', desc: 'fine unit grid', rec: true },
+  { key: 'circles', label: 'Construction Circles', desc: 'cap & x-height bowls + counters', rec: true },
+  { key: 'overshoot', label: 'Overshoot Zones', desc: 'optical overshoot at curves', rec: true },
+  { key: 'wideEllipse', label: 'Wide Ellipses', desc: 'centre proportion ellipses', rec: false },
+  { key: 'stacked', label: 'Stacked Circles', desc: 'vertical circle stack', rec: false },
+  { key: 'web', label: 'Diagonal Web', desc: 'corner & midpoint diagonals', rec: false },
+  { key: 'broadnib', label: 'Broad-Nib Slants', desc: 'pen-angle calligraphic guides', rec: false },
+];
+const RECOMMENDED_GRID = GRID_COMPONENTS.filter(c => c.rec).map(c => c.key);
+
+// Chosen components (+ a DNA for parameters like density/pen angle) -> the grid
+// effect objects the artboard/PDF draws.
+function componentsToGrids(keys, d, upm) {
+  d = d || BASE; upm = upm || 1000;
+  const has = (k) => keys.indexOf(k) >= 0;
+  const out = [];
+  if (has('metrics')) out.push({ kind: 'metrics' });
+  if (has('sidebearings')) out.push({ kind: 'sidebearings' });
+  if (has('emgrid')) { const div = Math.round(8 + (d.gridDensity / 100) * 24); out.push({ kind: 'emsquare', cell: Math.round(upm / div) }); }
+  if (has('circles')) out.push({ kind: 'circle', wf: Math.round((0.78 + (d.width / 100) * 0.32) * 100) / 100 });
+  if (has('wideEllipse')) out.push({ kind: 'wideEllipse' });
+  if (has('stacked')) out.push({ kind: 'stacked' });
+  if (has('web')) out.push({ kind: 'web' });
+  if (has('overshoot')) out.push({ kind: 'superellipse', overshoot: Math.round((d.overshoot / 100) * 30) });
+  if (has('broadnib') && d.penAngle > 0) out.push({ kind: 'broadnib', penAngle: d.penAngle });
+  return out;
+}
+
 const DEFAULT_PRESET = 'Clean';
 function byName(name) {
   const all = QUICK.concat(ADVANCED);
@@ -60,20 +93,18 @@ function byName(name) {
 // Turn a DNA into the artboard's construction-grid effects (consumed by the
 // jsx grid drawer): always metric lines, plus an em grid (density), broad-nib
 // slants (penAngle) and overshoot zones (overshoot).
+// DNA -> a sensible set of grid components -> effects (used by Advanced presets).
 function toGrids(d, upm) {
-  upm = upm || 1000;
-  const grids = [{ kind: 'metrics' }];
-  if (d.gridDensity > 15) {
-    const divisions = Math.round(8 + (d.gridDensity / 100) * 24); // 8–32
-    grids.push({ kind: 'emsquare', cell: Math.round(upm / divisions) });
-  }
-  if (d.penAngle > 0) grids.push({ kind: 'broadnib', penAngle: d.penAngle });
-  if (d.overshoot > 0) grids.push({ kind: 'superellipse', overshoot: Math.round((d.overshoot / 100) * 30) });
-  // Round-letter construction circles (cap + x-height bowls). Skip for very
-  // angular designs (low roundness, e.g. Textura/Fraktur). Ellipse width tracks
-  // the width axis.
-  if (d.roundness > 20) grids.push({ kind: 'circle', wf: Math.round((0.78 + (d.width / 100) * 0.32) * 100) / 100 });
-  return grids;
+  const keys = ['metrics', 'sidebearings', 'emgrid'];
+  if (d.roundness > 20) keys.push('circles');
+  if (d.overshoot > 0) keys.push('overshoot');
+  if (d.penAngle > 0) keys.push('broadnib');
+  if (d.geometry >= 70) keys.push('web');
+  return componentsToGrids(keys, d, upm);
 }
 
-module.exports = { PARAMS, BASE, QUICK, ADVANCED, DEFAULT_PRESET, byName, toGrids, dna };
+module.exports = {
+  PARAMS, BASE, QUICK, ADVANCED, DEFAULT_PRESET,
+  GRID_COMPONENTS, RECOMMENDED_GRID, componentsToGrids,
+  byName, toGrids, dna,
+};

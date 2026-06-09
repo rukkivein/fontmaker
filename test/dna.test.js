@@ -22,4 +22,13 @@ var g2 = dna.toGrids(dna.byName('Broad Nib').params, 1000);
 ok(g2.some(g => g.kind === 'broadnib'), 'penAngle → broad-nib slants');
 ok(g2.some(g => g.kind === 'superellipse'), 'overshoot → overshoot zones');
 
+// --- GRID tier components ---
+ok(dna.GRID_COMPONENTS.length === 9, '9 grid components');
+ok(dna.RECOMMENDED_GRID.indexOf('metrics') >= 0 && dna.RECOMMENDED_GRID.indexOf('circles') >= 0, 'recommended grid includes metrics & circles');
+ok(dna.GRID_COMPONENTS.filter(c => c.rec).length === dna.RECOMMENDED_GRID.length, 'recommended flags match RECOMMENDED_GRID');
+var ge = dna.componentsToGrids(['metrics', 'emgrid', 'web'], dna.BASE, 1000);
+ok(ge.some(g => g.kind === 'metrics') && ge.some(g => g.kind === 'emsquare') && ge.some(g => g.kind === 'web'),
+   'componentsToGrids maps selected components to effects');
+ok(!ge.some(g => g.kind === 'circle'), 'unselected components are absent');
+
 console.log('\nFont DNA OK');

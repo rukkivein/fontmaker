@@ -31,11 +31,16 @@ function evalScript(code) { return new Promise(function (r) { cs.evalScript(code
 // Holds settings only; nothing is generated until Start Creating.
 var draft = null;
 function newDraft() {
-  // Pre-select the most common Latin basics; other classic sets stay flagged.
+  // Pre-select the most common Latin basics + the recommended grid components.
+  var gc = {};
+  dna.RECOMMENDED_GRID.forEach(function (k) { gc[k] = true; });
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    preset: dna.DEFAULT_PRESET, presetTier: 'quick', customGrid: false,
+    gridMode: 'grid',           // 'grid' (components) | 'advanced' (DNA)
+    gridComps: gc,
+    preset: dna.DEFAULT_PRESET, // Advanced single-select preset
+    dnaCustom: null,            // when set, a custom DNA params object
     toggle: 'lang',
   };
 }
@@ -107,11 +112,13 @@ function setToggle(which) {
 }
 function renderTier() {
   var tabs = $('tierBar').querySelectorAll('.tier-tab');
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tier') === draft.presetTier);
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tier') === draft.gridMode);
 }
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
-  if (draft.toggle === 'preset') return renderPresets(box);
+  if (draft.toggle === 'preset') {
+    return draft.gridMode === 'grid' ? renderGridComps(box) : renderAdvanced(box);
+  }
   // Language Support — multi-select character sets.
   charsets.ALPHABETS.forEach(function (it) {
     var on = !!draft.lang[it.key];
@@ -126,31 +133,70 @@ function renderRightList() {
     box.appendChild(row);
   });
 }
-// Style Preset — single-select DNA preset (Quick or Advanced tier).
-function renderPresets(box) {
-  var list = draft.presetTier === 'advanced' ? dna.ADVANCED : dna.QUICK;
-  list.forEach(function (p) {
-    var on = !draft.customGrid && draft.preset === p.name;
+// GRID tier — composable, multi-select grid components (overlayable).
+function renderGridComps(box) {
+  dna.GRID_COMPONENTS.forEach(function (c) {
+    var on = !!draft.gridComps[c.key];
+    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (c.rec ? ' essential' : '');
+    var rec = c.rec ? ' <span class="ri-rec">Recommended</span>' : '';
+    var txt = document.createElement('div'); txt.className = 'ri-txt';
+    txt.innerHTML = '<div class="ri-t">' + c.label + rec + '</div><div class="ri-d">' + c.desc + '</div>';
+    var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
+    row.appendChild(txt); row.appendChild(btn);
+    row.addEventListener('click', function () { draft.gridComps[c.key] = !draft.gridComps[c.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    box.appendChild(row);
+  });
+}
+// ADVANCED tier — single-select DNA preset, or Custom DNA (17 sliders).
+function renderAdvanced(box) {
+  dna.QUICK.concat(dna.ADVANCED).forEach(function (p) {
+    var on = !draft.dnaCustom && draft.preset === p.name;
     var row = document.createElement('div'); row.className = 'rune-item preset' + (on ? ' on' : '');
     var sub = p.similar ? ('like ' + p.similar) : ('geometry ' + p.params.geometry + ' · contrast ' + p.params.contrast);
     var txt = document.createElement('div'); txt.className = 'ri-txt';
     txt.innerHTML = '<div class="ri-t">' + p.name + '</div><div class="ri-d">' + sub + '</div>';
     var rad = document.createElement('div'); rad.className = 'ri-radio' + (on ? ' on' : '');
     row.appendChild(txt); row.appendChild(rad);
-    row.addEventListener('click', function () {
-      draft.preset = p.name; draft.customGrid = false; if ($('customGrid')) $('customGrid').checked = false;
-      renderRightList(); updatePillLabels(); renderProfile();
-    });
+    row.addEventListener('click', function () { draft.dnaCustom = null; draft.preset = p.name; renderRightList(); updatePillLabels(); renderProfile(); });
     box.appendChild(row);
   });
+  var con = !!draft.dnaCustom;
+  var crow = document.createElement('div'); crow.className = 'rune-item preset' + (con ? ' on' : '');
+  crow.innerHTML = '<div class="ri-txt"><div class="ri-t">Custom DNA</div><div class="ri-d">tune the 17 parameters yourself</div></div>';
+  var crad = document.createElement('div'); crad.className = 'ri-radio' + (con ? ' on' : '');
+  crow.appendChild(crad);
+  crow.addEventListener('click', function () {
+    if (!draft.dnaCustom) draft.dnaCustom = Object.assign({}, dna.byName(draft.preset).params);
+    renderRightList(); updatePillLabels(); renderProfile();
+  });
+  box.appendChild(crow);
+  if (con) {
+    var wrap = document.createElement('div'); wrap.className = 'dna-sliders';
+    dna.PARAMS.forEach(function (k) {
+      var min = (k === 'stress') ? -100 : 0;
+      var row = document.createElement('div'); row.className = 'dna-slider';
+      row.innerHTML = '<span class="ds-k">' + k + '</span><input type="range" min="' + min + '" max="100" value="' + draft.dnaCustom[k] + '" /><span class="ds-v">' + draft.dnaCustom[k] + '</span>';
+      var inp = row.querySelector('input'), val = row.querySelector('.ds-v');
+      inp.addEventListener('input', function () { draft.dnaCustom[k] = +inp.value; val.textContent = inp.value; });
+      wrap.appendChild(row);
+    });
+    box.appendChild(wrap);
+  }
 }
 function selectedLangLabels() {
   return charsets.ALPHABETS.filter(function (it) { return draft.lang[it.key]; }).map(function (it) { return it.label; });
 }
+function gridSummary() {
+  if (draft.gridMode === 'grid') {
+    var labels = dna.GRID_COMPONENTS.filter(function (c) { return draft.gridComps[c.key]; }).map(function (c) { return c.label; });
+    return labels.length ? labels.join(', ') : '—';
+  }
+  return draft.dnaCustom ? 'Custom DNA' : draft.preset;
+}
 function updatePillLabels() {
   var l = selectedLangLabels();
   $('tg-lang-lbl').textContent = l.length ? l.join(', ') : 'Language Support';
-  $('tg-grid-lbl').textContent = draft.customGrid ? 'Custom grid' : (draft.preset || 'Style Preset');
+  $('tg-grid-lbl').textContent = draft.gridMode === 'grid' ? ('Grid · ' + gridSummary()) : gridSummary();
 }
 
 // --- profile (responsive: values shrink to never push the actions) ---
@@ -159,12 +205,12 @@ function renderProfile() {
   var fam = ($('nf-family') && $('nf-family').value.trim()) || 'Untitled';
   var masters = draft.masters.map(function (m) { return m.name; }).join(', ');
   var langs = selectedLangLabels().join(', ') || '—';
-  var preset = draft.customGrid ? 'Custom grid' : (draft.preset || '—');
+  var gridHead = draft.gridMode === 'grid' ? 'GRID' : 'STYLE (DNA)';
   p.innerHTML =
     '<div class="p-h">FONT NAME</div><div class="p-v">' + fam + '</div>' +
     '<div class="p-h">MASTERS</div><div class="p-v">' + masters + '</div>' +
     '<div class="p-h">LANGUAGE SUPPORT</div><div class="p-v">' + langs + '</div>' +
-    '<div class="p-h">STYLE PRESET</div><div class="p-v">' + preset + '</div>';
+    '<div class="p-h">' + gridHead + '</div><div class="p-v">' + gridSummary() + '</div>';
   fitProfile();
 }
 function fitProfile() {
@@ -185,11 +231,19 @@ function onStartCreating() {
   var alphabets = Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; });
   if (!alphabets.length) { setToggle('lang'); return; }
   var m0 = draft.masters[0];
-  var project = glyphset.createProject({
+  var opts = {
     familyName: ($('nf-family').value.trim() || 'Untitled'),
-    masterName: m0.name, masterType: m0.name,
-    alphabets: alphabets, preset: draft.preset, customGrid: draft.customGrid,
-  });
+    masterName: m0.name, masterType: m0.name, alphabets: alphabets,
+  };
+  if (draft.gridMode === 'grid') {
+    var comps = Object.keys(draft.gridComps).filter(function (k) { return draft.gridComps[k]; });
+    opts.gridComponents = comps.length ? comps : dna.RECOMMENDED_GRID.slice();
+  } else if (draft.dnaCustom) {
+    opts.dna = draft.dnaCustom;
+  } else {
+    opts.preset = draft.preset;
+  }
+  var project = glyphset.createProject(opts);
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
   openGlyphIndex = -1; searchQuery = ''; alphaFilter = null;
@@ -455,11 +509,7 @@ function boot() {
   $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
   $('tierBar').querySelectorAll('.tier-tab').forEach(function (t) {
-    t.addEventListener('click', function () { draft.presetTier = t.getAttribute('data-tier'); renderTier(); renderRightList(); });
-  });
-  $('customGrid').addEventListener('change', function () {
-    draft.customGrid = this.checked;
-    renderRightList(); updatePillLabels(); renderProfile();
+    t.addEventListener('click', function () { draft.gridMode = t.getAttribute('data-tier'); renderTier(); renderRightList(); updatePillLabels(); renderProfile(); });
   });
   $('nf-family').addEventListener('input', renderProfile);
   $('nf-import').addEventListener('click', onImport);

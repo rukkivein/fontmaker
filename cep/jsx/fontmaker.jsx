@@ -96,47 +96,61 @@ function fmStroke(layer, pts, gray, width, dashed) {
   return p;
 }
 
+function fmHas(grids, kind) { for (var i = 0; i < grids.length; i++) if (grids[i].kind === kind) return grids[i]; return null; }
 function fmDrawGrids(layer, grids, M, left, right, bottom) {
   function fy(u) { return bottom + (u - M.descender) * FM_SCALE; }
-  var w = right - left;
-  // Always: horizontal metric lines (baseline a touch darker).
-  fmStroke(layer, [[left, fy(M.descender)], [right, fy(M.descender)]], 205, 0.5);
-  fmStroke(layer, [[left, fy(M.ascender)], [right, fy(M.ascender)]], 205, 0.5);
-  fmStroke(layer, [[left, fy(M.capHeight)], [right, fy(M.capHeight)]], 190, 0.5);
-  fmStroke(layer, [[left, fy(M.xHeight)], [right, fy(M.xHeight)]], 190, 0.5);
-  fmStroke(layer, [[left, fy(0)], [right, fy(0)]], 130, 0.75); // baseline
-  // Side bearings (light verticals).
-  fmStroke(layer, [[left, fy(M.descender)], [left, fy(M.ascender)]], 220, 0.4);
-  fmStroke(layer, [[right, fy(M.descender)], [right, fy(M.ascender)]], 220, 0.4);
-
-  for (var gi = 0; gi < grids.length; gi++) {
-    var g = grids[gi];
-    if (g.kind === 'emsquare') {
-      var cell = (g.cell || 62) * FM_SCALE;
-      for (var x = left + cell; x < right; x += cell) fmStroke(layer, [[x, fy(M.descender)], [x, fy(M.ascender)]], 230, 0.3);
-      for (var y = fy(M.descender) + cell; y < fy(M.ascender); y += cell) fmStroke(layer, [[left, y], [right, y]], 230, 0.3);
-    } else if (g.kind === 'broadnib') {
-      var ang = (g.penAngle || 30) * Math.PI / 180, dy = Math.tan(ang);
-      var step = (M.capHeight) * FM_SCALE / 3;
-      for (var sx = left - w; sx < right + w; sx += step) {
-        var x1 = sx, y1 = fy(M.descender), x2 = sx + (fy(M.ascender) - fy(M.descender)) / Math.max(dy, 0.01), y2 = fy(M.ascender);
-        fmStroke(layer, [[x1, y1], [x2, y2]], 224, 0.3);
-      }
-    } else if (g.kind === 'golden') {
-      var phi = 1.618, px = left + w / phi;
-      fmStroke(layer, [[px, fy(M.descender)], [px, fy(M.ascender)]], 218, 0.4);
-      fmStroke(layer, [[left + w - w / phi, fy(M.descender)], [left + w - w / phi, fy(M.ascender)]], 224, 0.35);
-    } else if (g.kind === 'superellipse') {
-      var ov = (g.overshoot || 12) * FM_SCALE;
-      fmStroke(layer, [[left, fy(0) - ov], [right, fy(0) - ov]], 225, 0.35, true);
-      fmStroke(layer, [[left, fy(M.capHeight) + ov], [right, fy(M.capHeight) + ov]], 225, 0.35, true);
-      fmStroke(layer, [[left, fy(M.xHeight) + ov], [right, fy(M.xHeight) + ov]], 225, 0.35, true);
-    } else if (g.kind === 'circle') {
-      var wf = g.wf || 0.85, cx = (left + right) / 2;
-      // cap-height and x-height bowl circles (ellipses scaled by the width axis)
-      fmEllipse(layer, cx, fy(M.capHeight), M.capHeight * FM_SCALE * wf, M.capHeight * FM_SCALE);
-      fmEllipse(layer, cx, fy(M.xHeight), M.xHeight * FM_SCALE * wf, M.xHeight * FM_SCALE);
+  var w = right - left, cx = (left + right) / 2, capPx = M.capHeight * FM_SCALE;
+  // Each component draws only when its effect is present (Grid tier selection).
+  if (fmHas(grids, 'metrics')) {
+    fmStroke(layer, [[left, fy(M.descender)], [right, fy(M.descender)]], 205, 0.5);
+    fmStroke(layer, [[left, fy(M.ascender)], [right, fy(M.ascender)]], 205, 0.5);
+    fmStroke(layer, [[left, fy(M.capHeight)], [right, fy(M.capHeight)]], 190, 0.5);
+    fmStroke(layer, [[left, fy(M.xHeight)], [right, fy(M.xHeight)]], 190, 0.5);
+    fmStroke(layer, [[left, fy(0)], [right, fy(0)]], 130, 0.75); // baseline
+  }
+  if (fmHas(grids, 'sidebearings')) {
+    fmStroke(layer, [[left, fy(M.descender)], [left, fy(M.ascender)]], 220, 0.4);
+    fmStroke(layer, [[right, fy(M.descender)], [right, fy(M.ascender)]], 220, 0.4);
+  }
+  var em = fmHas(grids, 'emsquare');
+  if (em) {
+    var cell = (em.cell || 62) * FM_SCALE;
+    for (var x = left + cell; x < right; x += cell) fmStroke(layer, [[x, fy(M.descender)], [x, fy(M.ascender)]], 230, 0.3);
+    for (var y = fy(M.descender) + cell; y < fy(M.ascender); y += cell) fmStroke(layer, [[left, y], [right, y]], 230, 0.3);
+  }
+  if (fmHas(grids, 'web')) { // diagonal web: corner X + diagonals to apex & bottom mid
+    var b = fy(0), t = fy(M.capHeight);
+    fmStroke(layer, [[left, b], [right, t]], 200, 0.3); fmStroke(layer, [[right, b], [left, t]], 200, 0.3);
+    fmStroke(layer, [[left, b], [cx, t]], 200, 0.3); fmStroke(layer, [[right, b], [cx, t]], 200, 0.3);
+    fmStroke(layer, [[left, t], [cx, b]], 200, 0.3); fmStroke(layer, [[right, t], [cx, b]], 200, 0.3);
+  }
+  var bn = fmHas(grids, 'broadnib');
+  if (bn) {
+    var ang = (bn.penAngle || 30) * Math.PI / 180, dy = Math.tan(ang), step = capPx / 3;
+    for (var sx = left - w; sx < right + w; sx += step) {
+      fmStroke(layer, [[sx, fy(M.descender)], [sx + (fy(M.ascender) - fy(M.descender)) / Math.max(dy, 0.01), fy(M.ascender)]], 224, 0.3);
     }
+  }
+  var se = fmHas(grids, 'superellipse');
+  if (se) {
+    var ov = (se.overshoot || 12) * FM_SCALE;
+    fmStroke(layer, [[left, fy(0) - ov], [right, fy(0) - ov]], 225, 0.35, true);
+    fmStroke(layer, [[left, fy(M.capHeight) + ov], [right, fy(M.capHeight) + ov]], 225, 0.35, true);
+    fmStroke(layer, [[left, fy(M.xHeight) + ov], [right, fy(M.xHeight) + ov]], 225, 0.35, true);
+  }
+  var ci = fmHas(grids, 'circle');
+  if (ci) {
+    var wf = ci.wf || 0.85;
+    fmEllipse(layer, cx, fy(M.capHeight), capPx * wf, capPx);
+    fmEllipse(layer, cx, fy(M.capHeight) - capPx * 0.085, capPx * 0.83 * wf, capPx * 0.83); // counter
+    fmEllipse(layer, cx, fy(M.xHeight), M.xHeight * FM_SCALE * wf, M.xHeight * FM_SCALE);
+  }
+  if (fmHas(grids, 'wideEllipse')) fmEllipse(layer, cx, fy(M.capHeight * 0.75), w, capPx / 2);
+  if (fmHas(grids, 'stacked')) {
+    var r = capPx / 4;
+    fmEllipse(layer, cx, fy(M.capHeight), r * 2, r * 2);
+    fmEllipse(layer, cx, fy(M.capHeight * 0.75), r * 2, r * 2);
+    fmEllipse(layer, cx, fy(M.capHeight * 0.5), r * 2, r * 2);
   }
 }
 // Stroked ellipse guide: centered at cx, top at topY, given width & height.

@@ -64,12 +64,23 @@ function createProject(opts) {
     layers: emptyLayers(masters),
   }));
 
-  // Font DNA: a preset (or custom) drives the metrics and the construction grid.
-  const presetDef = dna.byName(opts.preset || dna.DEFAULT_PRESET);
-  const d = Object.assign({}, presetDef.params, opts.dna || {});
+  // Two ways to define the construction grid:
+  //  - Grid tier: an explicit set of grid components (gridComponents).
+  //  - Advanced tier: a DNA preset (preset) or a custom DNA (dna).
+  let d, grids, presetLabel, gridComponents = null;
+  if (opts.gridComponents) {
+    gridComponents = opts.gridComponents.slice();
+    d = Object.assign({}, dna.BASE, opts.dna || {});
+    grids = dna.componentsToGrids(gridComponents, d, UPM);
+    presetLabel = 'Grid';
+  } else {
+    const presetDef = dna.byName(opts.preset || dna.DEFAULT_PRESET);
+    d = Object.assign({}, presetDef.params, opts.dna || {});
+    grids = dna.toGrids(d, UPM);
+    presetLabel = opts.dna ? 'Custom DNA' : presetDef.name;
+  }
   const metrics = Object.assign({}, DEFAULT_METRICS);
   metrics.xHeight = Math.round((d.xHeight / 100) * metrics.capHeight);
-  const grids = dna.toGrids(d, UPM);
 
   return {
     schema: 1,
@@ -81,8 +92,8 @@ function createProject(opts) {
     unitsPerEm: UPM,
     metrics,
     dna: d,
-    preset: opts.customGrid ? 'Custom' : presetDef.name,
-    customGrid: !!opts.customGrid,
+    preset: presetLabel,
+    gridComponents,
     grids,
     alphabets: (opts.alphabets && opts.alphabets.length) ? opts.alphabets.slice() : DEFAULT_ALPHABETS.slice(),
     masters,
