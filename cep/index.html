@@ -44,7 +44,7 @@
     <div class="rune-body">
       <div class="rune-left">
         <button id="tg-lang" class="pill"><span id="tg-lang-lbl">Language Support</span><i class="pill-ar"></i></button>
-        <button id="tg-grid" class="pill"><span id="tg-grid-lbl">Supported Grids</span><i class="pill-ar"></i></button>
+        <button id="tg-grid" class="pill"><span id="tg-grid-lbl">Style Preset</span><i class="pill-ar"></i></button>
 
         <div class="prof-head">
           <div class="hword sm">profile<span class="dot">.</span></div>
@@ -54,6 +54,7 @@
         <div id="profile" class="prof-body"></div>
 
         <div class="rune-actions">
+          <label class="custom-grid"><input id="customGrid" type="checkbox" /> Custom grid — start from a blank DNA</label>
           <button id="nf-import" class="rune-btn outline">Import Your Project</button>
           <button id="nf-create" class="rune-btn blue">Start Creating</button>
         </div>
@@ -65,6 +66,10 @@
             <button id="countryBtn" class="country-btn" type="button"><span>Pick a country → auto-select its sets…</span><i class="dd-caret">▾</i></button>
             <div id="countryList" class="country-list hidden"></div>
           </div>
+        </div>
+        <div id="tierBar" class="tier-bar hidden">
+          <div class="tier-tab" data-tier="quick">Quick</div>
+          <div class="tier-tab" data-tier="advanced">Advanced</div>
         </div>
         <div id="rune-list" class="rune-list"></div>
       </div>

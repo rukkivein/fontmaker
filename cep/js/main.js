@@ -11,6 +11,7 @@ var ROOT = cs.getSystemPath(SystemPath.EXTENSION);
 var ilbridge = require(ROOT + '/js/ilbridge.js');
 var glyphset = require(ROOT + '/js/glyphset.js');
 var charsets = require(ROOT + '/js/charsets.js');
+var dna = require(ROOT + '/js/dna.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
 
@@ -34,7 +35,8 @@ function newDraft() {
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    grid: {}, toggle: 'lang',
+    preset: dna.DEFAULT_PRESET, presetTier: 'quick', customGrid: false,
+    toggle: 'lang',
   };
 }
 
@@ -90,46 +92,64 @@ function onAddMaster() {
   $('m-list').classList.remove('hidden');
 }
 
-// --- the two toggles + shared right list ---
+// --- the two toggles: Language Support / Style Preset ---
 function setToggle(which) {
   draft.toggle = which;
   $('tg-lang').classList.toggle('active', which === 'lang');
-  $('tg-grid').classList.toggle('active', which === 'grid');
+  $('tg-grid').classList.toggle('active', which === 'preset');
   $('tg-lang').querySelector('.pill-ar').classList.toggle('flip', which === 'lang');
-  $('tg-grid').querySelector('.pill-ar').classList.toggle('flip', which === 'grid');
+  $('tg-grid').querySelector('.pill-ar').classList.toggle('flip', which === 'preset');
   $('countryBar').classList.toggle('hidden', which !== 'lang');
+  $('tierBar').classList.toggle('hidden', which !== 'preset');
+  renderTier();
   renderRightList(); updatePillLabels();
 }
-function curItems() { return draft.toggle === 'lang' ? charsets.ALPHABETS : charsets.GRIDS; }
-function curSel() { return draft.toggle === 'lang' ? draft.lang : draft.grid; }
+function renderTier() {
+  var tabs = $('tierBar').querySelectorAll('.tier-tab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tier') === draft.presetTier);
+}
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
-  var sel = curSel();
-  var isLang = draft.toggle === 'lang';
-  curItems().forEach(function (it) {
-    var on = !!sel[it.key];
-    var essential = isLang && charsets.ESSENTIAL.indexOf(it.key) >= 0;
+  if (draft.toggle === 'preset') return renderPresets(box);
+  // Language Support — multi-select character sets.
+  charsets.ALPHABETS.forEach(function (it) {
+    var on = !!draft.lang[it.key];
+    var essential = charsets.ESSENTIAL.indexOf(it.key) >= 0;
     var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (essential ? ' essential' : '');
-    var sub = isLang ? charsets.sampleChars(it.key, 10) : (it.note || '');
     var rec = essential ? ' <span class="ri-rec">Recommended</span>' : '';
     var txt = document.createElement('div'); txt.className = 'ri-txt';
-    txt.innerHTML = '<div class="ri-t">' + it.label + rec + '</div><div class="ri-d' + (isLang ? ' chars' : '') + '">' + sub + '</div>';
+    txt.innerHTML = '<div class="ri-t">' + it.label + rec + '</div><div class="ri-d chars">' + charsets.sampleChars(it.key, 10) + '</div>';
     var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
     row.appendChild(txt); row.appendChild(btn);
-    // The whole box is the selection target (click anywhere to toggle).
-    row.addEventListener('click', function () { sel[it.key] = !sel[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    row.addEventListener('click', function () { draft.lang[it.key] = !draft.lang[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     box.appendChild(row);
   });
 }
-function selectedLabels(which) {
-  var sel = which === 'lang' ? draft.lang : draft.grid;
-  var items = which === 'lang' ? charsets.ALPHABETS : charsets.GRIDS;
-  return items.filter(function (it) { return sel[it.key]; }).map(function (it) { return it.label; });
+// Style Preset — single-select DNA preset (Quick or Advanced tier).
+function renderPresets(box) {
+  var list = draft.presetTier === 'advanced' ? dna.ADVANCED : dna.QUICK;
+  list.forEach(function (p) {
+    var on = !draft.customGrid && draft.preset === p.name;
+    var row = document.createElement('div'); row.className = 'rune-item preset' + (on ? ' on' : '');
+    var sub = p.similar ? ('like ' + p.similar) : ('geometry ' + p.params.geometry + ' · contrast ' + p.params.contrast);
+    var txt = document.createElement('div'); txt.className = 'ri-txt';
+    txt.innerHTML = '<div class="ri-t">' + p.name + '</div><div class="ri-d">' + sub + '</div>';
+    var rad = document.createElement('div'); rad.className = 'ri-radio' + (on ? ' on' : '');
+    row.appendChild(txt); row.appendChild(rad);
+    row.addEventListener('click', function () {
+      draft.preset = p.name; draft.customGrid = false; if ($('customGrid')) $('customGrid').checked = false;
+      renderRightList(); updatePillLabels(); renderProfile();
+    });
+    box.appendChild(row);
+  });
+}
+function selectedLangLabels() {
+  return charsets.ALPHABETS.filter(function (it) { return draft.lang[it.key]; }).map(function (it) { return it.label; });
 }
 function updatePillLabels() {
-  var l = selectedLabels('lang'), g = selectedLabels('grid');
+  var l = selectedLangLabels();
   $('tg-lang-lbl').textContent = l.length ? l.join(', ') : 'Language Support';
-  $('tg-grid-lbl').textContent = g.length ? g.join(', ') : 'Supported Grids';
+  $('tg-grid-lbl').textContent = draft.customGrid ? 'Custom grid' : (draft.preset || 'Style Preset');
 }
 
 // --- profile (responsive: values shrink to never push the actions) ---
@@ -137,13 +157,13 @@ function renderProfile() {
   var p = $('profile');
   var fam = ($('nf-family') && $('nf-family').value.trim()) || 'Untitled';
   var masters = draft.masters.map(function (m) { return m.name; }).join(', ');
-  var langs = selectedLabels('lang').join(', ') || '—';
-  var grids = selectedLabels('grid').join(', ') || '—';
+  var langs = selectedLangLabels().join(', ') || '—';
+  var preset = draft.customGrid ? 'Custom grid' : (draft.preset || '—');
   p.innerHTML =
     '<div class="p-h">FONT NAME</div><div class="p-v">' + fam + '</div>' +
     '<div class="p-h">MASTERS</div><div class="p-v">' + masters + '</div>' +
     '<div class="p-h">LANGUAGE SUPPORT</div><div class="p-v">' + langs + '</div>' +
-    '<div class="p-h">GRIDS</div><div class="p-v">' + grids + '</div>';
+    '<div class="p-h">STYLE PRESET</div><div class="p-v">' + preset + '</div>';
   fitProfile();
 }
 function fitProfile() {
@@ -163,13 +183,11 @@ function onImport() {
 function onStartCreating() {
   var alphabets = Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; });
   if (!alphabets.length) { setToggle('lang'); return; }
-  var grids = Object.keys(draft.grid).filter(function (k) { return draft.grid[k]; });
-  if (!grids.length) grids = ['metrics'];
   var m0 = draft.masters[0];
   var project = glyphset.createProject({
     familyName: ($('nf-family').value.trim() || 'Untitled'),
     masterName: m0.name, masterType: m0.name,
-    alphabets: alphabets, grids: grids,
+    alphabets: alphabets, preset: draft.preset, customGrid: draft.customGrid,
   });
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
@@ -433,8 +451,15 @@ function boot() {
   $('m-name').addEventListener('input', updateMasterAdd);
   $('m-ddbtn').addEventListener('click', function () { $('m-list').classList.toggle('hidden'); });
   $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
-  $('tg-grid').addEventListener('click', function () { setToggle('grid'); });
+  $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
+  $('tierBar').querySelectorAll('.tier-tab').forEach(function (t) {
+    t.addEventListener('click', function () { draft.presetTier = t.getAttribute('data-tier'); renderTier(); renderRightList(); });
+  });
+  $('customGrid').addEventListener('change', function () {
+    draft.customGrid = this.checked;
+    renderRightList(); updatePillLabels(); renderProfile();
+  });
   $('nf-family').addEventListener('input', renderProfile);
   $('nf-import').addEventListener('click', onImport);
   $('nf-create').addEventListener('click', onStartCreating);

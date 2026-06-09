@@ -5,6 +5,7 @@
 // (src/js/workboard.js) closely enough that core/fontEngine.js consumes it.
 
 const charsets = require('./charsets.js');
+const dna = require('./dna.js');
 
 const UPM = 1000;
 // Arial-normalized standard metrics (UPM 1000) so the Arial ghost sits exactly
@@ -63,14 +64,12 @@ function createProject(opts) {
     layers: emptyLayers(masters),
   }));
 
-  // One or more construction grids may be selected (they can overlay). The
-  // first selected grid drives the font's metrics.
-  let gridKeys = opts.grids && opts.grids.length ? opts.grids.slice() : (opts.grid ? [opts.grid] : ['metrics']);
-  const grids = gridKeys
-    .map(k => charsets.GRID_BY_KEY[k])
-    .filter(Boolean)
-    .map(def => Object.assign({ key: def.key, label: def.label }, def.build(UPM)));
-  if (!grids.length) grids.push(Object.assign({ key: 'metrics', label: 'Metrics Grid' }, charsets.GRID_BY_KEY.metrics.build(UPM)));
+  // Font DNA: a preset (or custom) drives the metrics and the construction grid.
+  const presetDef = dna.byName(opts.preset || dna.DEFAULT_PRESET);
+  const d = Object.assign({}, presetDef.params, opts.dna || {});
+  const metrics = Object.assign({}, DEFAULT_METRICS);
+  metrics.xHeight = Math.round((d.xHeight / 100) * metrics.capHeight);
+  const grids = dna.toGrids(d, UPM);
 
   return {
     schema: 1,
@@ -80,8 +79,10 @@ function createProject(opts) {
       version: opts.version || '1.000', copyright: '', license: '',
     },
     unitsPerEm: UPM,
-    metrics: Object.assign({}, grids[0].metrics || DEFAULT_METRICS),
-    gridKeys: grids.map(g => g.key),
+    metrics,
+    dna: d,
+    preset: opts.customGrid ? 'Custom' : presetDef.name,
+    customGrid: !!opts.customGrid,
     grids,
     alphabets: (opts.alphabets && opts.alphabets.length) ? opts.alphabets.slice() : DEFAULT_ALPHABETS.slice(),
     masters,

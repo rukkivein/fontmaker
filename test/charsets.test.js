@@ -33,21 +33,21 @@ ok(charsets.GRID_BY_KEY.golden.build(1000).metrics.capHeight === 700, 'golden gr
 // --- createProject from dialog choices ---
 const p = glyphset.createProject({
   familyName: 'Demo', version: '2.000',
-  alphabets: ['latinUpper', 'numbers'], grid: 'emsquare',
+  alphabets: ['latinUpper', 'numbers'], preset: 'Geometric Sans',
   masterName: 'Thin', masterType: 'Condensed',
 });
 ok(p.glyphs.length === 36, 'project built A–Z + 0–9');
 ok(p.meta.version === '2.000', 'version stored');
-ok(p.gridKeys[0] === 'emsquare', 'grid key stored');
-ok(p.grids[0].kind === 'emsquare', 'resolved grid object stored');
+ok(p.preset === 'Geometric Sans', 'DNA preset stored');
+ok(p.dna && p.dna.geometry === 100, 'DNA params applied (geometry 100)');
+ok(p.grids[0].kind === 'metrics', 'metric lines always present in derived grid');
 ok(p.masters[0].type === 'Condensed' && p.masters[0].name === 'Thin', 'master name+type set');
 ok(p.alphabets.indexOf('latinUpper') >= 0, 'alphabets recorded on project');
 
-// --- multiple overlaid grids ---
-const pg = glyphset.createProject({ alphabets: ['latinUpper'], grids: ['metrics', 'broadnib', 'golden'] });
-ok(pg.grids.length === 3, 'three grids resolved & stored');
-ok(pg.gridKeys.join(',') === 'metrics,broadnib,golden', 'grid order preserved');
-ok(pg.metrics.capHeight === pg.grids[0].metrics.capHeight, 'metrics come from the first grid');
+// --- DNA derives metrics & grid effects ---
+const pg = glyphset.createProject({ alphabets: ['latinUpper'], preset: 'Broad Nib' });
+ok(pg.grids.some(g => g.kind === 'broadnib'), 'broad-nib preset adds nib guides');
+ok(pg.metrics.xHeight === Math.round(pg.dna.xHeight / 100 * pg.metrics.capHeight), 'x-height derived from DNA');
 
 // --- standards-grounded coverage ---
 ok(charsets.ALPHABET_BY_KEY.latinCentral.glyphs().length === 128, 'Latin Extended-A is the full block (128)');
