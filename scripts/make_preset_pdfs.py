@@ -72,28 +72,42 @@ def build_pdf(pages, path):
     print('wrote', path, n, 'pages')
 
 def draw_G(pg, X, Y, advance, m, d, wf, scale):
-    """A single construction G traced on the cap circle — opening + bar + spur."""
+    """A real, FILLED construction G built on the cap circle: an outer/inner
+    ellipse ring open on the right (the C), plus a crossbar + spur. Filled with
+    nonzero winding at low opacity so the grids show through."""
     cx = X(advance / 2.0)
-    cy = (Y(0) + Y(CAP)) / 2.0
-    ry = (Y(CAP) - Y(0)) / 2.0
-    rx = ry * wf
-    # outer C: arc from +28° CCW over the top/left/bottom to 332° (opening on right)
-    pts = []
-    a0, a1, steps = 28, 332, 90
-    for i in range(steps + 1):
-        ang = math.radians(a0 + (a1 - a0) * i / steps)
-        pts.append((cx + rx * math.cos(ang), cy + ry * math.sin(ang)))
-    # bar + spur off the lower-right terminal, into the counter
-    end = pts[-1]
-    pts.append((cx, end[1]))                       # horizontal bar to centre
-    pts.append((cx, end[1] + ry * 0.34))           # short spur up
-    strokeW = max(4.0, (0.045 + d['weight'] / 100.0 * 0.07) * (CAP * scale))
-    pg.q()
-    pg.gs('GS1')                # ~30% opacity → grids show through
-    pg.caps(True)
-    pg.lw(strokeW); pg.color(0.08)
-    pg.polyline(pts)
-    pg.caps(False)
+    cyTop, cyBot = Y(CAP), Y(0)
+    cy = (cyTop + cyBot) / 2.0
+    Ry = (cyTop - cyBot) / 2.0
+    Rx = Ry * wf
+    t = max(14.0, (0.07 + d['weight'] / 100.0 * 0.09) * (CAP * scale))  # stroke (ring) thickness
+    rx, ry = Rx - t, Ry - t
+    th = 30.0  # opening half-angle on the right
+    ops = []
+    def mv(x, y): ops.append('%.2f %.2f m' % (x, y))
+    def ln(x, y): ops.append('%.2f %.2f l' % (x, y))
+    def E(rX, rY, ang):
+        a = math.radians(ang); return (cx + rX * math.cos(a), cy + rY * math.sin(a))
+    # C-ring: outer arc (CCW, th → 360-th), flat terminal, inner arc back (CW), close
+    N = 80
+    mv(*E(Rx, Ry, th))
+    for i in range(1, N + 1):
+        ln(*E(Rx, Ry, th + (360 - 2 * th) * i / N))
+    for i in range(0, N + 1):
+        ln(*E(rx, ry, (360 - th) - (360 - 2 * th) * i / N))
+    ops.append('h')
+    # crossbar: from centre out to the right opening, sitting just below centre
+    by1 = cy + t * 0.15
+    by0 = by1 - t
+    bx0, bx1 = cx - t * 0.15, cx + Rx * 1.0
+    mv(bx0, by0); ln(bx1, by0); ln(bx1, by1); ln(bx0, by1); ops.append('h')
+    # spur: short vertical down from the bar's inner end
+    sx0, sx1 = cx - t * 0.15, cx + t * 0.85
+    sy0, sy1 = cy - Ry * 0.42, by1
+    mv(sx0, sy0); ln(sx1, sy0); ln(sx1, sy1); ln(sx0, sy1); ops.append('h')
+    pg.q(); pg.gs('GS1'); pg.ops.append('0.10 0.10 0.10 rg')
+    pg.ops += ops
+    pg.ops.append('f')   # nonzero fill (C ∪ bar ∪ spur = G)
     pg.Q()
 
 def render(preset):
