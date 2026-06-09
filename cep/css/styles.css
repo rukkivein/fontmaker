@@ -193,8 +193,10 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ul { width: 100%; height: 8px; margin-top: 5px; background-color: #9a9a9a;
   -webkit-mask: url('../assets/line.svg') no-repeat left center / auto 100%; mask: url('../assets/line.svg') no-repeat left center / auto 100%; }
 /* Profile underline: same scale as settings (auto 100%) → identical thickness;
-   shorter element just shows less of the stroke. Mirrored for visual variety. */
-.ul-sm { width: 84%; -webkit-mask-size: auto 100%; mask-size: auto 100%; transform: scaleX(-1); }
+   shorter element shows less. Uses a horizontally-mirrored copy of the brush
+   (the DESIGN is flipped, still cropped from the left) for variety. */
+.ul-sm { width: 84%; -webkit-mask-image: url('../assets/line-flipped.svg'); mask-image: url('../assets/line-flipped.svg');
+  -webkit-mask-size: auto 100%; mask-size: auto 100%; }
 .rune-body { flex: 1 1 auto; display: flex; gap: 12px; padding: 8px 14px 12px; min-height: 0; flex-wrap: nowrap; }
 .rune-left { flex: 1 1 200px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rune-right { flex: 1 1 240px; min-width: 0; min-height: 0; border: 1px solid #3a3a3a; border-radius: 10px; overflow: hidden; display: flex; }
