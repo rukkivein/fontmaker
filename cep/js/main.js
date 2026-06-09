@@ -52,6 +52,7 @@ function buildCountries() {
   charsets.COUNTRIES.forEach(function (c) {
     var it = document.createElement('div'); it.className = 'country-item'; it.textContent = c.name;
     it.addEventListener('click', function () {
+      draft.lang = {};                       // replace — don't stack countries
       c.sets.forEach(function (k) { draft.lang[k] = true; });
       $('countryList').classList.add('hidden');
       setToggle('lang'); renderProfile();

@@ -147,7 +147,7 @@ const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'num
 // numbers/punctuation/symbols/math every font ships). Picking a country UNIONS
 // these into the current selection. Countries are mapped to a script group;
 // scripts we don't ship yet fall back to a Latin baseline.
-const COMMON = ['numbers', 'punct', 'symbols', 'math'];
+const COMMON = ['numbers', 'fractions', 'punct', 'symbols', 'math'];
 const LAT = ['latinUpper', 'latinLower'];
 const SCRIPT_SETS = {
   latin: LAT.concat(['latinWest'], COMMON),
