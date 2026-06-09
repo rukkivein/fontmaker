@@ -143,30 +143,80 @@ function collectGlyphs(alphabetKeys, opts) {
 // The "classic" sets every common font ships — flagged important in the UI.
 const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math'];
 
-// Pick a country → auto-select the sets its language needs (+ the common
+// Pick a country → auto-select the sets its written language needs (+ the common
 // numbers/punctuation/symbols/math every font ships). Picking a country UNIONS
-// these into the current selection.
+// these into the current selection. Countries are mapped to a script group;
+// scripts we don't ship yet fall back to a Latin baseline.
 const COMMON = ['numbers', 'punct', 'symbols', 'math'];
 const LAT = ['latinUpper', 'latinLower'];
-const COUNTRIES = [
-  { name: 'United States / UK', sets: LAT.concat(COMMON) },
-  { name: 'Germany / France / Spain / Italy', sets: LAT.concat(['latinWest'], COMMON) },
-  { name: 'Turkey', sets: LAT.concat(['latinWest', 'latinCentral'], COMMON) },
-  { name: 'Poland / Czechia / Hungary', sets: LAT.concat(['latinWest', 'latinCentral'], COMMON) },
-  { name: 'Scandinavia (Nordic)', sets: LAT.concat(['latinWest'], COMMON) },
-  { name: 'Vietnam', sets: LAT.concat(['latinWest', 'latinVietnamese'], COMMON) },
-  { name: 'Russia / Ukraine / Serbia', sets: ['cyrillic'].concat(LAT, COMMON) },
-  { name: 'Greece', sets: ['greek'].concat(LAT, COMMON) },
-  { name: 'Saudi Arabia / Egypt', sets: ['arabic'].concat(COMMON) },
-  { name: 'Israel', sets: ['hebrew'].concat(LAT, COMMON) },
-  { name: 'Japan', sets: ['hiragana', 'katakana', 'hanzi'].concat(LAT, COMMON) },
-  { name: 'China', sets: ['hanzi'].concat(LAT, COMMON) },
-  { name: 'Korea', sets: ['hangul'].concat(LAT, COMMON) },
-  { name: 'India (Hindi)', sets: ['devanagari'].concat(LAT, COMMON) },
-  { name: 'Thailand', sets: ['thai'].concat(LAT, COMMON) },
-  { name: 'Armenia', sets: ['armenian'].concat(LAT, COMMON) },
-  { name: 'Georgia', sets: ['georgian'].concat(LAT, COMMON) },
-];
+const SCRIPT_SETS = {
+  latin: LAT.concat(['latinWest'], COMMON),
+  latinCE: LAT.concat(['latinWest', 'latinCentral'], COMMON),
+  vietnamese: LAT.concat(['latinWest', 'latinVietnamese'], COMMON),
+  cyrillic: ['cyrillic'].concat(LAT, COMMON),
+  greek: ['greek'].concat(LAT, COMMON),
+  arabic: ['arabic'].concat(COMMON),
+  hebrew: ['hebrew'].concat(LAT, COMMON),
+  japanese: ['hiragana', 'katakana', 'hanzi'].concat(LAT, COMMON),
+  chinese: ['hanzi'].concat(LAT, COMMON),
+  korean: ['hangul'].concat(LAT, COMMON),
+  devanagari: ['devanagari'].concat(LAT, COMMON),
+  thai: ['thai'].concat(LAT, COMMON),
+  armenian: ['armenian'].concat(LAT, COMMON),
+  georgian: ['georgian'].concat(LAT, COMMON),
+};
+// country → script group (one entry per country; same-alphabet ones repeat).
+const COUNTRY_SCRIPT = {
+  // Latin — Western
+  'United States': 'latin', 'United Kingdom': 'latin', 'Ireland': 'latin', 'Canada': 'latin',
+  'Australia': 'latin', 'New Zealand': 'latin', 'Germany': 'latin', 'France': 'latin',
+  'Spain': 'latin', 'Portugal': 'latin', 'Italy': 'latin', 'Netherlands': 'latin',
+  'Belgium': 'latin', 'Switzerland': 'latin', 'Austria': 'latin', 'Luxembourg': 'latin',
+  'Denmark': 'latin', 'Sweden': 'latin', 'Norway': 'latin', 'Finland': 'latin', 'Iceland': 'latin',
+  'Mexico': 'latin', 'Brazil': 'latin', 'Argentina': 'latin', 'Chile': 'latin', 'Colombia': 'latin',
+  'Peru': 'latin', 'Venezuela': 'latin', 'Ecuador': 'latin', 'Bolivia': 'latin', 'Uruguay': 'latin',
+  'Paraguay': 'latin', 'Cuba': 'latin', 'Indonesia': 'latin', 'Malaysia': 'latin', 'Philippines': 'latin',
+  'Nigeria': 'latin', 'Kenya': 'latin', 'South Africa': 'latin', 'Ghana': 'latin', 'Tanzania': 'latin',
+  'Uganda': 'latin', 'Ivory Coast': 'latin', 'Cameroon': 'latin', 'Senegal': 'latin', 'Angola': 'latin',
+  'Mozambique': 'latin', 'Madagascar': 'latin', 'Botswana': 'latin', 'Namibia': 'latin', 'Rwanda': 'latin',
+  // Latin — Central/Eastern European (needs Extended-A)
+  'Poland': 'latinCE', 'Czechia': 'latinCE', 'Slovakia': 'latinCE', 'Hungary': 'latinCE',
+  'Croatia': 'latinCE', 'Slovenia': 'latinCE', 'Bosnia and Herzegovina': 'latinCE', 'Romania': 'latinCE',
+  'Lithuania': 'latinCE', 'Latvia': 'latinCE', 'Estonia': 'latinCE', 'Albania': 'latinCE',
+  'Turkey': 'latinCE', 'Azerbaijan': 'latinCE', 'Turkmenistan': 'latinCE', 'Malta': 'latinCE',
+  // Vietnamese
+  'Vietnam': 'vietnamese',
+  // Cyrillic
+  'Russia': 'cyrillic', 'Belarus': 'cyrillic', 'Ukraine': 'cyrillic', 'Bulgaria': 'cyrillic',
+  'Serbia': 'cyrillic', 'North Macedonia': 'cyrillic', 'Montenegro': 'cyrillic', 'Kazakhstan': 'cyrillic',
+  'Kyrgyzstan': 'cyrillic', 'Tajikistan': 'cyrillic', 'Mongolia': 'cyrillic',
+  // Greek
+  'Greece': 'greek', 'Cyprus': 'greek',
+  // Arabic
+  'Saudi Arabia': 'arabic', 'Egypt': 'arabic', 'United Arab Emirates': 'arabic', 'Iraq': 'arabic',
+  'Iran': 'arabic', 'Jordan': 'arabic', 'Lebanon': 'arabic', 'Syria': 'arabic', 'Kuwait': 'arabic',
+  'Qatar': 'arabic', 'Bahrain': 'arabic', 'Oman': 'arabic', 'Yemen': 'arabic', 'Algeria': 'arabic',
+  'Morocco': 'arabic', 'Tunisia': 'arabic', 'Libya': 'arabic', 'Sudan': 'arabic',
+  'Pakistan': 'arabic', 'Afghanistan': 'arabic',
+  // Hebrew
+  'Israel': 'hebrew',
+  // CJK / Korean
+  'China': 'chinese', 'Taiwan': 'chinese', 'Hong Kong': 'chinese', 'Singapore': 'chinese',
+  'Japan': 'japanese', 'South Korea': 'korean', 'North Korea': 'korean',
+  // Devanagari
+  'India': 'devanagari', 'Nepal': 'devanagari',
+  // Thai
+  'Thailand': 'thai',
+  // Caucasus
+  'Armenia': 'armenian', 'Georgia': 'georgian',
+};
+const COUNTRIES = Object.keys(COUNTRY_SCRIPT)
+  .sort()
+  .map(name => {
+    const seen = {}, sets = [];
+    SCRIPT_SETS[COUNTRY_SCRIPT[name]].forEach(k => { if (!seen[k]) { seen[k] = 1; sets.push(k); } });
+    return { name, sets };
+  });
 
 // A short sample of the characters a set brings (shown instead of prose).
 function sampleChars(key, n) {
