@@ -131,8 +131,19 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
       fmStroke(layer, [[left, fy(0) - ov], [right, fy(0) - ov]], 225, 0.35, true);
       fmStroke(layer, [[left, fy(M.capHeight) + ov], [right, fy(M.capHeight) + ov]], 225, 0.35, true);
       fmStroke(layer, [[left, fy(M.xHeight) + ov], [right, fy(M.xHeight) + ov]], 225, 0.35, true);
+    } else if (g.kind === 'circle') {
+      var wf = g.wf || 0.85, cx = (left + right) / 2;
+      // cap-height and x-height bowl circles (ellipses scaled by the width axis)
+      fmEllipse(layer, cx, fy(M.capHeight), M.capHeight * FM_SCALE * wf, M.capHeight * FM_SCALE);
+      fmEllipse(layer, cx, fy(M.xHeight), M.xHeight * FM_SCALE * wf, M.xHeight * FM_SCALE);
     }
   }
+}
+// Stroked ellipse guide: centered at cx, top at topY, given width & height.
+function fmEllipse(layer, cx, topY, width, height) {
+  var e = layer.pathItems.ellipse(topY, cx - width / 2, width, height);
+  e.filled = false; e.stroked = true; e.strokeColor = fmColor(220); e.strokeWidth = 0.35; e.name = 'fm-guide';
+  return e;
 }
 
 var FM_DESCENDERS = 'gjpqyµç';

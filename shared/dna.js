@@ -69,6 +69,10 @@ function toGrids(d, upm) {
   }
   if (d.penAngle > 0) grids.push({ kind: 'broadnib', penAngle: d.penAngle });
   if (d.overshoot > 0) grids.push({ kind: 'superellipse', overshoot: Math.round((d.overshoot / 100) * 30) });
+  // Round-letter construction circles (cap + x-height bowls). Skip for very
+  // angular designs (low roundness, e.g. Textura/Fraktur). Ellipse width tracks
+  // the width axis.
+  if (d.roundness > 20) grids.push({ kind: 'circle', wf: Math.round((0.78 + (d.width / 100) * 0.32) * 100) / 100 });
   return grids;
 }
 
