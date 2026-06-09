@@ -30,8 +30,12 @@ function evalScript(code) { return new Promise(function (r) { cs.evalScript(code
 // Holds settings only; nothing is generated until Start Creating.
 var draft = null;
 function newDraft() {
-  // Nothing pre-selected; the classic sets are merely flagged important (red).
-  return { masters: [{ name: 'Regular' }], lang: {}, grid: {}, toggle: 'lang' };
+  // Pre-select the most common Latin basics; other classic sets stay flagged.
+  return {
+    masters: [{ name: 'Regular' }],
+    lang: { latinUpper: true, latinLower: true, numbers: true },
+    grid: {}, toggle: 'lang',
+  };
 }
 
 function buildPage1() {
