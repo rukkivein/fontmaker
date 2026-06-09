@@ -40,7 +40,24 @@ function newDraft() {
 
 function buildPage1() {
   if (!draft) draft = newDraft();
+  buildCountries();
   renderMasters(); updateMasterAdd(); setToggle(draft.toggle); renderProfile();
+}
+
+// Country dropdown → auto-select the sets that country's language needs.
+function buildCountries() {
+  var sel = $('countrySel'); sel.innerHTML = '';
+  var o0 = document.createElement('option'); o0.value = ''; o0.textContent = 'Pick a country → auto-select its sets…'; sel.appendChild(o0);
+  charsets.COUNTRIES.forEach(function (c, i) {
+    var o = document.createElement('option'); o.value = String(i); o.textContent = c.name; sel.appendChild(o);
+  });
+}
+function onCountry() {
+  var v = $('countrySel').value; if (v === '') return;
+  var c = charsets.COUNTRIES[+v];
+  c.sets.forEach(function (k) { draft.lang[k] = true; });
+  $('countrySel').value = '';
+  setToggle('lang'); renderProfile();
 }
 
 // The + is disabled until a non-empty, non-duplicate master name is typed
@@ -82,6 +99,7 @@ function setToggle(which) {
   $('tg-grid').classList.toggle('active', which === 'grid');
   $('tg-lang').querySelector('.pill-ar').classList.toggle('flip', which === 'lang');
   $('tg-grid').querySelector('.pill-ar').classList.toggle('flip', which === 'grid');
+  $('countryBar').classList.toggle('hidden', which !== 'lang');
   renderRightList(); updatePillLabels();
 }
 function curItems() { return draft.toggle === 'lang' ? charsets.ALPHABETS : charsets.GRIDS; }
@@ -418,6 +436,7 @@ function boot() {
   $('m-ddbtn').addEventListener('click', function () { $('m-list').classList.toggle('hidden'); });
   $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
   $('tg-grid').addEventListener('click', function () { setToggle('grid'); });
+  $('countrySel').addEventListener('change', onCountry);
   $('nf-family').addEventListener('input', renderProfile);
   $('nf-import').addEventListener('click', onImport);
   $('nf-create').addEventListener('click', onStartCreating);

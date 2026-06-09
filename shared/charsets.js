@@ -143,6 +143,31 @@ function collectGlyphs(alphabetKeys, opts) {
 // The "classic" sets every common font ships — flagged important in the UI.
 const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math'];
 
+// Pick a country → auto-select the sets its language needs (+ the common
+// numbers/punctuation/symbols/math every font ships). Picking a country UNIONS
+// these into the current selection.
+const COMMON = ['numbers', 'punct', 'symbols', 'math'];
+const LAT = ['latinUpper', 'latinLower'];
+const COUNTRIES = [
+  { name: 'United States / UK', sets: LAT.concat(COMMON) },
+  { name: 'Germany / France / Spain / Italy', sets: LAT.concat(['latinWest'], COMMON) },
+  { name: 'Turkey', sets: LAT.concat(['latinWest', 'latinCentral'], COMMON) },
+  { name: 'Poland / Czechia / Hungary', sets: LAT.concat(['latinWest', 'latinCentral'], COMMON) },
+  { name: 'Scandinavia (Nordic)', sets: LAT.concat(['latinWest'], COMMON) },
+  { name: 'Vietnam', sets: LAT.concat(['latinWest', 'latinVietnamese'], COMMON) },
+  { name: 'Russia / Ukraine / Serbia', sets: ['cyrillic'].concat(LAT, COMMON) },
+  { name: 'Greece', sets: ['greek'].concat(LAT, COMMON) },
+  { name: 'Saudi Arabia / Egypt', sets: ['arabic'].concat(COMMON) },
+  { name: 'Israel', sets: ['hebrew'].concat(LAT, COMMON) },
+  { name: 'Japan', sets: ['hiragana', 'katakana', 'hanzi'].concat(LAT, COMMON) },
+  { name: 'China', sets: ['hanzi'].concat(LAT, COMMON) },
+  { name: 'Korea', sets: ['hangul'].concat(LAT, COMMON) },
+  { name: 'India (Hindi)', sets: ['devanagari'].concat(LAT, COMMON) },
+  { name: 'Thailand', sets: ['thai'].concat(LAT, COMMON) },
+  { name: 'Armenia', sets: ['armenian'].concat(LAT, COMMON) },
+  { name: 'Georgia', sets: ['georgian'].concat(LAT, COMMON) },
+];
+
 // A short sample of the characters a set brings (shown instead of prose).
 function sampleChars(key, n) {
   const a = ALPHABET_BY_KEY[key];
@@ -156,6 +181,6 @@ function sampleChars(key, n) {
 }
 
 module.exports = {
-  ALPHABETS, ALPHABET_BY_KEY, GRIDS, GRID_BY_KEY, MASTER_TYPES, ESSENTIAL,
+  ALPHABETS, ALPHABET_BY_KEY, GRIDS, GRID_BY_KEY, MASTER_TYPES, ESSENTIAL, COUNTRIES,
   collectGlyphs, sampleChars,
 };
