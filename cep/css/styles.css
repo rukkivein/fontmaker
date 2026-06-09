@@ -193,12 +193,12 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ul { width: 100%; height: 8px; margin-top: 5px; background-color: #9a9a9a;
   -webkit-mask: url('../assets/line.svg') no-repeat left center / auto 100%; mask: url('../assets/line.svg') no-repeat left center / auto 100%; }
 /* Profile underline: same scale as settings (auto 100%) → identical thickness;
-   shorter element just shows less of the stroke. */
-.ul-sm { width: 84%; -webkit-mask-size: auto 100%; mask-size: auto 100%; }
+   shorter element just shows less of the stroke. Mirrored for visual variety. */
+.ul-sm { width: 84%; -webkit-mask-size: auto 100%; mask-size: auto 100%; transform: scaleX(-1); }
 .rune-body { flex: 1 1 auto; display: flex; gap: 12px; padding: 8px 14px 12px; min-height: 0; flex-wrap: nowrap; }
 .rune-left { flex: 1 1 200px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rune-right { flex: 1 1 240px; min-width: 0; min-height: 0; border: 1px solid #3a3a3a; border-radius: 10px; overflow: hidden; display: flex; }
-.pill { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 8px; background: transparent; color: #eaeaea; border: 2px solid #6a6a6a; border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 700; cursor: pointer; }
+.pill { display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 8px; background: transparent; color: #eaeaea; border: 2px solid #6a6a6a; border-radius: 999px; padding: 9px 16px; font-size: 13px; font-weight: 700; cursor: pointer; }
 .pill .pill-ar { margin-left: auto; flex: 0 0 auto; width: 11px; height: 11px; transform: rotate(-90deg);
   -webkit-mask: url('../assets/cursor.svg') no-repeat center / contain; mask: url('../assets/cursor.svg') no-repeat center / contain; background-color: #cfcfcf; }
 .pill .pill-ar.flip { transform: rotate(90deg); }
