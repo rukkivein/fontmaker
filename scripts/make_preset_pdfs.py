@@ -77,28 +77,36 @@ def build_pdf(pages, path):
     print('wrote', path, n, 'pages')
 
 def draw_A(pg, X, Y, advance, d, cell):
-    """The user's 3-shape A, fitted to the grid: feet flush to the sidebearings
-    (full advance width), full cap height, every point snapped to the em grid
-    (cap/baseline/edges kept exact). All shapes are wound the same way and filled
-    with ONE nonzero fill so overlaps never punch holes; low opacity over guides."""
-    minPx = min(p[0] for sh in A_SHAPES for p in sh)
-    def fxu(px): return (px - minPx) / A_W * advance        # x-extent -> [0, advance]
+    """Construct a thin, grid-fitted A from scratch (points are free; they only
+    need to land on the grid): two parallelogram legs of a weight-derived width,
+    feet at the sidebearings, apex at the cap centre, a crossbar on a grid line.
+    One nonzero fill at low opacity."""
+    w = d['weight']
+    legW = max(cell, round((0.04 + w / 100.0 * 0.05) * UPM / cell) * cell)   # snapped stroke
+    cx = advance / 2.0
+    ybar = max(cell, round(CAP * 0.40 / cell) * cell)
+    def leftInner(y): return legW + (cx - 1.5 * legW) * (y / CAP)            # left leg inner edge
+    bL = leftInner(ybar); bR = advance - bL
+    shapes = [
+        [(0, 0), (legW, 0), (cx + legW / 2.0, CAP), (cx - legW / 2.0, CAP)],
+        [(advance, 0), (advance - legW, 0), (cx - legW / 2.0, CAP), (cx + legW / 2.0, CAP)],
+        [(bL, ybar), (bR, ybar), (bR, ybar + legW), (bL, ybar + legW)],
+    ]
     def snapX(x):
         if x <= cell * 0.5: return 0.0
         if x >= advance - cell * 0.5: return advance
-        c = advance / 2.0                       # snap about the centre → stays symmetric
-        return c + round((x - c) / cell) * cell
+        c = advance / 2.0; return c + round((x - c) / cell) * cell
     def snapY(y):
         if abs(y - CAP) <= cell * 0.6: return float(CAP)
         if abs(y) <= cell * 0.6: return 0.0
         return round(y / cell) * cell
     ops = []
-    for sh in A_SHAPES:
-        pts = [(snapX(fxu(px)), snapY(py)) for (px, py) in sh]
+    for sh in shapes:
+        pts = [(snapX(x), snapY(y)) for (x, y) in sh]
         area = 0.0
         for i in range(len(pts)):
             x1, y1 = pts[i]; x2, y2 = pts[(i + 1) % len(pts)]; area += x1 * y2 - x2 * y1
-        if area < 0: pts = pts[::-1]                         # normalize to CCW
+        if area < 0: pts = pts[::-1]
         page = [(X(x), Y(y)) for (x, y) in pts]
         ops.append('%.2f %.2f m' % page[0])
         for p in page[1:]:
@@ -113,14 +121,15 @@ def render(preset):
     W, H = 595.0, 842.0
     pg = Page(W, H)
     d = preset['params']; m = preset['metrics']; grids = preset['grids']
+    cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
     advance = round(UPM * (0.40 + d['width'] / 100.0 * 0.35))
+    advance = max(2 * cell, round(advance / (2 * cell)) * (2 * cell))   # grid-aligned (even cells -> centre on grid)
     scale = 560.0 / (ASC - DESC)
     ox = (W - advance * scale) / 2.0
     oy = 150.0
     def X(fx): return ox + fx * scale
     def Y(fy): return oy + (fy - DESC) * scale
     cxp = X(advance / 2.0)
-    cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
     wf = next((g['wf'] for g in grids if g.get('kind') == 'circle'), 0.86)
     def L(x1, y1, x2, y2): pg.line(X(x1), Y(y1), X(x2), Y(y2))
     def circ(lo, hi, wfac):
