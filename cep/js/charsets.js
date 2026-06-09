@@ -78,9 +78,9 @@ const ALPHABETS = [
       0x0025, 0x2030, 0x221A, 0x221E, 0x2248, 0x00B5, 0x03C0)) },
 ];
 // Display order: the classic/essential sets first, then by rough popularity.
-const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'symbols',
+const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math',
   'cyrillic', 'greek', 'arabic', 'hebrew', 'hanzi', 'hiragana', 'katakana', 'latinVietnamese',
-  'devanagari', 'thai', 'hangul', 'armenian', 'georgian', 'fractions', 'math'];
+  'devanagari', 'thai', 'hangul', 'armenian', 'georgian'];
 ALPHABETS.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
 const ALPHABET_BY_KEY = {};
 ALPHABETS.forEach(a => { ALPHABET_BY_KEY[a.key] = a; });
@@ -141,7 +141,7 @@ function collectGlyphs(alphabetKeys, opts) {
 }
 
 // The "classic" sets every common font ships — flagged important in the UI.
-const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'symbols'];
+const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math'];
 
 // A short sample of the characters a set brings (shown instead of prose).
 function sampleChars(key, n) {
