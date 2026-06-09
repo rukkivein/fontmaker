@@ -4,10 +4,15 @@ per page. The grids are the point; a single construction letter G is drawn to
 the grid (on the cap circle) at low opacity so the guides show through.
 Reads _presets.json (from shared/dna.js); writes Quick + Advanced PDFs.
 """
-import json, sys, math
+import json, sys, math, os
 
 UPM, ASC, DESC, CAP = 1000, 800, -200, 716
 KAPPA = 0.5523
+
+# The user's construction A (3 shapes), normalized to font units (y-up, baseline
+# 0..cap 716, x centred). Drawn to the grid as the reference letter.
+A_SHAPES = json.load(open(os.path.join(os.path.dirname(__file__), '..', 'shared', 'glyph-A.json'), encoding='utf-8'))
+A_W = max(p[0] for s in A_SHAPES for p in s) - min(p[0] for s in A_SHAPES for p in s)
 
 def esc(s):
     return s.replace('\\', r'\\').replace('(', r'\(').replace(')', r'\)')
@@ -71,43 +76,21 @@ def build_pdf(pages, path):
     open(path, 'wb').write((header + body + xref + trailer).encode('latin-1', 'replace'))
     print('wrote', path, n, 'pages')
 
-def draw_G(pg, X, Y, advance, m, d, wf, scale):
-    """A real, FILLED construction G built on the cap circle: an outer/inner
-    ellipse ring open on the right (the C), plus a crossbar + spur. Filled with
-    nonzero winding at low opacity so the grids show through."""
-    cx = X(advance / 2.0)
-    cyTop, cyBot = Y(CAP), Y(0)
-    cy = (cyTop + cyBot) / 2.0
-    Ry = (cyTop - cyBot) / 2.0
-    Rx = Ry * wf
-    t = max(14.0, (0.07 + d['weight'] / 100.0 * 0.09) * (CAP * scale))  # stroke (ring) thickness
-    rx, ry = Rx - t, Ry - t
-    th = 30.0  # opening half-angle on the right
+def draw_A(pg, X, Y, advance, d):
+    """The user's construction A (3 filled shapes), fitted to the grid: full cap
+    height, width bound to the advance (tracks the width axis), centred, one
+    nonzero fill at low opacity so the guides show through."""
+    xs = (advance * 0.86) / A_W
     ops = []
-    def mv(x, y): ops.append('%.2f %.2f m' % (x, y))
-    def ln(x, y): ops.append('%.2f %.2f l' % (x, y))
-    def E(rX, rY, ang):
-        a = math.radians(ang); return (cx + rX * math.cos(a), cy + rY * math.sin(a))
-    # C-ring: outer arc (CCW, th → 360-th), flat terminal, inner arc back (CW), close
-    N = 80
-    mv(*E(Rx, Ry, th))
-    for i in range(1, N + 1):
-        ln(*E(Rx, Ry, th + (360 - 2 * th) * i / N))
-    for i in range(0, N + 1):
-        ln(*E(rx, ry, (360 - th) - (360 - 2 * th) * i / N))
-    ops.append('h')
-    # crossbar: from centre out to the right opening, sitting just below centre
-    by1 = cy + t * 0.15
-    by0 = by1 - t
-    bx0, bx1 = cx - t * 0.15, cx + Rx * 1.0
-    mv(bx0, by0); ln(bx1, by0); ln(bx1, by1); ln(bx0, by1); ops.append('h')
-    # spur: short vertical down from the bar's inner end
-    sx0, sx1 = cx - t * 0.15, cx + t * 0.85
-    sy0, sy1 = cy - Ry * 0.42, by1
-    mv(sx0, sy0); ln(sx1, sy0); ln(sx1, sy1); ln(sx0, sy1); ops.append('h')
+    for sh in A_SHAPES:
+        pts = [(X(px * xs + advance / 2.0), Y(py)) for (px, py) in sh]
+        ops.append('%.2f %.2f m' % pts[0])
+        for p in pts[1:]:
+            ops.append('%.2f %.2f l' % p)
+        ops.append('h')
     pg.q(); pg.gs('GS1'); pg.ops.append('0.10 0.10 0.10 rg')
     pg.ops += ops
-    pg.ops.append('f')   # nonzero fill (C ∪ bar ∪ spur = G)
+    pg.ops.append('f')
     pg.Q()
 
 def render(preset):
@@ -177,7 +160,7 @@ def render(preset):
     mline(DESC, 0.5, 1.1, 'descender %d' % DESC)
 
     # the single construction letter, on the grid, see-through
-    draw_G(pg, X, Y, advance, m, d, wf, scale)
+    draw_A(pg, X, Y, advance, d)
 
     pg.text(ox, 90, 'Construction grid from the Font DNA — metric lines, em grid, circles, broad-nib slants & overshoot. The G is drawn to the grid at low opacity.', 8, 0.5)
     return pg
