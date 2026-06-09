@@ -76,16 +76,31 @@ def build_pdf(pages, path):
     open(path, 'wb').write((header + body + xref + trailer).encode('latin-1', 'replace'))
     print('wrote', path, n, 'pages')
 
-def draw_A(pg, X, Y, advance, d):
-    """The user's construction A (3 filled shapes), fitted to the grid: full cap
-    height, width bound to the advance (tracks the width axis), centred, one
-    nonzero fill at low opacity so the guides show through."""
-    xs = (advance * 0.86) / A_W
+def draw_A(pg, X, Y, advance, d, cell):
+    """The user's 3-shape A, fitted to the grid: feet flush to the sidebearings
+    (full advance width), full cap height, every point snapped to the em grid
+    (cap/baseline/edges kept exact). All shapes are wound the same way and filled
+    with ONE nonzero fill so overlaps never punch holes; low opacity over guides."""
+    minPx = min(p[0] for sh in A_SHAPES for p in sh)
+    def fxu(px): return (px - minPx) / A_W * advance        # x-extent -> [0, advance]
+    def snapX(x):
+        if x <= cell * 0.5: return 0.0
+        if x >= advance - cell * 0.5: return advance
+        return round(x / cell) * cell
+    def snapY(y):
+        if abs(y - CAP) <= cell * 0.6: return float(CAP)
+        if abs(y) <= cell * 0.6: return 0.0
+        return round(y / cell) * cell
     ops = []
     for sh in A_SHAPES:
-        pts = [(X(px * xs + advance / 2.0), Y(py)) for (px, py) in sh]
-        ops.append('%.2f %.2f m' % pts[0])
-        for p in pts[1:]:
+        pts = [(snapX(fxu(px)), snapY(py)) for (px, py) in sh]
+        area = 0.0
+        for i in range(len(pts)):
+            x1, y1 = pts[i]; x2, y2 = pts[(i + 1) % len(pts)]; area += x1 * y2 - x2 * y1
+        if area < 0: pts = pts[::-1]                         # normalize to CCW
+        page = [(X(x), Y(y)) for (x, y) in pts]
+        ops.append('%.2f %.2f m' % page[0])
+        for p in page[1:]:
             ops.append('%.2f %.2f l' % p)
         ops.append('h')
     pg.q(); pg.gs('GS1'); pg.ops.append('0.10 0.10 0.10 rg')
@@ -160,7 +175,8 @@ def render(preset):
     mline(DESC, 0.5, 1.1, 'descender %d' % DESC)
 
     # the single construction letter, on the grid, see-through
-    draw_A(pg, X, Y, advance, d)
+    cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
+    draw_A(pg, X, Y, advance, d, cell)
 
     pg.text(ox, 90, 'Construction grid from the Font DNA — metric lines, em grid, circles, broad-nib slants & overshoot. The G is drawn to the grid at low opacity.', 8, 0.5)
     return pg
