@@ -86,7 +86,8 @@ def draw_A(pg, X, Y, advance, d, cell):
     def snapX(x):
         if x <= cell * 0.5: return 0.0
         if x >= advance - cell * 0.5: return advance
-        return round(x / cell) * cell
+        c = advance / 2.0                       # snap about the centre → stays symmetric
+        return c + round((x - c) / cell) * cell
     def snapY(y):
         if abs(y - CAP) <= cell * 0.6: return float(CAP)
         if abs(y) <= cell * 0.6: return 0.0
@@ -128,14 +129,14 @@ def render(preset):
     pg.text(ox, H - 156, '   '.join('%s %d' % (k, d[k]) for k in keys), 8.5, 0.5)
 
     # sidebearings (verticals)
-    pg.color(0.62); pg.lw(1.0)
+    pg.color(0.6); pg.lw(0.6)
     pg.line(X(0), Y(DESC), X(0), Y(ASC))
     pg.line(X(advance), Y(DESC), X(advance), Y(ASC))
 
     # em grid
     for g in grids:
         if g.get('kind') == 'emsquare':
-            cell = g.get('cell', 62); pg.lw(0.5); pg.color(0.83)
+            cell = g.get('cell', 62); pg.lw(0.35); pg.color(0.85)
             x = cell
             while x < advance:
                 pg.line(X(x), Y(DESC), X(x), Y(ASC)); x += cell
@@ -149,14 +150,18 @@ def render(preset):
             pg.lw(0.5); pg.color(0.78); step = CAP / 3.0; sx = -advance
             while sx < advance * 2:
                 pg.line(X(sx), Y(DESC), X(sx + span / dy), Y(ASC)); sx += step
-    # construction circles (cap + x-height bowls)
+    # construction circles — outer bowls + inner counters at cap, x-height and
+    # the ascender band, so round letters have a fuller circle grid.
     wf = 0.86
     for g in grids:
         if g.get('kind') == 'circle':
-            wf = g.get('wf', 0.86); pg.lw(0.9); pg.color(0.55)
-            for topU in (CAP, m['xHeight']):
-                cy = (Y(0) + Y(topU)) / 2.0; ry = (Y(topU) - Y(0)) / 2.0
+            wf = g.get('wf', 0.86); pg.lw(0.55); pg.color(0.5)
+            bands = [(0, CAP), (0, m['xHeight']), (m['xHeight'], CAP)]
+            for lo, hi in bands:
+                cy = (Y(lo) + Y(hi)) / 2.0; ry = (Y(hi) - Y(lo)) / 2.0
+                inn = ry * 0.17
                 pg.ellipse(X(advance / 2.0), cy, ry * wf, ry)
+                pg.ellipse(X(advance / 2.0), cy, (ry - inn) * wf, ry - inn)
     # overshoot zones (dashed)
     for g in grids:
         if g.get('kind') == 'superellipse':
@@ -168,11 +173,11 @@ def render(preset):
     def mline(fy, g, w, label):
         pg.lw(w); pg.color(g); pg.line(X(0), Y(fy), X(advance), Y(fy))
         pg.text(X(advance) + 7, Y(fy) - 3, label, 7.5, 0.4)
-    mline(ASC, 0.5, 1.1, 'ascender %d' % ASC)
-    mline(CAP, 0.38, 1.2, 'cap height %d' % CAP)
-    mline(m['xHeight'], 0.38, 1.2, 'x-height %d' % m['xHeight'])
-    mline(0, 0.08, 1.7, 'baseline 0')
-    mline(DESC, 0.5, 1.1, 'descender %d' % DESC)
+    mline(ASC, 0.5, 0.8, 'ascender %d' % ASC)
+    mline(CAP, 0.38, 0.9, 'cap height %d' % CAP)
+    mline(m['xHeight'], 0.38, 0.9, 'x-height %d' % m['xHeight'])
+    mline(0, 0.08, 1.2, 'baseline 0')
+    mline(DESC, 0.5, 0.8, 'descender %d' % DESC)
 
     # the single construction letter, on the grid, see-through
     cell = next((g['cell'] for g in grids if g.get('kind') == 'emsquare'), round(UPM / 20))
