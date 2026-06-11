@@ -311,3 +311,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ds-k { flex: 0 0 96px; font-size: 10px; color: var(--txt2); }
 .dna-slider input[type=range] { flex: 1 1 auto; min-width: 0; }
 .ds-v { flex: 0 0 26px; text-align: right; font-size: 10px; color: var(--txt); }
+
+/* "Adjust grid" sub-header above the parameter sliders */
+.grid-adjust-h {
+  margin: 12px 4px 4px; padding-top: 10px; border-top: 1px solid var(--line);
+  font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--txt2);
+}

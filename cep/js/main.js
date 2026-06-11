@@ -30,17 +30,26 @@ function evalScript(code) { return new Promise(function (r) { cs.evalScript(code
 // ============ PAGE 1 — New Font (RuneType Glyphmaker) ============
 // Holds settings only; nothing is generated until Start Creating.
 var draft = null;
+// The few DNA axes that actually shape the construction grid — exposed as
+// sliders so the grid (density, proportions, circles, nib) is adjustable.
+var GRID_PARAMS = [
+  { key: 'gridDensity', label: 'Grid density' },
+  { key: 'width', label: 'Width' },
+  { key: 'xHeight', label: 'x-Height' },
+  { key: 'overshoot', label: 'Overshoot' },
+  { key: 'penAngle', label: 'Pen angle' },
+];
 function newDraft() {
   // Pre-select the most common Latin basics + the recommended grid components.
   var gc = {};
   dna.RECOMMENDED_GRID.forEach(function (k) { gc[k] = true; });
+  var gp = {};
+  GRID_PARAMS.forEach(function (p) { gp[p.key] = dna.BASE[p.key]; });
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    gridMode: 'grid',           // 'grid' (components) | 'advanced' (DNA)
-    gridComps: gc,
-    preset: dna.DEFAULT_PRESET, // Advanced single-select preset
-    dnaCustom: null,            // when set, a custom DNA params object
+    gridComps: gc,     // which construction components are on
+    gridParams: gp,    // adjustable grid parameters
     toggle: 'lang',
   };
 }
@@ -106,19 +115,11 @@ function setToggle(which) {
   $('tg-lang').querySelector('.pill-ar').classList.toggle('flip', which === 'lang');
   $('tg-grid').querySelector('.pill-ar').classList.toggle('flip', which === 'preset');
   $('countryBar').classList.toggle('hidden', which !== 'lang');
-  $('tierBar').classList.toggle('hidden', which !== 'preset');
-  renderTier();
   renderRightList(); updatePillLabels();
-}
-function renderTier() {
-  var tabs = $('tierBar').querySelectorAll('.tier-tab');
-  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tier') === draft.gridMode);
 }
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
-  if (draft.toggle === 'preset') {
-    return draft.gridMode === 'grid' ? renderGridComps(box) : renderAdvanced(box);
-  }
+  if (draft.toggle === 'preset') return renderGrid(box);
   // Language Support — multi-select character sets.
   charsets.ALPHABETS.forEach(function (it) {
     var on = !!draft.lang[it.key];
@@ -133,8 +134,9 @@ function renderRightList() {
     box.appendChild(row);
   });
 }
-// GRID tier — composable, multi-select grid components (overlayable).
-function renderGridComps(box) {
+// The construction GRID (from the preset PDF): composable, multi-select,
+// overlayable components, followed by the adjustable grid parameters.
+function renderGrid(box) {
   dna.GRID_COMPONENTS.forEach(function (c) {
     var on = !!draft.gridComps[c.key];
     var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (c.rec ? ' essential' : '');
@@ -146,57 +148,30 @@ function renderGridComps(box) {
     row.addEventListener('click', function () { draft.gridComps[c.key] = !draft.gridComps[c.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     box.appendChild(row);
   });
-}
-// ADVANCED tier — single-select DNA preset, or Custom DNA (17 sliders).
-function renderAdvanced(box) {
-  dna.QUICK.concat(dna.ADVANCED).forEach(function (p) {
-    var on = !draft.dnaCustom && draft.preset === p.name;
-    var row = document.createElement('div'); row.className = 'rune-item preset' + (on ? ' on' : '');
-    var sub = p.similar ? ('like ' + p.similar) : ('geometry ' + p.params.geometry + ' · contrast ' + p.params.contrast);
-    var txt = document.createElement('div'); txt.className = 'ri-txt';
-    txt.innerHTML = '<div class="ri-t">' + p.name + '</div><div class="ri-d">' + sub + '</div>';
-    var rad = document.createElement('div'); rad.className = 'ri-radio' + (on ? ' on' : '');
-    row.appendChild(txt); row.appendChild(rad);
-    row.addEventListener('click', function () { draft.dnaCustom = null; draft.preset = p.name; renderRightList(); updatePillLabels(); renderProfile(); });
-    box.appendChild(row);
+  // adjustable grid parameters
+  var head = document.createElement('div'); head.className = 'grid-adjust-h'; head.textContent = 'Adjust grid';
+  box.appendChild(head);
+  var wrap = document.createElement('div'); wrap.className = 'dna-sliders';
+  GRID_PARAMS.forEach(function (p) {
+    var row = document.createElement('div'); row.className = 'dna-slider';
+    row.innerHTML = '<span class="ds-k">' + p.label + '</span><input type="range" min="0" max="100" value="' + draft.gridParams[p.key] + '" /><span class="ds-v">' + draft.gridParams[p.key] + '</span>';
+    var inp = row.querySelector('input'), val = row.querySelector('.ds-v');
+    inp.addEventListener('input', function () { draft.gridParams[p.key] = +inp.value; val.textContent = inp.value; });
+    wrap.appendChild(row);
   });
-  var con = !!draft.dnaCustom;
-  var crow = document.createElement('div'); crow.className = 'rune-item preset' + (con ? ' on' : '');
-  crow.innerHTML = '<div class="ri-txt"><div class="ri-t">Custom DNA</div><div class="ri-d">tune the 17 parameters yourself</div></div>';
-  var crad = document.createElement('div'); crad.className = 'ri-radio' + (con ? ' on' : '');
-  crow.appendChild(crad);
-  crow.addEventListener('click', function () {
-    if (!draft.dnaCustom) draft.dnaCustom = Object.assign({}, dna.byName(draft.preset).params);
-    renderRightList(); updatePillLabels(); renderProfile();
-  });
-  box.appendChild(crow);
-  if (con) {
-    var wrap = document.createElement('div'); wrap.className = 'dna-sliders';
-    dna.PARAMS.forEach(function (k) {
-      var min = (k === 'stress') ? -100 : 0;
-      var row = document.createElement('div'); row.className = 'dna-slider';
-      row.innerHTML = '<span class="ds-k">' + k + '</span><input type="range" min="' + min + '" max="100" value="' + draft.dnaCustom[k] + '" /><span class="ds-v">' + draft.dnaCustom[k] + '</span>';
-      var inp = row.querySelector('input'), val = row.querySelector('.ds-v');
-      inp.addEventListener('input', function () { draft.dnaCustom[k] = +inp.value; val.textContent = inp.value; });
-      wrap.appendChild(row);
-    });
-    box.appendChild(wrap);
-  }
+  box.appendChild(wrap);
 }
 function selectedLangLabels() {
   return charsets.ALPHABETS.filter(function (it) { return draft.lang[it.key]; }).map(function (it) { return it.label; });
 }
 function gridSummary() {
-  if (draft.gridMode === 'grid') {
-    var labels = dna.GRID_COMPONENTS.filter(function (c) { return draft.gridComps[c.key]; }).map(function (c) { return c.label; });
-    return labels.length ? labels.join(', ') : '—';
-  }
-  return draft.dnaCustom ? 'Custom DNA' : draft.preset;
+  var labels = dna.GRID_COMPONENTS.filter(function (c) { return draft.gridComps[c.key]; }).map(function (c) { return c.label; });
+  return labels.length ? labels.join(', ') : '—';
 }
 function updatePillLabels() {
   var l = selectedLangLabels();
   $('tg-lang-lbl').textContent = l.length ? l.join(', ') : 'Language Support';
-  $('tg-grid-lbl').textContent = draft.gridMode === 'grid' ? ('Grid · ' + gridSummary()) : gridSummary();
+  $('tg-grid-lbl').textContent = 'Grid · ' + gridSummary();
 }
 
 // --- profile (responsive: values shrink to never push the actions) ---
@@ -205,12 +180,11 @@ function renderProfile() {
   var fam = ($('nf-family') && $('nf-family').value.trim()) || 'Untitled';
   var masters = draft.masters.map(function (m) { return m.name; }).join(', ');
   var langs = selectedLangLabels().join(', ') || '—';
-  var gridHead = draft.gridMode === 'grid' ? 'GRID' : 'STYLE (DNA)';
   p.innerHTML =
     '<div class="p-h">FONT NAME</div><div class="p-v">' + fam + '</div>' +
     '<div class="p-h">MASTERS</div><div class="p-v">' + masters + '</div>' +
     '<div class="p-h">LANGUAGE SUPPORT</div><div class="p-v">' + langs + '</div>' +
-    '<div class="p-h">' + gridHead + '</div><div class="p-v">' + gridSummary() + '</div>';
+    '<div class="p-h">GRID</div><div class="p-v">' + gridSummary() + '</div>';
   fitProfile();
 }
 function fitProfile() {
@@ -235,14 +209,9 @@ function onStartCreating() {
     familyName: ($('nf-family').value.trim() || 'Untitled'),
     masterName: m0.name, masterType: m0.name, alphabets: alphabets,
   };
-  if (draft.gridMode === 'grid') {
-    var comps = Object.keys(draft.gridComps).filter(function (k) { return draft.gridComps[k]; });
-    opts.gridComponents = comps.length ? comps : dna.RECOMMENDED_GRID.slice();
-  } else if (draft.dnaCustom) {
-    opts.dna = draft.dnaCustom;
-  } else {
-    opts.preset = draft.preset;
-  }
+  var comps = Object.keys(draft.gridComps).filter(function (k) { return draft.gridComps[k]; });
+  opts.gridComponents = comps.length ? comps : dna.RECOMMENDED_GRID.slice();
+  opts.dna = draft.gridParams;   // adjustable grid parameters
   var project = glyphset.createProject(opts);
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
@@ -508,9 +477,6 @@ function boot() {
   $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
   $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
-  $('tierBar').querySelectorAll('.tier-tab').forEach(function (t) {
-    t.addEventListener('click', function () { draft.gridMode = t.getAttribute('data-tier'); renderTier(); renderRightList(); updatePillLabels(); renderProfile(); });
-  });
   $('nf-family').addEventListener('input', renderProfile);
   $('nf-import').addEventListener('click', onImport);
   $('nf-create').addEventListener('click', onStartCreating);
