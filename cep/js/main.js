@@ -132,18 +132,21 @@ function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
 function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY }); }
 function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
 function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; }
-// All mirror copies of an item under the active symmetries (axes x=500, y=300).
-function gdVariants(it, gd) {
+// Mirror copies of an item under ITS OWN symmetry flags (stamped at creation,
+// so turning symmetry off later never removes existing mirrors). Axes: x=500, y=300.
+function gdVariants(it) {
   var v = [it];
   function mx(o) { var c = Object.assign({}, o); if (c.cx != null) c.cx = 1000 - c.cx; if (c.x != null) c.x = 1000 - c.x; if (c.angle != null) c.angle = (180 - c.angle + 360) % 360; return c; }
   function my(o) { var c = Object.assign({}, o); if (c.cy != null) c.cy = 600 - c.cy; if (c.y != null) c.y = 600 - c.y; if (c.angle != null) c.angle = (360 - c.angle) % 360; return c; }
-  if (gd.symY) v.push(mx(it));
-  if (gd.symX) v = v.concat(v.map(my));
+  if (it.symY) v.push(mx(it));
+  if (it.symX) { var n = v.length; for (var i = 0; i < n; i++) v.push(my(v[i])); }
   return v.slice(1);
 }
-function gdItemSvg(it, color, width, dash, idx) {
+function gdItemSvg(it, color, width, dash, idx, hit) {
   var sel = idx != null ? (' data-i="' + idx + '"') : '';
-  var st = 'fill="none" stroke="' + color + '" stroke-width="' + width + '"' + (dash ? ' stroke-dasharray="5 4"' : '') + sel;
+  var st;
+  if (hit) st = 'fill="none" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke"' + sel;
+  else st = 'fill="none" stroke="' + color + '" stroke-width="' + width + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + sel;
   if (it.type === 'circle') return '<circle cx="' + gdXs(it.cx) + '" cy="' + gdYs(it.cy) + '" r="' + (it.r * GD_SX) + '" ' + st + '/>';
   if (it.type === 'dline') {
     var a = it.angle * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
@@ -153,30 +156,43 @@ function gdItemSvg(it, color, width, dash, idx) {
   if (it.type === 'vline') return '<line x1="' + gdXs(it.x) + '" y1="' + gdYs(800) + '" x2="' + gdXs(it.x) + '" y2="' + gdYs(-200) + '" ' + st + '/>';
   return '';
 }
+function gdSelected(gd, i) { return gd.selSet && gd.selSet.indexOf(i) >= 0; }
 function gdRedraw(svg, gd) {
   var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
   s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
   s += '<g clip-path="url(#gdclip)">';
   if (gd.gridOn) {
-    var c = gd.gridCell || 50, sel = gd.selGrid;
-    var gc = sel ? '#9cc3f0' : '#dcdcdc';
-    for (var gx = 0; gx <= 1000; gx += c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
-    for (var gy = -200; gy <= 800; gy += c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    // the square grid is always centre-aligned: lines run outward from x=500 / y=300
+    var c = gd.gridCell || 50, gc = gd.selGrid ? '#9cc3f0' : '#e2e2e2';
+    var gx, gy;
+    for (gx = 500; gx <= 1000; gx += c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    for (gx = 500 - c; gx >= 0; gx -= c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    for (gy = 300; gy <= 800; gy += c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    for (gy = 300 - c; gy >= -200; gy -= c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
   }
-  if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.8" stroke-dasharray="7 5" opacity="0.55"/>';
-  if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.8" stroke-dasharray="7 5" opacity="0.55"/>';
-  gd.items.forEach(function (it, i) {
-    gdVariants(it, gd).forEach(function (m) { s += gdItemSvg(m, '#b9b9b9', 1, it.type === 'dline', null); });
-    var on = (i === gd.sel);
-    s += gdItemSvg(it, on ? '#1473e6' : '#3a3a3a', on ? 1.6 : 1.2, it.type === 'dline', i);
+  if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
+  if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
+  // ghosts (mirrors) under the originals; thick visible strokes; fat invisible hit layer on top
+  gd.items.forEach(function (it) {
+    gdVariants(it).forEach(function (m) { s += gdItemSvg(m, '#b5b5b5', 1.8, it.type === 'dline', null, false); });
   });
+  gd.items.forEach(function (it, i) {
+    var on = gdSelected(gd, i);
+    s += gdItemSvg(it, on ? '#1473e6' : '#333333', on ? 3 : 2.4, it.type === 'dline', i, false);
+  });
+  gd.items.forEach(function (it, i) { s += gdItemSvg(it, null, 0, false, i, true); });
+  if (gd._marq) {
+    var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
+    s += '<rect x="' + gdXs(x1) + '" y="' + gdYs(y2) + '" width="' + ((x2 - x1) * GD_SX) + '" height="' + ((y2 - y1) * GD_SY) + '" fill="#1473e6" fill-opacity="0.08" stroke="#1473e6" stroke-width="1" stroke-dasharray="4 3"/>';
+  }
   s += '</g>';
   svg.innerHTML = s;
 }
-// slider <-> selected object mapping
+// slider <-> single selection
 function gdSliderFor(gd) {
-  if (gd.selGrid) return Math.round((gd.gridCell - 25) / 100 * 100);
-  var it = gd.items[gd.sel];
+  if (gd.selGrid) return Math.round(gd.gridCell - 25);
+  if (!gd.selSet || gd.selSet.length !== 1) return null;
+  var it = gd.items[gd.selSet[0]];
   if (!it) return null;
   if (it.type === 'circle') return Math.round((it.r - 20) / 480 * 100);
   if (it.type === 'dline') return Math.round(it.angle / 3.6);
@@ -186,38 +202,48 @@ function gdSliderFor(gd) {
 }
 function gdApplySlider(gd, v) {
   if (gd.selGrid) { gd.gridCell = Math.round(25 + v); return; }
-  var it = gd.items[gd.sel];
+  if (!gd.selSet || gd.selSet.length !== 1) return;
+  var it = gd.items[gd.selSet[0]];
   if (!it) return;
   if (it.type === 'circle') it.r = Math.round(20 + v / 100 * 480);
   else if (it.type === 'dline') it.angle = Math.round(v * 3.6) % 360;
   else if (it.type === 'hline') it.y = Math.round(800 - v * 10);
   else if (it.type === 'vline') it.x = Math.round(v * 10);
 }
+// does an item touch a marquee rect (font units)?
+function gdInRect(it, x1, y1, x2, y2) {
+  if (it.type === 'circle') return it.cx + it.r >= x1 && it.cx - it.r <= x2 && it.cy + it.r >= y1 && it.cy - it.r <= y2;
+  if (it.type === 'dline') return it.cx >= x1 && it.cx <= x2 && it.cy >= y1 && it.cy <= y2;
+  if (it.type === 'hline') return it.y >= y1 && it.y <= y2;
+  if (it.type === 'vline') return it.x >= x1 && it.x <= x2;
+  return false;
+}
 function renderGridDesigner(box) {
   var gd = draft.gridDesign;
-  var wrap = document.createElement('div'); wrap.className = 'gd-wrap';
+  if (!gd.selSet) gd.selSet = [];
+  var wrap = document.createElement('div'); wrap.className = 'gd-wrap'; wrap.tabIndex = 0;
   wrap.innerHTML =
     '<div class="gd-top">' +
       '<div class="gd-toolcol">' +
         '<div class="gd-tools">' +
           '<button class="gd-tool" data-t="circle" title="Add circle"><span class="gd-ic-circle"></span></button>' +
-          '<button class="gd-tool" data-t="dline" title="Add dashed line (0–360°)"><span class="gd-ic-dline"></span></button>' +
+          '<button class="gd-tool" data-t="dline" title="Add dashed line (0-360)"><span class="gd-ic-dline"></span></button>' +
           '<button class="gd-tool" data-t="grid" title="Square grid on/off"><span class="gd-ic-grid"></span></button>' +
         '</div>' +
         '<input class="gd-slider" type="range" min="0" max="100" value="50" disabled title="Size / angle of the selection" />' +
       '</div>' +
       '<div class="gd-side">' +
-        '<button class="gd-sym" data-a="symY" title="Vertical symmetry"></button>' +
-        '<button class="gd-sym" data-a="symX" title="Horizontal symmetry"></button>' +
+        '<button class="gd-sym" data-a="symY" title="Vertical symmetry (applies to newly added items)"></button>' +
+        '<button class="gd-sym" data-a="symX" title="Horizontal symmetry (applies to newly added items)"></button>' +
         '<button class="gd-hist" data-a="undo" title="Undo"></button>' +
         '<button class="gd-hist" data-a="redo" title="Redo"></button>' +
       '</div>' +
     '</div>' +
     '<div class="gd-mid">' +
       '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
-      '<div class="gd-vbar" title="Add a vertical guide"></div>' +
+      '<div class="gd-vbar" title="Drag onto the canvas to drop a vertical guide"></div>' +
     '</div>' +
-    '<div class="gd-hbar" title="Add a baseline"></div>';
+    '<div class="gd-hbar" title="Drag onto the canvas to drop a baseline"></div>';
   box.appendChild(wrap);
 
   var svg = wrap.querySelector('.gd-canvas');
@@ -232,22 +258,22 @@ function renderGridDesigner(box) {
     wrap.querySelector('[data-a=symX]').classList.toggle('on', gd.symX);
     updatePillLabels(); renderProfile();
   }
-  function select(i, grid) { gd.sel = i; gd.selGrid = !!grid; sync(); }
-  function addItem(it) { gdPush(gd); gd.items.push(it); select(gd.items.length - 1, false); }
-
+  function addItem(it) {
+    // stamp the active symmetry onto the item — its mirrors live with IT
+    it.symX = gd.symX; it.symY = gd.symY;
+    gdPush(gd); gd.items.push(it); gd.selSet = [gd.items.length - 1]; gd.selGrid = false; sync();
+  }
   wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
   wrap.querySelector('[data-t=dline]').addEventListener('click', function () { addItem({ type: 'dline', cx: 500, cy: 300, angle: 45 }); });
-  wrap.querySelector('[data-t=grid]').addEventListener('click', function () { gdPush(gd); gd.gridOn = !gd.gridOn; select(-1, gd.gridOn); });
-  wrap.querySelector('.gd-hbar').addEventListener('click', function () { addItem({ type: 'hline', y: 0 }); });
-  wrap.querySelector('.gd-vbar').addEventListener('click', function () { addItem({ type: 'vline', x: 500 }); });
-  wrap.querySelector('[data-a=symY]').addEventListener('click', function () { gdPush(gd); gd.symY = !gd.symY; sync(); });
-  wrap.querySelector('[data-a=symX]').addEventListener('click', function () { gdPush(gd); gd.symX = !gd.symX; sync(); });
-  wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); sync(); });
-  wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); sync(); });
+  wrap.querySelector('[data-t=grid]').addEventListener('click', function () { gdPush(gd); gd.gridOn = !gd.gridOn; gd.selGrid = gd.gridOn; gd.selSet = []; sync(); });
+  wrap.querySelector('[data-a=symY]').addEventListener('click', function () { gd.symY = !gd.symY; sync(); });
+  wrap.querySelector('[data-a=symX]').addEventListener('click', function () { gd.symX = !gd.symX; sync(); });
+  wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); gd.selSet = []; sync(); });
+  wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); gd.selSet = []; sync(); });
   slider.addEventListener('input', function () { gdApplySlider(gd, +slider.value); gdRedraw(svg, gd); });
   slider.addEventListener('change', function () { gdPush(gd); updatePillLabels(); renderProfile(); });
 
-  // select & drag items on the canvas
+  // ---- pointer interactions: move / marquee / ruler guides (Photoshop-like) ----
   function svgPoint(ev) {
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
     var p = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -255,22 +281,76 @@ function renderGridDesigner(box) {
   }
   var drag = null;
   svg.addEventListener('mousedown', function (ev) {
+    ev.preventDefault(); wrap.focus();
     var t = ev.target.closest ? ev.target.closest('[data-i]') : null;
-    if (!t) { select(-1, gd.gridOn && gd.selGrid); return; }
-    var i = +t.getAttribute('data-i'), p = svgPoint(ev), it = draft.gridDesign.items[i];
-    gdPush(gd);
-    drag = { i: i, ox: p.fx - (it.cx != null ? it.cx : (it.x != null ? it.x : 0)), oy: p.fy - (it.cy != null ? it.cy : (it.y != null ? it.y : 0)) };
-    select(i, false);
+    var p = svgPoint(ev);
+    if (t) {
+      var i = +t.getAttribute('data-i');
+      if (!gdSelected(gd, i)) { gd.selSet = [i]; gd.selGrid = false; }
+      gdPush(gd);
+      drag = { mode: 'move', sx: p.fx, sy: p.fy, orig: gd.selSet.map(function (k) { var o = gd.items[k]; return { i: k, cx: o.cx, cy: o.cy, x: o.x, y: o.y }; }) };
+      sync();
+    } else {
+      gd.selSet = []; gd.selGrid = false;
+      drag = { mode: 'marq' };
+      gd._marq = { x1: p.fx, y1: p.fy, x2: p.fx, y2: p.fy };
+      sync();
+    }
   });
-  svg.addEventListener('mousemove', function (ev) {
+  // ruler bars: press & drag onto the canvas — the guide follows the pointer
+  function startGuide(ev, type) {
+    ev.preventDefault(); wrap.focus();
+    var it = type === 'vline' ? { type: 'vline', x: 1000 } : { type: 'hline', y: -200 };
+    it.symX = gd.symX; it.symY = gd.symY;
+    gdPush(gd); gd.items.push(it);
+    gd.selSet = [gd.items.length - 1]; gd.selGrid = false;
+    drag = { mode: 'guide', i: gd.items.length - 1 };
+    sync();
+  }
+  wrap.querySelector('.gd-vbar').addEventListener('mousedown', function (ev) { startGuide(ev, 'vline'); });
+  wrap.querySelector('.gd-hbar').addEventListener('mousedown', function (ev) { startGuide(ev, 'hline'); });
+  window.addEventListener('mousemove', function (ev) {
     if (!drag) return;
-    var p = svgPoint(ev), it = gd.items[drag.i];
-    if (it.cx != null) { it.cx = Math.max(0, Math.min(1000, Math.round(p.fx - drag.ox))); it.cy = Math.max(-200, Math.min(800, Math.round(p.fy - drag.oy))); }
-    else if (it.x != null) it.x = Math.max(0, Math.min(1000, Math.round(p.fx - drag.ox)));
-    else if (it.y != null) it.y = Math.max(-200, Math.min(800, Math.round(p.fy - drag.oy)));
-    gdRedraw(svg, gd);
+    var p = svgPoint(ev);
+    if (drag.mode === 'move') {
+      var dx = p.fx - drag.sx, dy = p.fy - drag.sy;
+      drag.orig.forEach(function (o) {
+        var it = gd.items[o.i]; if (!it) return;
+        if (o.cx != null) { it.cx = Math.max(0, Math.min(1000, Math.round(o.cx + dx))); it.cy = Math.max(-200, Math.min(800, Math.round(o.cy + dy))); }
+        if (o.x != null) it.x = Math.max(0, Math.min(1000, Math.round(o.x + dx)));
+        if (o.y != null) it.y = Math.max(-200, Math.min(800, Math.round(o.y + dy)));
+      });
+      gdRedraw(svg, gd);
+    } else if (drag.mode === 'marq') {
+      gd._marq.x2 = p.fx; gd._marq.y2 = p.fy;
+      gdRedraw(svg, gd);
+    } else if (drag.mode === 'guide') {
+      var it = gd.items[drag.i]; if (!it) return;
+      if (it.type === 'vline') it.x = Math.max(0, Math.min(1000, Math.round(p.fx)));
+      else it.y = Math.max(-200, Math.min(800, Math.round(p.fy)));
+      gdRedraw(svg, gd);
+    }
   });
-  window.addEventListener('mouseup', function () { if (drag) { drag = null; sync(); } });
+  window.addEventListener('mouseup', function () {
+    if (!drag) return;
+    if (drag.mode === 'marq' && gd._marq) {
+      var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
+      gd.selSet = [];
+      gd.items.forEach(function (it, i) { if (gdInRect(it, x1, y1, x2, y2)) gd.selSet.push(i); });
+      delete gd._marq;
+    }
+    drag = null; sync();
+  });
+  // Delete / Backspace removes the selection
+  wrap.addEventListener('keydown', function (ev) {
+    if ((ev.key === 'Delete' || ev.key === 'Backspace') && gd.selSet.length) {
+      ev.preventDefault();
+      gdPush(gd);
+      gd.items = gd.items.filter(function (_, i) { return !gdSelected(gd, i); });
+      gd.selSet = [];
+      sync();
+    }
+  });
   sync();
 }
 function selectedLangLabels() {

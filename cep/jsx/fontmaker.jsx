@@ -159,9 +159,10 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
     var fx = function (u) { return left + (u / 1000) * w; };
     var items = [];
     for (var di = 0; di < de.items.length; di++) {
+      // symmetry is stamped per item at creation time (not a global toggle)
       var it = de.items[di], vs = [it];
-      if (de.symY) vs.push(fmMirror(it, true, false));
-      if (de.symX) { var n = vs.length; for (var vi = 0; vi < n; vi++) vs.push(fmMirror(vs[vi], false, true)); }
+      if (it.symY) vs.push(fmMirror(it, true, false));
+      if (it.symX) { var n = vs.length; for (var vi = 0; vi < n; vi++) vs.push(fmMirror(vs[vi], false, true)); }
       for (var v = 0; v < vs.length; v++) items.push(vs[v]);
     }
     for (var ii = 0; ii < items.length; ii++) {
