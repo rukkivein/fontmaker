@@ -140,45 +140,43 @@ var GD_PY = (GD_H - 1000 * GD_SY) / 2;
 // 519, cap-box centre (500,358), φ = 1.618) ----
 var GD_PHI = 1.61803398875;
 var GD_PRESETS = [
-  { key: 'construction', label: 'Construction Web' },
-  { key: 'golden', label: 'Golden Ratio' },
-  { key: 'lettering', label: 'Lettering Grid' },
+  { key: 'xtall', label: 'Tall x-Height' },
+  { key: 'xregular', label: 'Regular x-Height' },
+  { key: 'xsmall', label: 'Small x-Height' },
   { key: 'calligraphic', label: 'Calligraphic' },
   { key: 'modular', label: 'Modular' },
   { key: 'copyvector', label: 'Paste Vector' },
 ];
+// The three x-height presets share one construction: a SOLID portrait
+// rectangle (baseline, cap, sidebearings) with its optical allowance dashed on
+// all four sides, plus a SOLID x-height line (the upper/lowercase divide) with
+// dashed optical allowance above and below. Only the x-height differs:
+// tall lowercase / Arial-standard / small lowercase ("A vs a").
+function gdLetterBox(xh) {
+  var CAP = 716, OV = 15, L = 60, Rt = 940;
+  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: a }; }
+  function h(y) { return { type: 'hline', y: Math.round(y) }; }
+  function v(x) { return { type: 'vline', x: Math.round(x) }; }
+  return { grid: true, cell: 50, items: [
+    // solid rectangle
+    h(0), h(CAP), v(L), v(Rt),
+    // optical allowance of the rectangle (dashed, all four sides)
+    dl(500, -OV, 0), dl(500, CAP + OV, 0), dl(L - OV, 300, 90), dl(Rt + OV, 300, 90),
+    // the uppercase/lowercase divide + its optical allowance
+    h(xh), dl(500, xh - OV, 0), dl(500, xh + OV, 0),
+  ] };
+}
 function gdPresetItems(key) {
   // em geometry: x 0..1000, baseline 0, cap 716, x-height 519, centre (500,358)
-  var CAP = 716, XH = 519, CY = 358, R = 358;
-  var XA = Math.atan2(CAP, 1000) * 180 / Math.PI;  // corner-to-corner X  (35.6°)
-  var AP = Math.atan2(CAP, 500) * 180 / Math.PI;   // corner-to-mid apex  (55.1°)
+  var CAP = 716, XH = 519, CY = 358;
   function c(cx, cy, r) { return { type: 'circle', cx: cx, cy: cy, r: Math.round(r) }; }
-  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: Math.round(a * 10) / 10 }; }
+  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: a }; }
   function h(y) { return { type: 'hline', y: Math.round(y) }; }
   function v(x) { return { type: 'vline', x: Math.round(x) }; }
   switch (key) {
-    case 'construction': // the classic type-construction web: rows/cols + full diagonal web + stacked circles
-      return { grid: true, cell: 50, items: [
-        h(0), h(CAP), h(CAP / 4), h(CAP / 2), h(3 * CAP / 4),
-        v(250), v(500), v(750),
-        dl(500, CY, XA), dl(500, CY, 180 - XA),                       // corner X
-        dl(250, CY, AP), dl(750, CY, 180 - AP),                       // up to the apex
-        dl(250, CY, 180 - AP), dl(750, CY, AP),                       // down to the bottom mid
-        c(500, CY, R), c(500, CAP / 4, CAP / 4), c(500, CY, CAP / 4), c(500, 3 * CAP / 4, CAP / 4),
-      ] };
-    case 'golden': // golden cuts of the em + φ circle progression + corner X
-      return { grid: true, cell: 50, items: [
-        h(0), h(CAP), v(1000 - 1000 / GD_PHI), v(1000 / GD_PHI),
-        h(CAP - CAP / GD_PHI), h(CAP / GD_PHI),
-        dl(500, CY, XA), dl(500, CY, 180 - XA),
-        c(500, CY, R), c(500, CY, R / GD_PHI), c(500, CY, R / GD_PHI / GD_PHI),
-      ] };
-    case 'lettering': // lettering typography grid: quarter arcs in the corners + half arcs + columns
-      return { grid: true, cell: 50, items: [
-        h(0), h(CAP), h(CAP / 2), v(232), v(500), v(768),
-        c(0, 0, 268), c(1000, 0, 268), c(0, CAP, 268), c(1000, CAP, 268),
-        c(500, 0, 268), c(500, CAP, 268), c(500, CY, 134),
-      ] };
+    case 'xtall': return gdLetterBox(590);      // big lowercase (x-height 0.82 cap)
+    case 'xregular': return gdLetterBox(519);   // Arial-standard x-height
+    case 'xsmall': return gdLetterBox(440);     // small lowercase (0.61 cap)
     case 'calligraphic': // 30° broad-nib slant family over the metrics
       return { grid: true, cell: 50, items: [
         h(0), h(XH), h(CAP),
