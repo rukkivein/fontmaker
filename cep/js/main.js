@@ -106,6 +106,7 @@ function setToggle(which) {
 }
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
+  box.classList.toggle('gd-mode', draft.toggle === 'preset'); // designer fills the panel, no scroll
   if (draft.toggle === 'preset') return renderGridDesigner(box);
   // Language Support — multi-select character sets.
   charsets.ALPHABETS.forEach(function (it) {
@@ -240,14 +241,26 @@ function renderGridDesigner(box) {
       '</div>' +
     '</div>' +
     '<div class="gd-mid">' +
-      '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
-      '<div class="gd-vbar" title="Drag onto the canvas to drop a vertical guide"></div>' +
-    '</div>' +
-    '<div class="gd-hbar" title="Drag onto the canvas to drop a baseline"></div>';
+      '<div class="gd-stage">' +
+        '<div class="gd-stage-row">' +
+          '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
+          '<div class="gd-vbar" title="Drag onto the canvas to drop a vertical guide"></div>' +
+        '</div>' +
+        '<div class="gd-hbar" title="Drag onto the canvas to drop a baseline"></div>' +
+      '</div>' +
+    '</div>';
   box.appendChild(wrap);
 
   var svg = wrap.querySelector('.gd-canvas');
   var slider = wrap.querySelector('.gd-slider');
+  // size the A4 to FIT the available height (flex won't derive width from
+  // an svg's aspect ratio reliably) — keeps the whole designer scroll-free
+  function fit() {
+    var row = wrap.querySelector('.gd-stage-row');
+    var h = row.clientHeight || 400;
+    svg.style.width = Math.round(h * GD_W / GD_H) + 'px';
+  }
+  window.addEventListener('resize', fit);
   function sync() {
     gdRedraw(svg, gd);
     var sv = gdSliderFor(gd);
@@ -351,7 +364,7 @@ function renderGridDesigner(box) {
       sync();
     }
   });
-  sync();
+  fit(); sync();
 }
 function selectedLangLabels() {
   return charsets.ALPHABETS.filter(function (it) { return draft.lang[it.key]; }).map(function (it) { return it.label; });
