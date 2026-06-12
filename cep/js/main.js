@@ -20,7 +20,8 @@ var activeFont = -1;
 var selectedSlot = -1;
 var openGlyphIndex = -1; // glyph currently open for editing in Illustrator
 var searchQuery = '';
-var alphaFilter = null;  // alphabet key to filter the grid, or null = all
+var alphaFilters = []; // selected alphabet keys (multi); empty = all
+var activeMaster = 0;   // index into curFont().masters
 var faceSeq = 0;         // unique @font-face family per rebuild
 
 function $(id) { return document.getElementById(id); }
@@ -112,7 +113,7 @@ function setToggle(which) {
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
   box.classList.toggle('gd-mode', draft.toggle === 'preset'); // designer fills the panel, no scroll
-  if (draft.toggle === 'preset') return renderGridDesigner(box);
+  if (draft.toggle === 'preset') return renderGridDesigner(box, draft.gridDesign, function () { updatePillLabels(); renderProfile(); });
   // Language Support — multi-select character sets.
   charsets.ALPHABETS.forEach(function (it) {
     var on = !!draft.lang[it.key];
@@ -225,8 +226,35 @@ function gdItemSvg(it, color, width, dash, idx, hit) {
   return '';
 }
 function gdSelected(gd, i) { return gd.selSet && gd.selSet.indexOf(i) >= 0; }
+function gdView(gd) { if (!gd._view) gd._view = { x: 0, y: 0, s: 1 }; return gd._view; }
+function gdShapePath(contours, dx, dy) {
+  // glyph contours (font units, y-up) -> designer-space path string
+  var d = '';
+  contours.forEach(function (c) {
+    var pts = c.points; if (!pts.length) return;
+    function X(p) { return gdXs(p.x + dx); }
+    function Y(p) { return gdYs(p.y + dy); }
+    d += 'M' + X(pts[0]).toFixed(2) + ' ' + Y(pts[0]).toFixed(2);
+    var segs = c.closed ? pts.length : pts.length - 1;
+    for (var i = 0; i < segs; i++) {
+      var a = pts[i], b = pts[(i + 1) % pts.length];
+      var hasO = a.handleOut && (a.handleOut.x !== a.x || a.handleOut.y !== a.y);
+      var hasI = b.handleIn && (b.handleIn.x !== b.x || b.handleIn.y !== b.y);
+      if (hasO || hasI) {
+        var c1 = a.handleOut || a, c2 = b.handleIn || b;
+        d += 'C' + gdXs(c1.x + dx).toFixed(2) + ' ' + gdYs(c1.y + dy).toFixed(2) + ' ' +
+             gdXs(c2.x + dx).toFixed(2) + ' ' + gdYs(c2.y + dy).toFixed(2) + ' ' +
+             gdXs(b.x + dx).toFixed(2) + ' ' + gdYs(b.y + dy).toFixed(2);
+      } else d += 'L' + gdXs(b.x + dx).toFixed(2) + ' ' + gdYs(b.y + dy).toFixed(2);
+    }
+    if (c.closed) d += 'Z';
+  });
+  return d;
+}
 function gdRedraw(svg, gd) {
+  var v = gdView(gd);
   var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
+  s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
   s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
   s += '<g clip-path="url(#gdclip)">';
   if (gd.gridOn) {
@@ -273,7 +301,12 @@ function gdRedraw(svg, gd) {
     var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
     s += '<rect x="' + gdXs(x1) + '" y="' + gdYs(y2) + '" width="' + ((x2 - x1) * GD_SX) + '" height="' + ((y2 - y1) * GD_SY) + '" fill="#1473e6" fill-opacity="0.08" stroke="#1473e6" stroke-width="1" stroke-dasharray="4 3"/>';
   }
-  s += '</g>';
+  // the glyph's current shape (page 2): solid dark fill, draggable
+  if (gd._shape && gd._shape.length) {
+    s += '<path d="' + gdShapePath(gd._shape, gd._sdx || 0, gd._sdy || 0) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
+  }
+  s += '</g>';   // clip
+  s += '</g>';   // view transform
   svg.innerHTML = s;
 }
 // slider <-> single selection
@@ -306,14 +339,15 @@ function gdInRect(it, x1, y1, x2, y2) {
   if (it.type === 'vline') return it.x >= x1 && it.x <= x2;
   return false;
 }
-function renderGridDesigner(box) {
-  var gd = draft.gridDesign;
+function renderGridDesigner(box, gd, onChange) {
   if (!gd.selSet) gd.selSet = [];
+  var notify = onChange || function () {};
   var wrap = document.createElement('div'); wrap.className = 'gd-wrap'; wrap.tabIndex = 0;
   wrap.innerHTML =
     '<div class="gd-top">' +
       '<div class="gd-toolcol">' +
         '<div class="gd-tools">' +
+          '<button class="gd-tool" data-t="free" title="Freeform: pan the page, zoom with the wheel"><span class="gd-ic-free"></span></button>' +
           '<button class="gd-tool" data-t="circle" title="Add circle"><span class="gd-ic-circle"></span></button>' +
           '<button class="gd-tool" data-t="dline" title="Add dashed line (0-360)"><span class="gd-ic-dline"></span></button>' +
           '<button class="gd-tool" data-t="grid" title="Square grid on/off"><span class="gd-ic-grid"></span></button>' +
@@ -332,11 +366,9 @@ function renderGridDesigner(box) {
     '</div>' +
     '<div class="gd-mid">' +
       '<div class="gd-stage">' +
-        '<div class="gd-stage-row">' +
-          '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
-          '<div class="gd-vbar" title="Drag onto the canvas to drop a vertical guide"></div>' +
-        '</div>' +
-        '<div class="gd-hbar" title="Drag onto the canvas to drop a baseline"></div>' +
+        '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
+        '<div class="gd-vbar" title="Drag onto the page to drop a vertical guide"></div>' +
+        '<div class="gd-hbar" title="Drag onto the page to drop a baseline"></div>' +
       '</div>' +
     '</div>';
   box.appendChild(wrap);
@@ -348,8 +380,8 @@ function renderGridDesigner(box) {
   // the right ruler + gaps) — responsive, never scrolls, rulers always visible
   function fit() {
     var mid = wrap.querySelector('.gd-mid');
-    var availH = Math.max(120, mid.clientHeight - 10);  // - hbar row
-    var availW = Math.max(120, mid.clientWidth - 12);   // - vbar + gap
+    var availH = Math.max(120, mid.clientHeight - 2);
+    var availW = Math.max(120, mid.clientWidth - 2);
     var h = Math.min(availH, availW * GD_H / GD_W);
     var w = h * GD_W / GD_H;
     svg.style.width = Math.round(w) + 'px';
@@ -366,13 +398,19 @@ function renderGridDesigner(box) {
     gbtn.classList.toggle('mul2', gd.gridOn && (gd.gridMul || 1) === 2);
     wrap.querySelector('[data-a=symY]').classList.toggle('on', gd.symY);
     wrap.querySelector('[data-a=symX]').classList.toggle('on', gd.symX);
-    updatePillLabels(); renderProfile();
+    wrap.querySelector('[data-t=free]').classList.toggle('active', gd._tool === 'free');
+    notify();
   }
   function addItem(it) {
     // stamp the active symmetry onto the item — its mirrors live with IT
     it.symX = gd.symX; it.symY = gd.symY;
     gdPush(gd); gd.items.push(it); gd.selSet = [gd.items.length - 1]; gd.selGrid = false; sync();
   }
+  wrap.querySelector('[data-t=free]').addEventListener('click', function () {
+    gd._tool = (gd._tool === 'free') ? null : 'free';
+    if (gd._tool !== 'free') { var v = gdView(gd); v.x = 0; v.y = 0; v.s = 1; } // leaving freeform resets the view
+    sync();
+  });
   wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
   wrap.querySelector('[data-t=dline]').addEventListener('click', function () { addItem({ type: 'dline', cx: 500, cy: 300, angle: 45 }); });
   wrap.querySelector('[data-t=grid]').addEventListener('click', function () {
@@ -398,7 +436,7 @@ function renderGridDesigner(box) {
   wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); gd.selSet = []; sync(); });
   wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); gd.selSet = []; sync(); });
   slider.addEventListener('input', function () { gdApplySlider(gd, +slider.value); gdRedraw(svg, gd); });
-  slider.addEventListener('change', function () { gdPush(gd); updatePillLabels(); renderProfile(); });
+  slider.addEventListener('change', function () { gdPush(gd); notify(); });
   // grid presets — mathematically constructed compositions (replace the canvas)
   wrap.querySelector('.gd-presets').addEventListener('change', function () {
     var pr = gdPresetItems(this.value);
@@ -415,6 +453,18 @@ function renderGridDesigner(box) {
   // mouse wheel nudges the slider (size / angle / cell of the selection)
   var lastWheel = 0;
   wrap.addEventListener('wheel', function (ev) {
+    if (gd._tool === 'free') {
+      ev.preventDefault();
+      var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+      var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
+      var v = gdView(gd);
+      var ns = Math.max(0.5, Math.min(5, v.s * (ev.deltaY > 0 ? 0.9 : 1.1)));
+      v.x = pp.x - (pp.x - v.x) * (ns / v.s);
+      v.y = pp.y - (pp.y - v.y) * (ns / v.s);
+      v.s = ns;
+      gdRedraw(svg, gd);
+      return;
+    }
     if (slider.disabled) return;
     ev.preventDefault();
     var now = Date.now();
@@ -430,13 +480,26 @@ function renderGridDesigner(box) {
   function svgPoint(ev) {
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
     var p = pt.matrixTransform(svg.getScreenCTM().inverse());
-    return { fx: (p.x - GD_PX) / GD_SX, fy: 800 - (p.y - GD_PY) / GD_SY };
+    var v = gdView(gd);
+    var px = (p.x - v.x) / v.s, py = (p.y - v.y) / v.s;
+    return { fx: (px - GD_PX) / GD_SX, fy: 800 - (py - GD_PY) / GD_SY, sx: p.x, sy: p.y };
   }
   var drag = null;
   svg.addEventListener('mousedown', function (ev) {
     ev.preventDefault(); wrap.focus();
-    var t = ev.target.closest ? ev.target.closest('[data-i]') : null;
     var p = svgPoint(ev);
+    if (gd._tool === 'free') {           // freeform: drag pans the page
+      var v0 = gdView(gd);
+      drag = { mode: 'pan', px: p.sx, py: p.sy, vx: v0.x, vy: v0.y };
+      return;
+    }
+    var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
+    if (sh) {                            // drag the glyph shape itself
+      drag = { mode: 'shape', sx: p.fx, sy: p.fy };
+      gd._sdx = 0; gd._sdy = 0;
+      return;
+    }
+    var t = ev.target.closest ? ev.target.closest('[data-i]') : null;
     if (t) {
       var i = +t.getAttribute('data-i');
       if (ev.ctrlKey || ev.metaKey) {
@@ -477,6 +540,17 @@ function renderGridDesigner(box) {
   window.addEventListener('mousemove', function (ev) {
     if (!drag) return;
     var p = svgPoint(ev);
+    if (drag.mode === 'pan') {
+      var v1 = gdView(gd);
+      v1.x = drag.vx + (p.sx - drag.px); v1.y = drag.vy + (p.sy - drag.py);
+      gdRedraw(svg, gd);
+      return;
+    }
+    if (drag.mode === 'shape') {
+      gd._sdx = Math.round(p.fx - drag.sx); gd._sdy = Math.round(p.fy - drag.sy);
+      gdRedraw(svg, gd);
+      return;
+    }
     if (drag.mode === 'move') {
       var dx = p.fx - drag.sx, dy = p.fy - drag.sy;
       drag.orig.forEach(function (o) {
@@ -503,6 +577,10 @@ function renderGridDesigner(box) {
       gd.selSet = [];
       gd.items.forEach(function (it, i) { if (gdInRect(it, x1, y1, x2, y2)) gd.selSet.push(i); });
       delete gd._marq;
+    } else if (drag.mode === 'shape') {
+      var ddx = gd._sdx || 0, ddy = gd._sdy || 0;
+      gd._sdx = 0; gd._sdy = 0;
+      if ((ddx || ddy) && typeof gd._onShapeMove === 'function') gd._onShapeMove(ddx, ddy);
     }
     drag = null; sync();
   });
@@ -579,7 +657,7 @@ function onStartCreating() {
   var project = glyphset.createProject(opts);
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
-  openGlyphIndex = -1; searchQuery = ''; alphaFilter = null;
+  openGlyphIndex = -1; searchQuery = ''; alphaFilters = []; activeMaster = 0;
   draft = null;
   // No document is created here — the plugin just shows the glyphs. A per-glyph
   // artboard opens only when you click a letter (openGlyph).
@@ -587,20 +665,76 @@ function onStartCreating() {
 }
 
 // ============ PAGE 2 — Workspace ============
+var FM_SCALE_PANEL = 0.25; // must match jsx FM_SCALE
 function curFont() { return fonts[activeFont]; }
-function curMasterId() { return curFont().masters[0].id; }
+function curMasterId() { return curFont().masters[activeMaster].id; }
 function isFilled(g) { var l = g.layers[curMasterId()]; return !!(l && l.contours && l.contours.length); }
-function setStatus(m, k) { $('status').textContent = m; $('status').className = 'status' + (k ? ' ' + k : ''); }
+function setStatus(m, k) { var el = $('status'); if (el) { el.textContent = m; el.className = 'status' + (k ? ' ' + k : ''); } }
+function selGlyph() { return selectedSlot >= 0 ? curFont().glyphs[selectedSlot] : null; }
+function glyphLabel(g) { return g.char == null ? g.name : (g.char === ' ' ? '␣' : g.char); }
 
-function renderTabs() {
-  var tabs = $('w-tabs'); tabs.innerHTML = '';
-  fonts.forEach(function (f, i) {
-    var t = document.createElement('div');
-    t.className = 'tab' + (i === activeFont ? ' active' : '');
-    t.textContent = f.meta.familyName + ' · ' + f.masters[0].type;
-    t.addEventListener('click', function () { activeFont = i; selectedSlot = -1; lastSig = {}; renderWorkspace(); });
-    tabs.appendChild(t);
+// ---- master tabs (top bar) ----
+function renderMastersBar() {
+  var bar = $('w-masters'); bar.innerHTML = '';
+  curFont().masters.forEach(function (m, i) {
+    var t = document.createElement('button');
+    t.className = 'w-mtab' + (i === activeMaster ? ' active' : '');
+    t.textContent = m.name;
+    t.addEventListener('click', function () {
+      activeMaster = i; lastSig = {};
+      renderMastersBar(); renderGrid(); refreshTester(); renderWorkDesigner(); updateAssign();
+    });
+    bar.appendChild(t);
   });
+}
+
+// ---- per-glyph construction grid (clones the font standard on first edit) ----
+function fontGD() {
+  var f = curFont();
+  if (!f.gridDesign) f.gridDesign = { items: [], gridOn: true, gridCell: 50, gridMul: 1, symX: false, symY: false };
+  var gd = f.gridDesign;
+  if (!gd.undo) { gd.undo = []; gd.redo = []; gd.selSet = []; gd.sel = -1; gd.selGrid = false; }
+  return gd;
+}
+function glyphGD(g) {
+  if (!g.gridDesign) {
+    var std = fontGD();
+    g.gridDesign = JSON.parse(JSON.stringify({ items: std.items, gridOn: std.gridOn, gridCell: std.gridCell, gridMul: std.gridMul || 1, symX: std.symX, symY: std.symY }));
+  }
+  var gd = g.gridDesign;
+  if (!gd.undo) { gd.undo = []; gd.redo = []; gd.selSet = []; gd.sel = -1; gd.selGrid = false; }
+  return gd;
+}
+
+// ---- the right-hand designer: selected glyph's grid + its live shape ----
+function renderWorkDesigner() {
+  var box = $('w-designer'); if (!box) return;
+  box.innerHTML = '';
+  var g = selGlyph();
+  var gd = g ? glyphGD(g) : fontGD();
+  if (g) {
+    var l = g.layers[curMasterId()];
+    gd._shape = (l && l.contours && l.contours.length) ? l.contours : null;
+    gd._onShapeMove = function (dx, dy) { shiftGlyphShape(g, dx, dy); };
+  } else { gd._shape = null; gd._onShapeMove = null; }
+  renderGridDesigner(box, gd, function () { autosave(); });
+}
+// Dragging the shape on the canvas moves the real outline — and the artwork in
+// the glyph's Illustrator project moves with it.
+function shiftGlyphShape(g, dx, dy) {
+  var l = g.layers[curMasterId()];
+  if (!l || !l.contours || !l.contours.length) return;
+  l.contours.forEach(function (c) {
+    c.points.forEach(function (pt) {
+      pt.x += dx; pt.y += dy;
+      if (pt.handleIn) { pt.handleIn.x += dx; pt.handleIn.y += dy; }
+      if (pt.handleOut) { pt.handleOut.x += dx; pt.handleOut.y += dy; }
+    });
+  });
+  lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
+  evalScript('fmShiftArt(' + JSON.stringify(JSON.stringify({ name: g.name, dx: dx * FM_SCALE_PANEL, dy: dy * FM_SCALE_PANEL })) + ')');
+  renderGrid(); scheduleTester(); autosave(); renderWorkDesigner();
+  setStatus('Shape moved ' + dx + ', ' + dy + ' — synced to Illustrator.', 'ok');
 }
 
 // Build an SVG path (screen coords, Y-down) from a glyph's contours.
@@ -633,117 +767,218 @@ function glyphThumb(g) {
 }
 
 function glyphVisible(g) {
-  if (alphaFilter && g.alphabet !== alphaFilter) return false;
+  if (alphaFilters.length && alphaFilters.indexOf(g.alphabet) < 0) return false;
   return glyphset.glyphMatches(g, searchQuery);
 }
 
 function renderGrid() {
-  var grid = $('grid'); grid.innerHTML = '';
+  var grid = $('grid'); if (!grid) return;
+  grid.innerHTML = '';
   var f = curFont();
-  var shown = 0;
   f.glyphs.forEach(function (g, i) {
     if (!glyphVisible(g)) return;
-    shown++;
     var cell = document.createElement('div');
-    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '') + (i === openGlyphIndex ? ' open' : '');
-    var label = g.char != null ? (g.char === ' ' ? '␣' : g.char) : g.name;
+    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+    var label = glyphLabel(g);
     if (g.char == null) cell.className += ' named';
     if (isFilled(g)) {
-      var th = glyphThumb(g);
-      cell.innerHTML = (th || '') + '<span class="lab">' + label + '</span>';
+      // preview thumbnail + the letter itself stays visible, dark, top-right
+      cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + label + '</span>';
     } else {
       cell.textContent = label;
     }
-    cell.title = g.name + ' — double-click to edit';
-    cell.addEventListener('click', function () { selectedSlot = i; updateAssign(); renderGrid(); });
-    cell.addEventListener('dblclick', function () { selectedSlot = i; updateAssign(); openGlyph(i); renderGrid(); });
+    cell.title = g.name + ' — click to open its project';
+    cell.addEventListener('click', function () {
+      selectedSlot = i;
+      updateAssign(); renderGrid(); renderWorkDesigner();
+      openGlyph(i); // a click opens the glyph's own Illustrator project
+    });
     grid.appendChild(cell);
   });
-  var filled = f.glyphs.filter(isFilled).length;
-  $('filledCount').textContent = filled + ' / ' + f.glyphs.length + (shown !== f.glyphs.length ? ' · ' + shown + ' shown' : '');
-  $('exportBtn').disabled = filled === 0;
 }
 
-// Alphabet filter chips (built from the alphabets present in the font).
+// ---- language filter tabs (multi-select; overflow fades into …) ----
 function renderFilters() {
-  var box = $('glyphFilters'); if (!box) return;
+  var box = $('w-filters'); if (!box) return;
   box.innerHTML = '';
   var f = curFont();
   var keys = [];
   f.glyphs.forEach(function (g) { if (keys.indexOf(g.alphabet) < 0) keys.push(g.alphabet); });
   function chip(label, key) {
     var c = document.createElement('div');
-    c.className = 'fchip' + ((alphaFilter === key) ? ' active' : '');
+    var on = key === null ? alphaFilters.length === 0 : alphaFilters.indexOf(key) >= 0;
+    c.className = 'fchip' + (on ? ' active' : '');
     c.textContent = label;
-    c.addEventListener('click', function () { alphaFilter = key; renderFilters(); renderGrid(); });
+    c.title = label;
+    c.addEventListener('click', function () {
+      if (key === null) alphaFilters = [];
+      else {
+        var ix = alphaFilters.indexOf(key);
+        if (ix >= 0) alphaFilters.splice(ix, 1); else alphaFilters.push(key);
+      }
+      renderFilters(); renderGrid();
+    });
     box.appendChild(c);
   }
   chip('All', null);
   keys.forEach(function (k) {
-    var a = charsets.ALPHABET_BY_KEY[k];
-    chip(a ? a.label : k, k);
+    var al = charsets.ALPHABET_BY_KEY[k];
+    chip(al ? al.label : k, k);
   });
+  // ellipsis when the tabs don't fit
+  box.classList.toggle('overflowing', box.scrollWidth > box.clientWidth + 1);
 }
 
-// Open a glyph for editing in Illustrator (its own artboard, grids + ghost +
-// any existing artwork). Edits stream back via the live-sync poll (no file).
+// ---- open a glyph: ALWAYS its own Illustrator project (never an artboard) ----
 function openGlyph(i) {
-  if (i === openGlyphIndex) return; // already open
   openGlyphIndex = i;
   var f = curFont(), g = f.glyphs[i];
   var layer = g.layers[curMasterId()];
+  var gd = glyphGD(g);
   var cfg = {
     metrics: f.metrics, unitsPerEm: f.unitsPerEm, advanceWidth: g.advanceWidth,
     name: g.name, char: g.char, ghost: g.ghost || g.char || '',
-    grids: f.grids.map(function (x) { return { kind: x.kind, cell: x.cell, penAngle: x.penAngle, overshoot: x.overshoot }; }),
+    grids: dna.designToGrids(gd, f.unitsPerEm),   // the glyph's OWN grid
     contours: (layer && layer.contours) ? layer.contours : [],
   };
-  setStatus('Opening "' + (g.char || g.name) + '" for editing…');
+  setStatus('Opening "' + glyphLabel(g) + '" project…');
   evalScript('fmOpenGlyph(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
     var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (r && r.ok) setStatus('Editing "' + (g.char || g.name) + '" · draws sync back automatically', 'ok');
+    if (r && r.ok) setStatus((r.reused ? 'Switched to' : 'Opened') + ' "' + glyphLabel(g) + '" · edits sync live', 'ok');
     else setStatus('Could not open glyph: ' + ((r && r.error) || '?'), 'err');
   });
 }
 
 function updateAssign() {
-  var ok = selectedSlot >= 0; $('assignBtn').disabled = !ok; $('altBtn').disabled = !ok;
-  $('assignTarget').textContent = ok ? (function () { var g = curFont().glyphs[selectedSlot]; return g.char == null ? g.name : (g.char === ' ' ? 'space' : g.char); })() : '—';
+  var g = selGlyph();
+  $('assignBtn').disabled = !g;
+  $('altBtn').disabled = !g;
+  $('assignChip').textContent = g ? glyphLabel(g) : '—';
+  $('altChip').textContent = g ? glyphLabel(g) : '—';
 }
 
-// ---- special glyphs: alternates & ligatures ----
-function appendArtboardFor(idx) {
-  var f = curFont(), g = f.glyphs[idx];
-  var cfg = {
-    metrics: f.metrics, unitsPerEm: f.unitsPerEm,
-    grids: f.grids.map(function (x) { return { kind: x.kind, cell: x.cell, penAngle: x.penAngle, overshoot: x.overshoot }; }),
-    name: g.name, ghost: g.ghost || '',
-  };
-  evalScript('fmAppendArtboard(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
-    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (!(r && r.ok)) setStatus('Glyph added (artboard not created: ' + ((r && r.error) || '?') + ')', 'err');
-  });
-}
+// ---- modification: alternates & ligatures ----
 function onAlt() {
   if (selectedSlot < 0) return;
   var idx = glyphset.createAlternate(curFont(), selectedSlot);
   if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
-  appendArtboardFor(idx);
-  selectedSlot = idx; renderGrid(); updateAssign();
-  setStatus('Created alternate "' + curFont().glyphs[idx].name + '" → its own artboard.', 'ok');
+  selectedSlot = idx; renderGrid(); updateAssign(); renderWorkDesigner();
+  openGlyph(idx);
+  setStatus('Created alternate "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
+  autosave();
 }
 function onLig() {
   var str = $('ligInput').value.trim();
-  if (str.length < 2) { setStatus('Type ≥2 characters to ligate (e.g. ft).', 'err'); return; }
+  if (str.length !== 2) {
+    setStatus('Ligatures join exactly 2 letters — "' + str + '" has ' + str.length + '.', 'err');
+    return;
+  }
   var idx = glyphset.createLigature(curFont(), str);
   if (idx < 0) { setStatus('Could not create ligature.', 'err'); return; }
-  appendArtboardFor(idx);
-  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign();
-  setStatus('Created ligature "' + curFont().glyphs[idx].name + '" → its own artboard.', 'ok');
+  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign(); renderWorkDesigner();
+  openGlyph(idx);
+  setStatus('Created ligature "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
+  autosave();
+}
+
+// ---- signature. — OpenType name-table metadata ----
+var SIG_FIELDS = [
+  { key: 'familyName', label: 'Family Name' },
+  { key: 'styleName', label: 'Style / Subfamily' },
+  { key: 'designer', label: 'Designer' },
+  { key: 'designerURL', label: 'Designer URL' },
+  { key: 'manufacturer', label: 'Manufacturer / Foundry' },
+  { key: 'vendorURL', label: 'Vendor URL' },
+  { key: 'version', label: 'Version' },
+  { key: 'copyright', label: 'Copyright' },
+  { key: 'trademark', label: 'Trademark' },
+  { key: 'license', label: 'License' },
+  { key: 'licenseURL', label: 'License URL' },
+  { key: 'description', label: 'Description' },
+  { key: 'sampleText', label: 'Sample Text' },
+  { key: 'created', label: 'Created (date)' },
+];
+function openSig() {
+  var f = curFont(), box = $('sigFields'); box.innerHTML = '';
+  if (!f.meta.created) f.meta.created = new Date().toISOString().slice(0, 10);
+  SIG_FIELDS.forEach(function (fl) {
+    var row = document.createElement('label'); row.className = 'fm-row';
+    row.innerHTML = '<span>' + fl.label + '</span>';
+    var inp = document.createElement('input');
+    inp.type = 'text'; inp.value = f.meta[fl.key] || '';
+    inp.setAttribute('data-k', fl.key);
+    row.appendChild(inp);
+    box.appendChild(row);
+  });
+  $('sigModal').classList.remove('hidden');
+}
+function saveSig() {
+  var f = curFont();
+  $('sigFields').querySelectorAll('input[data-k]').forEach(function (inp) {
+    f.meta[inp.getAttribute('data-k')] = inp.value.trim();
+  });
+  $('sigModal').classList.add('hidden');
+  renderMastersBar(); autosave();
+  setStatus('Metadata saved into the project.', 'ok');
+}
+
+// ---- save. — single-file project format or export folder ----
+function serializeProject(f) {
+  // strip runtime-only keys; undo stacks stay out of the file
+  return JSON.stringify(f, function (k, v) {
+    if (k && k.charAt(0) === '_') return undefined;
+    if (k === 'undo' || k === 'redo') return [];
+    return v;
+  });
+}
+function autosave() {
+  try {
+    var dir = cs.getSystemPath(SystemPath.USER_DATA) + '/RuneType';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    if (fonts.length) fs.writeFileSync(dir + '/autosave.runetype', serializeProject(curFont()));
+  } catch (e) { /* best-effort temp save */ }
+}
+function onSaveProject() {
+  var f = curFont();
+  var dlg = '(function(){var fl=File.saveDialog("Save RuneType project","RuneType:*.runetype");if(!fl)return "";if(fl.name.indexOf(".")<0)fl=new File(fl.fsName+".runetype");return fl.fsName;})()';
+  evalScript(dlg).then(function (path) {
+    if (!path) return;
+    try {
+      fs.writeFileSync(path, serializeProject(f));
+      $('saveModal').classList.add('hidden');
+      setStatus('Project saved → ' + path, 'ok');
+    } catch (e) { setStatus('Save failed: ' + e.message, 'err'); }
+  });
+}
+function onExportGo() {
+  if (!$('exOtf').checked) { setStatus('Pick at least one format to export.', 'err'); return; }
+  var f = curFont();
+  evalScript('(function(){var d=Folder.selectDialog("Choose a folder to export into");return d?d.fsName:"";})()').then(function (dir) {
+    if (!dir) return;
+    try {
+      var fam = (f.meta.familyName || 'Font');
+      var folder = dir + '/' + fam.replace(/[^\w\- ]+/g, '').trim();
+      if (!fs.existsSync(folder)) fs.mkdirSync(folder);   // exports land in a folder
+      var n = 0, errs = 0;
+      f.masters.forEach(function (m) {
+        try {
+          var built = fontEngine.buildFont(f, 'otf', {
+            familyName: fam, styleName: m.type || m.name,
+            designer: f.meta.designer || '', version: f.meta.version, masterId: m.id,
+          });
+          fs.writeFileSync(folder + '/' + fam.replace(/\s+/g, '') + '-' + m.name.replace(/\s+/g, '') + '.otf',
+            Buffer.from(new Uint8Array(built.buffer)));
+          n++;
+        } catch (e) { errs++; }
+      });
+      $('saveModal').classList.add('hidden');
+      setStatus('Exported ' + n + ' file(s) → ' + folder + (errs ? ' (' + errs + ' master(s) skipped — no outlines)' : ''), n ? 'ok' : 'err');
+    } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
+  });
 }
 
 function renderWorkspace() {
-  renderTabs(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
+  renderMastersBar(); renderFilters(); renderGrid(); updateAssign(); refreshTester(); renderWorkDesigner();
   setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
 
@@ -758,9 +993,8 @@ function onAssign() {
     if (!contours.length) { setStatus('Selection has no usable outlines.', 'err'); return; }
     if (!glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMasterId())) { setStatus('Could not place selection.', 'err'); return; }
     var g = curFont().glyphs[selectedSlot];
-    var pts = contours.reduce(function (n, c) { return n + c.points.length; }, 0);
-    setStatus('Assigned ' + contours.length + ' contour(s), ' + pts + ' pts → "' + g.char + '".', 'ok');
-    renderGrid(); refreshTester();
+    setStatus('Assigned ' + contours.length + ' contour(s) → "' + glyphLabel(g) + '".', 'ok');
+    renderGrid(); refreshTester(); renderWorkDesigner(); autosave();
   });
 }
 
@@ -768,7 +1002,7 @@ function onAssign() {
 function refreshTester() {
   var f = curFont(); if (!f) return;
   var filled = f.glyphs.filter(isFilled).length;
-  var styleEl = $('fm-faces') || (function () { var s = document.createElement('style'); s.id = 'fm-faces'; document.head.appendChild(s); return s; })();
+  var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
   try {
     var fam = 'FMTest_' + (++faceSeq);
@@ -786,8 +1020,13 @@ function applyTesterCtl() {
   t.style.fontKerning = $('t-kern').value;
   t.style.fontFeatureSettings = $('t-kern').value === 'none' ? '"kern" 0' : '"kern" 1';
 }
+function setTesterBg(darkBg) {
+  $('t-paper').classList.toggle('dark', darkBg);
+  $('bg-b').classList.toggle('on', darkBg);
+  $('bg-w').classList.toggle('on', !darkBg);
+}
 
-// ---- live sync: poll the active artboard, update that glyph live ----
+// ---- live sync: poll the active glyph project, update that glyph live ----
 var POLL_MS = 700, polling = false, lastSig = {}, testerTimer = null;
 function startPolling() { if (polling) return; polling = true; setInterval(pollActive, POLL_MS); }
 function scheduleTester() { if (testerTimer) clearTimeout(testerTimer); testerTimer = setTimeout(refreshTester, 1200); }
@@ -797,7 +1036,11 @@ function pollActive() {
   evalScript('fmReadActive()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { return; }
     if (!res || !res.ok || !res.paths || !res.paths.length) return;
-    var f = curFont(), idx = openGlyphIndex; // the glyph currently being edited
+    var f = curFont();
+    // multiple glyph projects can be open — map the ACTIVE document to its glyph
+    var idx = -1;
+    if (res.glyph) { f.glyphs.forEach(function (g, k) { if (g.name === res.glyph) idx = k; }); }
+    if (idx < 0) idx = openGlyphIndex;
     if (idx < 0 || idx >= f.glyphs.length) return;
     var contours = ilbridge.contoursFromArtboard(res.paths, res.rect, res.scale, f.metrics.descender);
     if (!contours.length) return;
@@ -807,26 +1050,9 @@ function pollActive() {
     if (sig === lastSig[idx]) return;
     lastSig[idx] = sig;
     renderGrid();
-    setStatus('Live · "' + f.glyphs[idx].char + '" updated from artboard', 'ok');
-    scheduleTester();
-  });
-}
-
-// ---- export OTF ----
-function onExport() {
-  var f = curFont(), m = f.masters[0];
-  var meta = { familyName: f.meta.familyName, styleName: m.type || 'Regular', designer: $('designer').value.trim(), version: f.meta.version, masterId: m.id };
-  var fileName = (f.meta.familyName.replace(/\s+/g, '') || 'Font') + '-' + (m.type || 'Regular') + '.otf';
-  setStatus('Choose where to save…');
-  var dlg = '(function(){var f=File.saveDialog("Save font","OTF:*.otf");if(!f)return "";if(f.name.indexOf(".")<0)f=new File(f.fsName+".otf");return f.fsName;})()';
-  evalScript(dlg).then(function (p) {
-    if (!p) { setStatus('Export cancelled.'); return; }
-    try {
-      setStatus('Building font…');
-      var built = fontEngine.buildFont(f, 'otf', meta);
-      fs.writeFileSync(p, Buffer.from(new Uint8Array(built.buffer)));
-      setStatus('Exported ' + built.glyphCount + ' glyphs → ' + p, 'ok');
-    } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
+    if (idx === selectedSlot) renderWorkDesigner();
+    setStatus('Live · "' + glyphLabel(f.glyphs[idx]) + '" updated from its project', 'ok');
+    scheduleTester(); autosave();
   });
 }
 
@@ -844,14 +1070,24 @@ function boot() {
   $('nf-family').addEventListener('input', renderProfile);
   $('nf-import').addEventListener('click', onImport);
   $('nf-create').addEventListener('click', onStartCreating);
-  $('w-newfont').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
   // page 2 (workspace)
+  $('w-home').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
   $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
   $('assignBtn').addEventListener('click', onAssign);
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
-  $('exportBtn').addEventListener('click', onExport);
-  ['t-size', 't-track', 't-kern'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
+  $('ligInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLig(); });
+  $('sigBtn').addEventListener('click', openSig);
+  $('sigSave').addEventListener('click', saveSig);
+  $('sigCancel').addEventListener('click', function () { $('sigModal').classList.add('hidden'); });
+  $('saveBtn').addEventListener('click', function () { $('saveModal').classList.remove('hidden'); });
+  $('saveCancel').addEventListener('click', function () { $('saveModal').classList.add('hidden'); });
+  $('saveProject').addEventListener('click', onSaveProject);
+  $('exportGo').addEventListener('click', onExportGo);
+  $('bg-b').addEventListener('click', function () { setTesterBg(true); });
+  $('bg-w').addEventListener('click', function () { setTesterBg(false); });
+  ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
+  $('t-kern').addEventListener('change', applyTesterCtl);
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

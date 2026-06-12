@@ -77,49 +77,98 @@
   </div>
 
   <!-- ============ PAGE 2 — Workspace ============ -->
-  <div id="view-work" class="view hidden">
-    <header class="bar">
-      <span class="brand">RuneType™ <b>Glyphmaker</b></span>
-      <button id="w-newfont" class="mini">＋ Font</button>
+  <div id="view-work" class="view rune hidden">
+    <!-- top: mini logo + master tabs -->
+    <header class="w-head">
+      <img id="w-home" class="w-logo" src="assets/logomini.png" alt="RuneType" title="New font" />
+      <div id="w-masters" class="w-masters"></div>
     </header>
-    <div id="w-tabs" class="tabs"></div>
 
-    <section class="assign">
-      <div class="hint">Draw on a glyph's artboard (it syncs live), or select art and Assign to a slot.</div>
-      <button id="assignBtn" class="primary" disabled>Assign selection → <b id="assignTarget">—</b></button>
-      <div class="special">
-        <button id="altBtn" class="ghost-btn" disabled title="Stylistic alternate of the selected glyph (X.ssNN)">＋ Alternate</button>
-        <input id="ligInput" class="lig-input" type="text" placeholder="ft" title="Characters to ligate" />
-        <button id="ligBtn" class="ghost-btn" title="Make a ligature (e.g. f_t)">＋ Ligature</button>
+    <div class="w-body">
+      <div class="w-left">
+        <!-- glyphs. + language filter tabs -->
+        <div class="w-glyphrow">
+          <div class="hword sm">glyphs<span class="dot">.</span></div>
+          <div id="w-filters" class="w-filters"></div>
+        </div>
+        <div class="ul ul-sm"></div>
+
+        <input id="glyphSearch" class="w-search" type="text" placeholder="Search Glyph" spellcheck="false" />
+        <div class="w-gridwrap"><div id="grid" class="grid"></div></div>
+
+        <!-- modification. -->
+        <div class="hword sm w-sec">modification<span class="dot">.</span></div>
+        <div class="ul ul-sm"></div>
+        <div class="w-modrow">
+          <button id="altBtn" class="rune-btn outline sm2" disabled>+ Alternate</button>
+          <span id="altChip" class="w-chip">—</span>
+          <button id="ligBtn" class="rune-btn outline sm2">+ Ligature</button>
+          <input id="ligInput" class="w-chip w-chip-in" type="text" placeholder="fi" maxlength="4" />
+          <button id="sigBtn" class="w-sig" title="Font info &amp; metadata"></button>
+          <button id="saveBtn" class="rune-btn blue sm2 w-savebtn">Save</button>
+        </div>
+
+        <!-- the main CTA -->
+        <div class="w-assign">
+          <span id="assignChip" class="w-assignchip">A</span>
+          <button id="assignBtn" class="w-assignbtn" disabled>Assign Shape</button>
+        </div>
+
+        <!-- testing. -->
+        <div class="hword sm w-sec">testing<span class="dot">.</span></div>
+        <div class="ul ul-sm"></div>
+        <div class="w-tester">
+          <div id="t-paper" class="w-paper dark">
+            <div class="w-paper-top">
+              <span class="w-bgdots">
+                <i id="bg-w" class="bgdot light" title="White background"></i>
+                <i id="bg-b" class="bgdot darkdot on" title="Black background"></i>
+              </span>
+              <select id="t-kern" class="w-kern"><option value="normal">Optical</option><option value="none">Metric</option></select>
+            </div>
+            <input id="t-text" type="text" value="Lazy fox jumps over the brown dog." spellcheck="false" />
+          </div>
+          <div class="w-testctl">
+            <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="12" max="120" value="44" /></label>
+            <label>Track<input id="t-track" class="gd-slider wctl" type="range" min="-40" max="120" value="0" /></label>
+            <label class="dim">Variable<input id="t-var" class="gd-slider wctl" type="range" min="0" max="100" value="50" disabled /></label>
+          </div>
+        </div>
+        <div id="status" class="status"></div>
       </div>
-    </section>
 
-    <div class="glyph-tools">
-      <input id="glyphSearch" class="glyph-search" type="text" placeholder="Search glyphs…  a → à á â" spellcheck="false" />
-      <div id="glyphFilters" class="glyph-filters"></div>
+      <!-- right: the per-glyph grid designer + the live shape -->
+      <div class="w-right"><div id="w-designer" class="w-designer"></div></div>
     </div>
 
-    <section class="gridwrap"><div id="grid" class="grid"></div></section>
-
-    <!-- font tester -->
-    <section id="tester" class="tester">
-      <div class="tester-paper"><input id="t-text" type="text" value="Handgloves 0123" spellcheck="false" /></div>
-      <div class="tester-ctl">
-        <label>Size<input id="t-size" type="range" min="12" max="120" value="44" /></label>
-        <label>Track<input id="t-track" type="range" min="-40" max="120" value="0" /></label>
-        <label>Kern<select id="t-kern"><option value="normal">Optical</option><option value="none">Metric</option></select></label>
-        <label class="dim">Var<input id="t-var" type="range" min="0" max="100" value="50" disabled /></label>
-      </div>
-    </section>
-
-    <footer class="foot">
-      <div id="status" class="status">Ready.</div>
-      <div class="actions">
-        <input id="designer" class="mini-input" type="text" placeholder="Designer (for export)" />
-        <span id="filledCount" class="count">0</span>
-        <button id="exportBtn" class="export" disabled>Export OTF</button>
-      </div>
+    <footer class="rune-credit">
+      <div class="credit-txt">RuneType&trade; Glyphmaker by BRST STUDIO&trade;<br/>2026 All rights reserved.<br/>v 1.00</div>
+      <img class="credit-stamp" src="assets/stamp.png" alt="" />
     </footer>
+
+    <!-- signature. — font info & metadata -->
+    <div id="sigModal" class="fm-modal hidden"><div class="fm-box">
+      <div class="fm-title">signature<span class="dot">.</span></div>
+      <div id="sigFields" class="fm-fields"></div>
+      <div class="fm-actions">
+        <button id="sigCancel" class="rune-btn outline sm2">Cancel</button>
+        <button id="sigSave" class="rune-btn blue sm2">Save</button>
+      </div>
+    </div></div>
+
+    <!-- save. — project file or font export -->
+    <div id="saveModal" class="fm-modal hidden"><div class="fm-box">
+      <div class="fm-title">save<span class="dot">.</span></div>
+      <button id="saveProject" class="rune-btn outline">Save Project (.runetype)</button>
+      <div class="fm-exh">Export font files</div>
+      <div class="fm-formats">
+        <label class="fm-chk"><input id="exOtf" type="checkbox" checked /> OTF</label>
+        <label class="fm-chk dim"><input id="exTtf" type="checkbox" disabled /> TTF <span class="muted">soon</span></label>
+        <label class="fm-chk dim"><input id="exVar" type="checkbox" disabled /> Variable <span class="muted">soon</span></label>
+      </div>
+      <button id="exportGo" class="rune-btn blue">Export to folder&hellip;</button>
+      <div class="fm-actions"><button id="saveCancel" class="rune-btn outline sm2">Close</button></div>
+    </div></div>
   </div>
 
 </div>

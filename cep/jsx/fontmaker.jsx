@@ -297,27 +297,38 @@ function fmDrawContours(layer, contours, left, bottom, M) {
 // Open ONE glyph for editing: a single-artboard document with the selected
 // grids + ghost (and any existing/dragged artwork), reusing one edit doc so we
 // don't spawn a document per click. Edits sync back to the plugin (no file).
+// One Illustrator DOCUMENT per glyph (never an extra artboard). Open documents
+// are tracked in $.global.fmGlyphDocs by glyph name; clicking the same glyph
+// re-activates its project with the user's work untouched.
+function fmGlyphDocs() {
+  if (!$.global.fmGlyphDocs) $.global.fmGlyphDocs = {};
+  return $.global.fmGlyphDocs;
+}
+function fmDocAlive(doc) {
+  try { return !!(doc && doc.name !== undefined && doc.artboards.length >= 0); } catch (e) { return false; }
+}
 function fmOpenGlyph(arg) {
   try {
     var cfg = eval('(' + arg + ')');
     var M = cfg.metrics, grids = cfg.grids || [];
     var AH = (M.ascender - M.descender) * FM_SCALE;
     var AW = Math.round((cfg.advanceWidth || Math.round((M.ascender - M.descender) * 0.6)) * FM_SCALE);
+    var docs = fmGlyphDocs();
 
-    // REUSE one edit document (never close it — closing the last doc shows the
-    // Home screen and hides the panel). If our doc is gone, make a new one.
-    var doc = null;
-    try { if ($.global.fmEditDoc && $.global.fmEditDoc.name !== undefined) doc = $.global.fmEditDoc; } catch (eR) { doc = null; }
-    if (doc) { app.activeDocument = doc; }
-    else { doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200); $.global.fmEditDoc = doc; }
+    // Already open? Just bring its project forward — keep the work as-is.
+    var doc = docs[cfg.name];
+    if (fmDocAlive(doc)) {
+      app.activeDocument = doc;
+      return '{"ok":true,"name":"' + (cfg.name || '') + '","reused":true,"doc":"' + doc.name + '"}';
+    }
 
-    // Exactly ONE artboard — never add a new artboard beside an existing one.
-    while (doc.artboards.length > 1) { try { doc.artboards.remove(doc.artboards.length - 1); } catch (eA) { break; } }
+    // A NEW project for this glyph (one artboard).
+    doc = app.documents.add(DocumentColorSpace.RGB, AW + 200, AH + 200);
+    docs[cfg.name] = doc;
     var left = 100, top = -100, right = left + AW, bottom = top - AH;
     doc.artboards[0].artboardRect = [left, top, right, bottom];
     try { doc.artboards[0].name = cfg.name; } catch (eN) {}
 
-    // Fresh layers, then drop any leftover layers from the previous glyph.
     var refLayer = doc.layers.add(); refLayer.name = 'Reference (locked)';
     var artLayer = doc.layers.add(); artLayer.name = 'Artwork'; artLayer.zOrder(ZOrderMethod.BRINGTOFRONT);
     for (var li = doc.layers.length - 1; li >= 0; li--) {
@@ -332,7 +343,31 @@ function fmOpenGlyph(arg) {
     if (cfg.contours && cfg.contours.length) fmDrawContours(artLayer, cfg.contours, left, bottom, M);
     doc.activeLayer = artLayer;
     try { app.executeMenuCommand('fitall'); } catch (eF) {}
-    return '{"ok":true,"name":"' + (cfg.name || '') + '"}';
+    return '{"ok":true,"name":"' + (cfg.name || '') + '","doc":"' + doc.name + '"}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+
+// Which glyph does the ACTIVE document belong to? ('' if none of ours.)
+function fmActiveGlyphName() {
+  try {
+    var docs = fmGlyphDocs(), act = app.activeDocument;
+    for (var k in docs) { if (docs.hasOwnProperty(k) && fmDocAlive(docs[k]) && docs[k] === act) return k; }
+  } catch (e) {}
+  return '';
+}
+
+// Translate the artwork of a glyph's project by (dx, dy) points — used when the
+// shape is dragged on the panel's canvas, so both stay in sync.
+function fmShiftArt(arg) {
+  try {
+    var cfg = eval('(' + arg + ')');
+    var docs = fmGlyphDocs(), doc = docs[cfg.name];
+    if (!fmDocAlive(doc)) return '{"ok":false,"error":"glyph project is not open"}';
+    var layer = null;
+    for (var i = 0; i < doc.layers.length; i++) if (doc.layers[i].name === 'Artwork') { layer = doc.layers[i]; break; }
+    if (!layer) return '{"ok":false,"error":"no Artwork layer"}';
+    for (var j = 0; j < layer.pageItems.length; j++) layer.pageItems[j].translate(cfg.dx, cfg.dy);
+    return '{"ok":true}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 
@@ -371,6 +406,7 @@ function fmReadActive() {
     var parts = [];
     for (var k = 0; k < paths.length; k++) parts.push(fmSerializePath(paths[k]));
     return '{"ok":true,"index":' + idx + ',"scale":' + FM_SCALE +
+           ',"glyph":"' + fmActiveGlyphName().replace(/"/g, '\\"') + '"' +
            ',"rect":[' + r[0] + ',' + r[1] + ',' + r[2] + ',' + r[3] + ']' +
            ',"paths":[' + parts.join(',') + ']}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
