@@ -197,6 +197,10 @@ button:disabled { opacity: 0.4; cursor: default; }
    (the DESIGN is flipped, still cropped from the left) for variety. */
 .ul-sm { width: 84%; -webkit-mask-image: url('../assets/line-flipped.svg'); mask-image: url('../assets/line-flipped.svg');
   -webkit-mask-size: auto 100%; mask-size: auto 100%; }
+/* shifted crops so each stroke feels hand-placed, not aligned */
+.ul-o1 { -webkit-mask-position: -34px center; mask-position: -34px center; width: 88%; }
+.ul-o2 { -webkit-mask-position: -150px center; mask-position: -150px center; width: 79%; }
+.ul-o3 { -webkit-mask-position: -82px center; mask-position: -82px center; width: 92%; }
 .rune-body { flex: 1 1 auto; display: flex; gap: 12px; padding: 8px 14px 12px; min-height: 0; flex-wrap: nowrap; }
 .rune-left { flex: 1 1 200px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rune-right { flex: 1 1 240px; min-width: 0; min-height: 0; border: 1px solid #3a3a3a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
@@ -408,8 +412,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* ===== Page 2 — workspace (per the sketch; reuses the existing tokens) ===== */
 .rune-btn.sm2 { padding: 6px 14px; font-size: 12px; }
-#view-work { display: flex; flex-direction: column; }
-.w-head { display: flex; align-items: flex-end; gap: 16px; padding: 8px 14px 0; background: #000; }
+#view-work { display: flex; flex-direction: column; background: var(--bg); }
+.w-head { display: flex; align-items: flex-end; gap: 16px; padding: 8px 14px 0; background: #1b1b1b; border-bottom: 1px solid #000; }
 .w-logo { height: 44px; width: auto; cursor: pointer; margin-bottom: 8px; }
 .w-logo:hover { opacity: 0.85; }
 .w-masters { display: flex; gap: 10px; flex: 1 1 auto; min-width: 0; overflow: hidden; align-items: flex-end; }
@@ -427,7 +431,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-right { flex: 1 1 0; min-width: 0; display: flex; }
 .w-designer { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; padding: 10px; }
 
-.w-glyphrow { display: flex; align-items: baseline; gap: 12px; min-width: 0; }
+.w-glyphrow { display: flex; align-items: baseline; gap: 12px; min-width: 0; margin-top: 18px; }
 .w-filters { display: flex; gap: 5px; flex: 1 1 auto; min-width: 0; overflow: hidden; flex-wrap: nowrap; align-self: center; }
 .w-filters .fchip { flex: 0 0 auto; }
 .w-filters.overflowing { -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent 99%); }
@@ -467,6 +471,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 .cell.filled .lab { left: auto; right: 3px; top: 2px; font-size: 9px; color: #1d1d1d; font-weight: 700; }
 
 .w-modrow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.w-modrow .rune-btn.outline {
+  border-radius: 10px; border: 1px solid #4a4a4a; background: #2b2b2b; color: #eee;
+  font-weight: 600; padding: 8px 16px;
+}
+.w-modrow .rune-btn.outline:hover { background: #3a3a3a; color: #fff; border-color: #6a6a6a; }
 .w-chip {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 36px; height: 36px; padding: 0 6px;
@@ -475,10 +484,11 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .w-chip-in { width: 46px; text-align: center; font-family: inherit; }
 .w-chip-in:focus { outline: none; border-color: var(--edge-h); }
-/* signature — outline ellipse, like the sketch */
+/* signature — outline ellipse, right next to Save */
 .w-sig {
   width: 54px; height: 36px; padding: 0; position: relative; cursor: pointer;
   background: transparent; border: 2px solid #6a6a6a; border-radius: 999px;
+  margin-left: auto;
 }
 .w-sig::after {
   content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: 0; margin: 7px 12px;
@@ -487,7 +497,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .w-sig:hover { background: var(--invert-fill); border-color: var(--invert-fill); }
 .w-sig:hover::after { background: #1d1d1d; }
-.w-savebtn { margin-left: auto; }
+.w-savebtn { margin-left: 0; }
 
 /* the main CTA — Assign Shape (sketch): the chip sits ON the blue pill, inset
    from its left edge so the blue cap peeks around it; gray body, blue ring,
@@ -495,7 +505,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-assign { position: relative; height: 70px; flex: 0 0 70px; margin: 6px 0; }
 .w-assignbtn {
   position: absolute; left: 0; right: 0; top: 10px; bottom: 10px;
-  padding: 0 16px 0 88px; min-width: 0;
+  padding: 0 16px; min-width: 0;
   background: var(--accent); color: #fff; border: none; border-radius: 999px;
   font-size: 19px; font-weight: 700; cursor: pointer; text-align: center;
 }
@@ -510,8 +520,9 @@ button:disabled { opacity: 0.4; cursor: default; }
 
 /* testing — paper defaults to BLACK; dots flip it */
 .w-tester { display: flex; flex-direction: column; gap: 6px; }
-.w-paper { background: #fff; color: #111; border-radius: 8px; padding: 6px 10px 8px; }
-.w-paper.dark { background: #0e0e0e; color: #f2f2f2; }
+.w-paper { background: #fff; color: #111; border-radius: 8px; padding: 6px 10px 8px;
+  height: 88px; flex: 0 0 88px; display: flex; flex-direction: column; overflow: hidden; box-sizing: border-box; }
+.w-paper.dark { background: #161616; color: #f2f2f2; }
 .w-paper-top { display: flex; align-items: center; gap: 6px; }
 .w-bgdots { display: flex; gap: 5px; align-items: center; }
 .bgdot { width: 11px; height: 11px; border-radius: 50%; cursor: pointer; border: 1px solid #8d8d8d; box-sizing: border-box; }
@@ -523,7 +534,7 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: var(--sunk); color: var(--txt); border: 1px solid var(--edge);
   border-radius: 999px; font-size: 10px; padding: 2px 10px; font-family: inherit;
 }
-.w-paper input { width: 100%; border: none; outline: none; background: transparent; color: inherit; font-size: 44px; line-height: 1.15; padding: 2px 0; }
+.w-paper input { width: 100%; flex: 1 1 auto; min-height: 0; border: none; outline: none; background: transparent; color: inherit; font-size: 24px; line-height: 1.1; padding: 2px 0; }
 .w-testctl { display: flex; gap: 14px; align-items: center; }
 .w-testctl label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--txt2); }
 .w-testctl .dim { opacity: 0.5; }

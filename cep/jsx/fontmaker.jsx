@@ -356,6 +356,24 @@ function fmActiveGlyphName() {
   return '';
 }
 
+// Replace the artwork of a glyph's project with the given contours (font
+// units) — used when the panel transforms the shape (scaling), so both stay
+// identical.
+function fmSetArt(arg) {
+  try {
+    var cfg = eval('(' + arg + ')');
+    var docs = fmGlyphDocs(), doc = docs[cfg.name];
+    if (!fmDocAlive(doc)) return '{"ok":false,"error":"glyph project is not open"}';
+    var layer = null;
+    for (var i = 0; i < doc.layers.length; i++) if (doc.layers[i].name === 'Artwork') { layer = doc.layers[i]; break; }
+    if (!layer) return '{"ok":false,"error":"no Artwork layer"}';
+    for (var j = layer.pageItems.length - 1; j >= 0; j--) { try { layer.pageItems[j].remove(); } catch (e2) {} }
+    var r = doc.artboards[0].artboardRect;
+    fmDrawContours(layer, cfg.contours || [], r[0], r[3], cfg.metrics);
+    return '{"ok":true}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+
 // Translate the artwork of a glyph's project by (dx, dy) points — used when the
 // shape is dragged on the panel's canvas, so both stay in sync.
 function fmShiftArt(arg) {

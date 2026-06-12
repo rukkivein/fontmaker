@@ -251,6 +251,27 @@ function gdShapePath(contours, dx, dy) {
   });
   return d;
 }
+function gdShapeBounds(contours, dx, dy) {
+  var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, any = false;
+  contours.forEach(function (c) { c.points.forEach(function (p) {
+    any = true;
+    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y; if (p.y > maxY) maxY = p.y;
+  }); });
+  if (!any) return null;
+  return { minX: minX + (dx || 0), maxX: maxX + (dx || 0), minY: minY + (dy || 0), maxY: maxY + (dy || 0) };
+}
+function gdScaleContours(contours, ax, ay, sx, sy) {
+  return contours.map(function (c) {
+    return { closed: c.closed, points: c.points.map(function (p) {
+      return {
+        x: ax + (p.x - ax) * sx, y: ay + (p.y - ay) * sy, type: p.type,
+        handleIn: p.handleIn ? { x: ax + (p.handleIn.x - ax) * sx, y: ay + (p.handleIn.y - ay) * sy } : null,
+        handleOut: p.handleOut ? { x: ax + (p.handleOut.x - ax) * sx, y: ay + (p.handleOut.y - ay) * sy } : null,
+      };
+    }) };
+  });
+}
 function gdRedraw(svg, gd) {
   var v = gdView(gd);
   var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
@@ -301,9 +322,26 @@ function gdRedraw(svg, gd) {
     var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
     s += '<rect x="' + gdXs(x1) + '" y="' + gdYs(y2) + '" width="' + ((x2 - x1) * GD_SX) + '" height="' + ((y2 - y1) * GD_SY) + '" fill="#1473e6" fill-opacity="0.08" stroke="#1473e6" stroke-width="1" stroke-dasharray="4 3"/>';
   }
-  // the glyph's current shape (page 2): solid dark fill, draggable
+  // the glyph's current shape (page 2): solid dark fill, draggable; when
+  // selected it gets Illustrator-style transform controls (8 handles)
   if (gd._shape && gd._shape.length) {
     s += '<path d="' + gdShapePath(gd._shape, gd._sdx || 0, gd._sdy || 0) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
+    if (gd._shapeSel) {
+      var sb = gdShapeBounds(gd._shape, gd._sdx || 0, gd._sdy || 0);
+      if (sb) {
+        var x1 = gdXs(sb.minX), x2 = gdXs(sb.maxX), yT = gdYs(sb.maxY), yB = gdYs(sb.minY);
+        var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
+        s += '<rect x="' + x1 + '" y="' + yT + '" width="' + (x2 - x1) + '" height="' + (yB - yT) + '" fill="none" stroke="#1473e6" stroke-width="1"/>';
+        var H = [
+          ['nw', x1, yT, 'nwse-resize'], ['n', cxm, yT, 'ns-resize'], ['ne', x2, yT, 'nesw-resize'],
+          ['e', x2, cym, 'ew-resize'], ['se', x2, yB, 'nwse-resize'], ['s', cxm, yB, 'ns-resize'],
+          ['sw', x1, yB, 'nesw-resize'], ['w', x1, cym, 'ew-resize'],
+        ];
+        for (var hi = 0; hi < H.length; hi++) {
+          s += '<rect data-h="' + H[hi][0] + '" x="' + (H[hi][1] - 4) + '" y="' + (H[hi][2] - 4) + '" width="8" height="8" fill="#fff" stroke="#1473e6" stroke-width="1.2" style="cursor:' + H[hi][3] + '"/>';
+        }
+      }
+    }
   }
   s += '</g>';   // clip
   s += '</g>';   // view transform
@@ -493,12 +531,21 @@ function renderGridDesigner(box, gd, onChange) {
       drag = { mode: 'pan', px: p.sx, py: p.sy, vx: v0.x, vy: v0.y };
       return;
     }
-    var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
-    if (sh) {                            // drag the glyph shape itself
-      drag = { mode: 'shape', sx: p.fx, sy: p.fy };
-      gd._sdx = 0; gd._sdy = 0;
+    var hd = ev.target.closest ? ev.target.closest('[data-h]') : null;
+    if (hd && gd._shape) {               // transform handle: scale the shape
+      var b0 = gdShapeBounds(gd._shape, 0, 0);
+      drag = { mode: 'scaleShape', h: hd.getAttribute('data-h'), b: b0, orig: JSON.parse(JSON.stringify(gd._shape)) };
       return;
     }
+    var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
+    if (sh) {                            // click selects (shows controls) + drags
+      gd._shapeSel = true;
+      drag = { mode: 'shape', sx: p.fx, sy: p.fy };
+      gd._sdx = 0; gd._sdy = 0;
+      gdRedraw(svg, gd);
+      return;
+    }
+    gd._shapeSel = false;
     var t = ev.target.closest ? ev.target.closest('[data-i]') : null;
     if (t) {
       var i = +t.getAttribute('data-i');
@@ -551,6 +598,28 @@ function renderGridDesigner(box, gd, onChange) {
       gdRedraw(svg, gd);
       return;
     }
+    if (drag.mode === 'scaleShape') {
+      var b = drag.b, h = drag.h;
+      var ax = h.indexOf('w') >= 0 ? b.maxX : (h.indexOf('e') >= 0 ? b.minX : (b.minX + b.maxX) / 2);
+      var ay = h.indexOf('s') >= 0 ? b.maxY : (h.indexOf('n') >= 0 ? b.minY : (b.minY + b.maxY) / 2);
+      var hx0 = h.indexOf('w') >= 0 ? b.minX : (h.indexOf('e') >= 0 ? b.maxX : null);
+      var hy0 = h.indexOf('s') >= 0 ? b.minY : (h.indexOf('n') >= 0 ? b.maxY : null);
+      var sx = hx0 != null ? (p.fx - ax) / (hx0 - ax) : null;
+      var sy = hy0 != null ? (p.fy - ay) / (hy0 - ay) : null;
+      function cl(v2) { return Math.max(0.05, v2); }
+      var SX, SY;
+      if (ev.shiftKey) {                  // SHIFT: free (each axis on its own)
+        SX = sx != null ? cl(sx) : 1;
+        SY = sy != null ? cl(sy) : 1;
+      } else {                            // default: proportional
+        var sP = sx != null && sy != null ? Math.max(Math.abs(sx), Math.abs(sy))
+               : sx != null ? Math.abs(sx) : Math.abs(sy);
+        SX = SY = cl(sP);
+      }
+      gd._shape = gdScaleContours(drag.orig, ax, ay, SX, SY);
+      gdRedraw(svg, gd);
+      return;
+    }
     if (drag.mode === 'move') {
       var dx = p.fx - drag.sx, dy = p.fy - drag.sy;
       drag.orig.forEach(function (o) {
@@ -581,6 +650,8 @@ function renderGridDesigner(box, gd, onChange) {
       var ddx = gd._sdx || 0, ddy = gd._sdy || 0;
       gd._sdx = 0; gd._sdy = 0;
       if ((ddx || ddy) && typeof gd._onShapeMove === 'function') gd._onShapeMove(ddx, ddy);
+    } else if (drag.mode === 'scaleShape') {
+      if (typeof gd._onShapeScale === 'function') gd._onShapeScale(gd._shape);
     }
     drag = null; sync();
   });
@@ -716,7 +787,8 @@ function renderWorkDesigner() {
     var l = g.layers[curMasterId()];
     gd._shape = (l && l.contours && l.contours.length) ? l.contours : null;
     gd._onShapeMove = function (dx, dy) { shiftGlyphShape(g, dx, dy); };
-  } else { gd._shape = null; gd._onShapeMove = null; }
+    gd._onShapeScale = function (contours) { applyShapeContours(g, contours); };
+  } else { gd._shape = null; gd._onShapeMove = null; gd._onShapeScale = null; gd._shapeSel = false; }
   renderGridDesigner(box, gd, function () { autosave(); });
 }
 // Dragging the shape on the canvas moves the real outline — and the artwork in
@@ -735,6 +807,15 @@ function shiftGlyphShape(g, dx, dy) {
   evalScript('fmShiftArt(' + JSON.stringify(JSON.stringify({ name: g.name, dx: dx * FM_SCALE_PANEL, dy: dy * FM_SCALE_PANEL })) + ')');
   renderGrid(); scheduleTester(); autosave(); renderWorkDesigner();
   setStatus('Shape moved ' + dx + ', ' + dy + ' — synced to Illustrator.', 'ok');
+}
+// Commit a transformed outline (scaling) — the Illustrator artwork is redrawn
+// from the same contours so both stay identical.
+function applyShapeContours(g, contours) {
+  glyphset.setGlyphContours(curFont(), selectedSlot, curMasterId(), contours, g.advanceWidth);
+  lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
+  evalScript('fmSetArt(' + JSON.stringify(JSON.stringify({ name: g.name, contours: contours, metrics: curFont().metrics })) + ')');
+  renderGrid(); scheduleTester(); autosave(); renderWorkDesigner();
+  setStatus('Shape transformed — synced to Illustrator.', 'ok');
 }
 
 // Build an SVG path (screen coords, Y-down) from a glyph's contours.
@@ -857,16 +938,21 @@ function openGlyph(i) {
 function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
-  $('altBtn').disabled = !g;
   $('openInAi').disabled = !g;
   $('assignChip').textContent = g ? glyphLabel(g) : '';   // empty when nothing selected
-  $('altChip').textContent = g ? glyphLabel(g) : '';
+  $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
 }
 
 // ---- modification: alternates & ligatures ----
 function onAlt() {
-  if (selectedSlot < 0) return;
-  var idx = glyphset.createAlternate(curFont(), selectedSlot);
+  var f = curFont(), base = -1;
+  var ch = $('altChip').value.trim();
+  if (ch) {
+    f.glyphs.forEach(function (g, i) { if (base < 0 && g.char === ch) base = i; });
+    if (base < 0) { setStatus('No glyph "' + ch + '" in this font.', 'err'); return; }
+  } else if (selectedSlot >= 0) base = selectedSlot;
+  else { setStatus('Type a letter (or select a glyph) to alternate.', 'err'); return; }
+  var idx = glyphset.createAlternate(curFont(), base);
   if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
   selectedSlot = idx; renderGrid(); updateAssign(); renderWorkDesigner();
   openGlyph(idx);
