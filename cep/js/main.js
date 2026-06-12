@@ -787,11 +787,16 @@ function renderGrid() {
     } else {
       cell.textContent = label;
     }
-    cell.title = g.name + ' — click to open its project';
+    cell.title = g.name + ' — right-click to open in Illustrator';
     cell.addEventListener('click', function () {
       selectedSlot = i;
       updateAssign(); renderGrid(); renderWorkDesigner();
-      openGlyph(i); // a click opens the glyph's own Illustrator project
+    });
+    cell.addEventListener('contextmenu', function (ev) {
+      ev.preventDefault();
+      selectedSlot = i;
+      updateAssign(); renderGrid(); renderWorkDesigner();
+      openGlyph(i); // right-click = open in AI
     });
     grid.appendChild(cell);
   });
@@ -853,8 +858,9 @@ function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
   $('altBtn').disabled = !g;
-  $('assignChip').textContent = g ? glyphLabel(g) : '—';
-  $('altChip').textContent = g ? glyphLabel(g) : '—';
+  $('openInAi').disabled = !g;
+  $('assignChip').textContent = g ? glyphLabel(g) : '';   // empty when nothing selected
+  $('altChip').textContent = g ? glyphLabel(g) : '';
 }
 
 // ---- modification: alternates & ligatures ----
@@ -1073,6 +1079,7 @@ function boot() {
   // page 2 (workspace)
   $('w-home').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
   $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
+  $('openInAi').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('assignBtn').addEventListener('click', onAssign);
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);

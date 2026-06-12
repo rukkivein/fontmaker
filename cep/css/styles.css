@@ -434,8 +434,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-sec { margin-top: 4px; }
 
 /* search — same outline-pill language as Import Your Project, gray text */
+.w-searchrow { display: flex; gap: 8px; align-items: stretch; }
+.w-import {
+  flex: 1.7 1 0; min-width: 0; padding: 9px 14px; cursor: pointer;
+  background: transparent; color: #eaeaea; font-size: 13px; font-weight: 700; font-family: inherit;
+  border: 2px solid #6a6a6a; border-radius: 999px;
+}
+.w-import:hover:not(:disabled) { background: var(--invert-fill); color: #1d1d1d; border-color: var(--invert-fill); }
+.w-import:disabled { opacity: 0.45; cursor: default; }
 .w-search {
-  width: 100%; padding: 9px 16px; text-align: center;
+  flex: 1 1 0; min-width: 0; padding: 9px 16px; text-align: center;
   background: transparent; color: var(--txt2); font-size: 13px; font-family: inherit;
   border: 2px solid #6a6a6a; border-radius: 999px;
 }
@@ -481,22 +489,23 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-sig:hover::after { background: #1d1d1d; }
 .w-savebtn { margin-left: auto; }
 
-/* the main CTA — Assign Shape: the black A chip (thick white ring) overhangs
-   the SOLID blue pill, exactly like the sketch */
-.w-assign { position: relative; height: 72px; flex: 0 0 72px; margin: 4px 0; }
+/* the main CTA — Assign Shape (sketch): the chip sits ON the blue pill, inset
+   from its left edge so the blue cap peeks around it; gray body, blue ring,
+   taller than the pill; the letter inside — empty when nothing is selected */
+.w-assign { position: relative; height: 70px; flex: 0 0 70px; margin: 6px 0; }
 .w-assignbtn {
-  position: absolute; left: 28px; right: 0; top: 11px; bottom: 11px;
-  padding: 0 16px 0 56px; min-width: 0;
+  position: absolute; left: 0; right: 0; top: 10px; bottom: 10px;
+  padding: 0 16px 0 88px; min-width: 0;
   background: var(--accent); color: #fff; border: none; border-radius: 999px;
   font-size: 19px; font-weight: 700; cursor: pointer; text-align: center;
 }
 .w-assignbtn:hover { background: var(--accent-h); }
 .w-assignbtn:disabled { background: #2c5e9e; cursor: default; }
 .w-assignchip {
-  position: absolute; left: 0; top: 0; bottom: 0; width: 64px; box-sizing: border-box;
+  position: absolute; left: 16px; top: 0; bottom: 0; width: 58px; box-sizing: border-box;
   display: flex; align-items: center; justify-content: center;
-  background: #0e0e0e; color: #fff; font-size: 30px; font-weight: 700;
-  border: 3px solid #fff; border-radius: 18px; z-index: 2;
+  background: #2b2b2b; color: #fff; font-size: 28px; font-weight: 700;
+  border: 2.5px solid var(--accent); border-radius: 15px; z-index: 2;
 }
 
 /* testing — paper defaults to BLACK; dots flip it */
