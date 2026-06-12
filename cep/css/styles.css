@@ -322,8 +322,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* The designer fills the panel — no scrolling. */
 .rune-list.gd-mode { overflow: hidden; padding: 10px; }
 .gd-wrap { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; outline: none; }
-.gd-top { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
-.gd-toolcol { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.gd-top { display: flex; align-items: flex-start; gap: 10px; flex: 0 0 auto; flex-wrap: wrap; }
+.gd-toolcol { display: flex; flex-direction: column; gap: 6px; flex: 0 0 120px; }
 .gd-tools { display: flex; gap: 6px; }
 .gd-tool {
   width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center;
@@ -343,7 +343,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .gd-ic-grid { -webkit-mask-image: url(../assets/gd/grid.svg); }
 .gd-slider {
   -webkit-appearance: none; appearance: none;
-  width: 120px; height: 8px; margin: 4px 0 0;
+  width: 120px; height: 12px; margin: 0;
   background: var(--sunk); border: 1px solid var(--edge); border-radius: 4px;
 }
 .gd-slider::-webkit-slider-thumb {
@@ -352,16 +352,26 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .gd-slider:hover::-webkit-slider-thumb { background: var(--accent-h); }
 .gd-slider:disabled { opacity: 0.35; }
-/* mathematical grid presets */
+/* mathematical grid presets — styled like the Masters field */
 .gd-presets {
-  flex: 0 1 130px; min-width: 80px; height: 36px; padding: 0 6px;
-  background: var(--sunk); color: var(--txt); border: 1px solid var(--edge);
-  border-radius: 3px; font-size: 11px; font-family: inherit;
+  -webkit-appearance: none; appearance: none;
+  flex: 1 1 auto; min-width: 96px; height: 36px; padding: 0 26px 0 10px;
+  background: #2b2b2b; color: #eee; border: 1px solid #4a4a4a;
+  border-radius: 6px; font-size: 13px; font-family: inherit; cursor: pointer;
 }
-.gd-presets:hover { border-color: var(--edge-h); }
+.gd-presets:hover { border-color: #6a6a6a; }
+.gd-presets:focus { outline: none; border-color: #6a6a6a; }
+/* caret like the Masters dropdown (cursor.svg), drawn on a wrapper-free select */
+.gd-preset-caret { position: relative; flex: 1 1 auto; min-width: 96px; display: flex; }
+.gd-preset-caret::after {
+  content: ''; position: absolute; right: 9px; top: 50%; width: 11px; height: 11px;
+  margin-top: -5.5px; pointer-events: none; background-color: #8d8d8d;
+  -webkit-mask: url('../assets/cursor.svg') no-repeat center / contain;
+}
+.gd-preset-caret:hover::after { background-color: #d0d0d0; }
 /* symmetry (accent blue) + undo/redo (brand red) — 2x2 block */
-.gd-side { display: grid; grid-template-columns: 36px 36px; gap: 6px; margin-left: auto; }
-.gd-sym, .gd-hist { position: relative; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
+.gd-side { display: grid; grid-template-columns: 36px 36px; gap: 6px; margin-left: auto; flex: 0 0 auto; }
+.gd-sym, .gd-hist { position: relative; height: 25px; padding: 0; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
 .gd-sym { background: var(--sunk); border: 1px solid var(--edge); }
 .gd-sym:hover { background: var(--ctrl-h); border-color: var(--edge-h); }
 .gd-sym::after { background: var(--txt); }

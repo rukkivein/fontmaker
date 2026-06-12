@@ -36,7 +36,12 @@ function newDraft() {
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    gridDesign: { items: [], gridOn: false, gridCell: 50, gridMul: 1, symX: false, symY: false, sel: -1, selGrid: false, undo: [], redo: [] },
+    gridDesign: (function () {
+      var pv = gdPresetItems('copyvector');
+      return { items: pv.items.map(function (it) { it.symX = false; it.symY = false; return it; }),
+               gridOn: true, gridCell: pv.cell || 50, gridMul: pv.mul || 1, preset: 'copyvector',
+               symX: false, symY: false, sel: -1, selGrid: false, selSet: [], undo: [], redo: [] };
+    })(),
     toggle: 'lang',
   };
 }
@@ -126,8 +131,11 @@ function renderRightList() {
 // construction grid on: circles, dashed lines (0–360°), a square grid toggle,
 // baselines from the bottom/right bars, X/Y symmetry, undo/redo. Items are
 // stored in FONT UNITS (x 0..1000 across the em, y -200..800).
-var GD_W = 595, GD_H = 842, GD_PX = 36, GD_PY = 36; // mini A4 + canvas padding
-var GD_SX = (GD_W - 2 * GD_PX) / 1000, GD_SY = (GD_H - 2 * GD_PY) / 1000;
+var GD_W = 595, GD_H = 842, GD_PX = 36; // mini A4 + canvas padding
+// UNIFORM scale (same px per font unit on both axes) so grid cells are always
+// SQUARE and angles/circles render true; the em block centres vertically.
+var GD_SX = (GD_W - 2 * GD_PX) / 1000, GD_SY = GD_SX;
+var GD_PY = (GD_H - 1000 * GD_SY) / 2;
 // ---- mathematical grid presets (em: x 0..1000, baseline 0, cap 716, x-height
 // 519, cap-box centre (500,358), φ = 1.618) ----
 var GD_PHI = 1.61803398875;
@@ -137,7 +145,7 @@ var GD_PRESETS = [
   { key: 'lettering', label: 'Lettering Grid' },
   { key: 'calligraphic', label: 'Calligraphic' },
   { key: 'modular', label: 'Modular' },
-  { key: 'copyvector', label: 'Copy/Paste Vector' },
+  { key: 'copyvector', label: 'Paste Vector' },
 ];
 function gdPresetItems(key) {
   // em geometry: x 0..1000, baseline 0, cap 716, x-height 519, centre (500,358)
@@ -150,7 +158,7 @@ function gdPresetItems(key) {
   function v(x) { return { type: 'vline', x: Math.round(x) }; }
   switch (key) {
     case 'construction': // the classic type-construction web: rows/cols + full diagonal web + stacked circles
-      return { grid: false, items: [
+      return { grid: true, cell: 50, items: [
         h(0), h(CAP), h(CAP / 4), h(CAP / 2), h(3 * CAP / 4),
         v(250), v(500), v(750),
         dl(500, CY, XA), dl(500, CY, 180 - XA),                       // corner X
@@ -159,20 +167,20 @@ function gdPresetItems(key) {
         c(500, CY, R), c(500, CAP / 4, CAP / 4), c(500, CY, CAP / 4), c(500, 3 * CAP / 4, CAP / 4),
       ] };
     case 'golden': // golden cuts of the em + φ circle progression + corner X
-      return { grid: false, items: [
+      return { grid: true, cell: 50, items: [
         h(0), h(CAP), v(1000 - 1000 / GD_PHI), v(1000 / GD_PHI),
         h(CAP - CAP / GD_PHI), h(CAP / GD_PHI),
         dl(500, CY, XA), dl(500, CY, 180 - XA),
         c(500, CY, R), c(500, CY, R / GD_PHI), c(500, CY, R / GD_PHI / GD_PHI),
       ] };
     case 'lettering': // lettering typography grid: quarter arcs in the corners + half arcs + columns
-      return { grid: false, items: [
+      return { grid: true, cell: 50, items: [
         h(0), h(CAP), h(CAP / 2), v(232), v(500), v(768),
         c(0, 0, 268), c(1000, 0, 268), c(0, CAP, 268), c(1000, CAP, 268),
         c(500, 0, 268), c(500, CAP, 268), c(500, CY, 134),
       ] };
     case 'calligraphic': // 30° broad-nib slant family over the metrics
-      return { grid: false, items: [
+      return { grid: true, cell: 50, items: [
         h(0), h(XH), h(CAP),
         dl(250, CY, 60), dl(500, CY, 60), dl(750, CY, 60),
       ] };
@@ -182,7 +190,7 @@ function gdPresetItems(key) {
         c(500, CAP / 4, CAP / 4), c(500, CY, CAP / 4), c(500, 3 * CAP / 4, CAP / 4),
       ] };
     case 'copyvector': // paste-safe area: only baselines carving margins on all four sides
-      return { grid: false, items: [h(-100), h(700), v(100), v(900)] };
+      return { grid: true, cell: 50, items: [h(-100), h(700), v(100), v(900)] };
   }
   return null;
 }
@@ -305,9 +313,9 @@ function renderGridDesigner(box) {
         '</div>' +
         '<input class="gd-slider" type="range" min="0" max="100" value="50" disabled title="Size / angle of the selection" />' +
       '</div>' +
-      '<select class="gd-presets" title="Mathematical grid presets"><option value="">Preset…</option>' +
+      '<span class="gd-preset-caret"><select class="gd-presets" title="Mathematical grid presets"><option value="">Preset…</option>' +
         GD_PRESETS.map(function (p) { return '<option value="' + p.key + '">' + p.label + '</option>'; }).join('') +
-      '</select>' +
+      '</select></span>' +
       '<div class="gd-side">' +
         '<button class="gd-sym" data-a="symY" title="Vertical symmetry (applies to newly added items)"></button>' +
         '<button class="gd-sym" data-a="symX" title="Horizontal symmetry (applies to newly added items)"></button>' +
@@ -325,6 +333,7 @@ function renderGridDesigner(box) {
       '</div>' +
     '</div>';
   box.appendChild(wrap);
+  if (gd.preset) wrap.querySelector('.gd-presets').value = gd.preset;
 
   var svg = wrap.querySelector('.gd-canvas');
   var slider = wrap.querySelector('.gd-slider');
@@ -378,6 +387,7 @@ function renderGridDesigner(box) {
     var pr = gdPresetItems(this.value);
     if (!pr) return;
     gdPush(gd);
+    gd.preset = this.value;
     gd.items = pr.items.map(function (it) { it.symX = false; it.symY = false; return it; });
     gd.gridOn = !!pr.grid;
     gd.gridMul = pr.mul || 1;
