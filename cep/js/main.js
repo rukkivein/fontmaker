@@ -383,8 +383,18 @@ function renderGridDesigner(box) {
     gd.selGrid = gd.gridOn; gd.selSet = [];
     sync();
   });
-  wrap.querySelector('[data-a=symY]').addEventListener('click', function () { gd.symY = !gd.symY; sync(); });
-  wrap.querySelector('[data-a=symX]').addEventListener('click', function () { gd.symX = !gd.symX; sync(); });
+  // toggling symmetry also (re)stamps every currently SELECTED item, so
+  // existing elements join/leave the mirror — new items keep following the mode
+  function toggleSym(axis) {
+    gd[axis] = !gd[axis];
+    if (gd.selSet.length) {
+      gdPush(gd);
+      gd.selSet.forEach(function (i) { var it = gd.items[i]; if (it) it[axis] = gd[axis]; });
+    }
+    sync();
+  }
+  wrap.querySelector('[data-a=symY]').addEventListener('click', function () { toggleSym('symY'); });
+  wrap.querySelector('[data-a=symX]').addEventListener('click', function () { toggleSym('symX'); });
   wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); gd.selSet = []; sync(); });
   wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); gd.selSet = []; sync(); });
   slider.addEventListener('input', function () { gdApplySlider(gd, +slider.value); gdRedraw(svg, gd); });
@@ -429,6 +439,14 @@ function renderGridDesigner(box) {
     var p = svgPoint(ev);
     if (t) {
       var i = +t.getAttribute('data-i');
+      if (ev.ctrlKey || ev.metaKey) {
+        // Ctrl+click: add to / remove from the multi-selection (no drag)
+        var pos = gd.selSet.indexOf(i);
+        if (pos >= 0) gd.selSet.splice(pos, 1); else gd.selSet.push(i);
+        gd.selGrid = false;
+        sync();
+        return;
+      }
       if (!gdSelected(gd, i)) { gd.selSet = [i]; gd.selGrid = false; }
       gdPush(gd);
       drag = { mode: 'move', sx: p.fx, sy: p.fy, orig: gd.selSet.map(function (k) { var o = gd.items[k]; return { i: k, cx: o.cx, cy: o.cy, x: o.x, y: o.y }; }) };
