@@ -38,7 +38,7 @@ function newDraft() {
     lang: { latinUpper: true, latinLower: true, numbers: true },
     gridDesign: (function () {
       var pv = gdPresetItems('copyvector');
-      return { items: pv.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; }),
+      return { items: pv.items.map(function (it) { return Object.assign({}, it); }),
                gridOn: true, gridCell: pv.cell || 50, gridMul: pv.mul || 1, preset: 'copyvector',
                symX: false, symY: false, sel: -1, selGrid: false, selSet: [], undo: [], redo: [] };
     })(),
@@ -158,11 +158,12 @@ function gdLetterBox(xh) {
   function h(y) { return { type: 'hline', y: Math.round(y) }; }
   function v(x) { return { type: 'vline', x: Math.round(x) }; }
   return { grid: true, cell: 50, items: [
-    // solid rectangle — the SIDE lines are ONE symmetric red item each (solid +
-    // dashed optical): symY keeps left/right mirrored no matter how they move
+    // solid rectangle — the SIDE lines are REAL left+right red elements (solid +
+    // dashed optical), each an independent body (a symmetric copy, not a mirror)
     h(0), h(CAP),
-    { type: 'vline', x: L, symY: true, red: true },
-    { type: 'dline', cx: L - OV, cy: 300, angle: 90, symY: true, red: true },
+    { type: 'vline', x: L, red: true }, { type: 'vline', x: 1000 - L, red: true },
+    { type: 'dline', cx: L - OV, cy: 300, angle: 90, red: true },
+    { type: 'dline', cx: 1000 - (L - OV), cy: 300, angle: 90, red: true },
     // top/bottom optical allowance (dashed)
     dl(500, -OV, 0), dl(500, CAP + OV, 0),
     // the uppercase/lowercase divide + its optical allowance
@@ -200,15 +201,19 @@ function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
 function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY }); }
 function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
 function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.gridMul = o.gridMul || 1; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; gd.selSet = []; }
-// Mirror copies of an item under ITS OWN symmetry flags (stamped at creation,
-// so turning symmetry off later never removes existing mirrors). Axes: x=500, y=300.
-function gdVariants(it) {
-  var v = [it];
-  function mx(o) { var c = Object.assign({}, o); if (c.cx != null) c.cx = 1000 - c.cx; if (c.x != null) c.x = 1000 - c.x; if (c.angle != null) c.angle = (180 - c.angle + 360) % 360; return c; }
-  function my(o) { var c = Object.assign({}, o); if (c.cy != null) c.cy = 600 - c.cy; if (c.y != null) c.y = 600 - c.y; if (c.angle != null) c.angle = (360 - c.angle) % 360; return c; }
-  if (it.symY) v.push(mx(it));
-  if (it.symX) { var n = v.length; for (var i = 0; i < n; i++) v.push(my(v[i])); }
-  return v.slice(1);
+// Symmetry makes a REAL, INDEPENDENT copy (not a live mirror). Axes: x=500 / y=300.
+function gdMirror(o, vert, horz) {
+  var c = Object.assign({}, o);
+  if (vert) { if (c.cx != null) c.cx = 1000 - c.cx; if (c.x != null) c.x = 1000 - c.x; if (c.angle != null) c.angle = (180 - c.angle + 360) % 360; }
+  if (horz) { if (c.cy != null) c.cy = 600 - c.cy; if (c.y != null) c.y = 600 - c.y; if (c.angle != null) c.angle = (360 - c.angle) % 360; }
+  return c;
+}
+// Real mirror copies of an item for the currently active symmetry axes.
+function gdMirrorsOf(it, sx, sy) {
+  var out = [];
+  if (sy) out.push(gdMirror(it, true, false));
+  if (sx) { var n = out.length; out.push(gdMirror(it, false, true)); for (var i = 0; i < n; i++) out.push(gdMirror(out[i], false, true)); }
+  return out;
 }
 function gdItemSvg(it, color, width, dash, idx, hit) {
   var sel = idx != null ? (' data-i="' + idx + '"') : '';
@@ -252,14 +257,8 @@ function gdRedraw(svg, gd) {
   }
   if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
   if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
-  // ghosts (mirrors) under the originals; thick visible strokes; fat invisible
-  // hit layer on top. RED items (e.g. the letterbox side lines) stay red — and
-  // their mirrors draw at full strength so both sides read as one pair.
-  gd.items.forEach(function (it) {
-    gdVariants(it).forEach(function (m) {
-      s += gdItemSvg(m, it.red ? '#c0271d' : '#b5b5b5', it.red ? 2.4 : 1.8, it.type === 'dline', null, false);
-    });
-  });
+  // every item is a real, independent element (mirror copies are real items,
+  // not live ghosts); thick visible strokes + a fat invisible hit layer on top
   gd.items.forEach(function (it, i) {
     var on = gdSelected(gd, i);
     var guide = it.type === 'hline' || it.type === 'vline';
@@ -369,9 +368,12 @@ function renderGridDesigner(box) {
     updatePillLabels(); renderProfile();
   }
   function addItem(it) {
-    // stamp the active symmetry onto the item — its mirrors live with IT
-    it.symX = gd.symX; it.symY = gd.symY;
-    gdPush(gd); gd.items.push(it); gd.selSet = [gd.items.length - 1]; gd.selGrid = false; sync();
+    // symmetry drops REAL independent copies alongside the new item
+    gdPush(gd);
+    var base = gd.items.length;
+    gd.items.push(it);
+    gdMirrorsOf(it, gd.symX, gd.symY).forEach(function (m) { gd.items.push(m); });
+    gd.selSet = [base]; gd.selGrid = false; sync();
   }
   wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
   wrap.querySelector('[data-t=dline]').addEventListener('click', function () { addItem({ type: 'dline', cx: 500, cy: 300, angle: 45 }); });
@@ -383,13 +385,22 @@ function renderGridDesigner(box) {
     gd.selGrid = gd.gridOn; gd.selSet = [];
     sync();
   });
-  // toggling symmetry also (re)stamps every currently SELECTED item, so
-  // existing elements join/leave the mirror — new items keep following the mode
+  // Symmetry is a mode for NEW items; turning it on also drops a real mirror
+  // copy of every currently SELECTED element (each copy an independent body).
   function toggleSym(axis) {
-    gd[axis] = !gd[axis];
-    if (gd.selSet.length) {
+    var turningOn = !gd[axis];
+    gd[axis] = turningOn;
+    if (turningOn && gd.selSet.length) {
       gdPush(gd);
-      gd.selSet.forEach(function (i) { var it = gd.items[i]; if (it) it[axis] = gd[axis]; });
+      var copies = [];
+      gd.selSet.forEach(function (i) {
+        var it = gd.items[i];
+        if (it) copies.push(gdMirror(it, axis === 'symY', axis === 'symX'));
+      });
+      var base = gd.items.length;
+      copies.forEach(function (m) { gd.items.push(m); });
+      // keep the originals selected, add the new copies to the selection too
+      for (var k = 0; k < copies.length; k++) gd.selSet.push(base + k);
     }
     sync();
   }
@@ -405,7 +416,8 @@ function renderGridDesigner(box) {
     if (!pr) return;
     gdPush(gd);
     gd.preset = this.value;
-    gd.items = pr.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; });
+    gd.items = pr.items.map(function (it) { return Object.assign({}, it); });
+    gd.symX = false; gd.symY = false;   // preset items are already real elements
     gd.gridOn = !!pr.grid;
     gd.gridMul = pr.mul || 1;
     if (pr.cell) gd.gridCell = pr.cell;
@@ -466,7 +478,6 @@ function renderGridDesigner(box) {
     var it = type === 'vline'
       ? { type: 'vline', x: Math.max(0, Math.min(1000, Math.round(p.fx))) }
       : { type: 'hline', y: Math.max(-200, Math.min(800, Math.round(p.fy))) };
-    it.symX = gd.symX; it.symY = gd.symY;
     gdPush(gd); gd.items.push(it);
     gd.selSet = [gd.items.length - 1]; gd.selGrid = false;
     drag = { mode: 'guide', i: gd.items.length - 1 };
@@ -503,6 +514,10 @@ function renderGridDesigner(box) {
       gd.selSet = [];
       gd.items.forEach(function (it, i) { if (gdInRect(it, x1, y1, x2, y2)) gd.selSet.push(i); });
       delete gd._marq;
+    } else if (drag.mode === 'guide' && (gd.symX || gd.symY)) {
+      // dropping a guide while symmetry is on leaves a real mirror copy of it
+      var g = gd.items[drag.i];
+      if (g) gdMirrorsOf(g, gd.symX, gd.symY).forEach(function (mc) { gd.items.push(mc); });
     }
     drag = null; sync();
   });
