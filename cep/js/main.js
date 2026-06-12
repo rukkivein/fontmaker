@@ -128,6 +128,40 @@ function renderRightList() {
 // stored in FONT UNITS (x 0..1000 across the em, y -200..800).
 var GD_W = 595, GD_H = 842, GD_PX = 36, GD_PY = 36; // mini A4 + canvas padding
 var GD_SX = (GD_W - 2 * GD_PX) / 1000, GD_SY = (GD_H - 2 * GD_PY) / 1000;
+// ---- mathematical grid presets (em: x 0..1000, baseline 0, cap 716, x-height
+// 519, cap-box centre (500,358), φ = 1.618) ----
+var GD_PHI = 1.61803398875;
+var GD_PRESETS = [
+  { key: 'golden', label: 'Golden Ratio' },
+  { key: 'geometric', label: 'Geometric' },
+  { key: 'grotesk', label: 'Grotesk' },
+  { key: 'calligraphic', label: 'Calligraphic' },
+  { key: 'serif', label: 'Serif' },
+  { key: 'sans', label: 'Sans' },
+];
+function gdPresetItems(key) {
+  var CAP = 716, XH = 519, CY = 358, R = 358; // cap box: centre (500,358), half-height 358
+  function c(cx, cy, r) { return { type: 'circle', cx: cx, cy: cy, r: Math.round(r) }; }
+  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: a }; }
+  function h(y) { return { type: 'hline', y: Math.round(y) }; }
+  function v(x) { return { type: 'vline', x: Math.round(x) }; }
+  var G = 1000 / GD_PHI; // 618 — the golden cut of the em
+  switch (key) {
+    case 'golden': // golden cuts of the em + a φ-progression of circles
+      return { grid: false, items: [v(1000 - G), v(G), h(CAP - CAP / GD_PHI), h(CAP / GD_PHI), c(500, CY, R), c(500, CY, R / GD_PHI), c(500, CY, R / GD_PHI / GD_PHI)] };
+    case 'geometric': // pure compass-and-square: em grid, Ø=cap circle, half circle, 45° diagonals
+      return { grid: true, cell: 50, items: [h(0), h(CAP), c(500, CY, R), c(500, CY, R / 2), dl(500, CY, 45), dl(500, CY, 135)] };
+    case 'grotesk': // metric lines + cap & x-height bowls + sidebearings
+      return { grid: false, items: [h(0), h(CAP), h(XH), v(60), v(940), c(500, CY, R), c(500, XH / 2, XH / 2)] };
+    case 'calligraphic': // 30° broad-nib slant family (60° from horizontal) over the metrics
+      return { grid: false, items: [h(0), h(XH), h(CAP), dl(250, CY, 60), dl(500, CY, 60), dl(750, CY, 60)] };
+    case 'serif': // metrics + overshoot lines + bracket circles at the feet
+      return { grid: false, items: [h(0), h(CAP), h(XH), h(-28), h(CAP + 28), v(500), c(280, 84, 84), c(720, 84, 84)] };
+    case 'sans': // em grid + metrics + central axis + cap bowl
+      return { grid: true, cell: 62, items: [h(0), h(CAP), h(XH), v(500), c(500, CY, R)] };
+  }
+  return null;
+}
 function gdXs(fx) { return GD_PX + fx * GD_SX; }
 function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
 function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY }); }
@@ -179,7 +213,9 @@ function gdRedraw(svg, gd) {
   });
   gd.items.forEach(function (it, i) {
     var on = gdSelected(gd, i);
-    s += gdItemSvg(it, on ? '#1473e6' : '#333333', on ? 3 : 2.4, it.type === 'dline', i, false);
+    var guide = it.type === 'hline' || it.type === 'vline';
+    var col = guide ? (on ? '#0d66d0' : '#1473e6') : (on ? '#1473e6' : '#333333');
+    s += gdItemSvg(it, col, on ? 3 : 2.4, it.type === 'dline', i, false);
   });
   gd.items.forEach(function (it, i) { s += gdItemSvg(it, null, 0, false, i, true); });
   if (gd._marq) {
@@ -233,6 +269,9 @@ function renderGridDesigner(box) {
         '</div>' +
         '<input class="gd-slider" type="range" min="0" max="100" value="50" disabled title="Size / angle of the selection" />' +
       '</div>' +
+      '<select class="gd-presets" title="Mathematical grid presets"><option value="">Preset…</option>' +
+        GD_PRESETS.map(function (p) { return '<option value="' + p.key + '">' + p.label + '</option>'; }).join('') +
+      '</select>' +
       '<div class="gd-side">' +
         '<button class="gd-sym" data-a="symY" title="Vertical symmetry (applies to newly added items)"></button>' +
         '<button class="gd-sym" data-a="symX" title="Horizontal symmetry (applies to newly added items)"></button>' +
@@ -253,14 +292,18 @@ function renderGridDesigner(box) {
 
   var svg = wrap.querySelector('.gd-canvas');
   var slider = wrap.querySelector('.gd-slider');
-  // size the A4 to FIT the available height (flex won't derive width from
-  // an svg's aspect ratio reliably) — keeps the whole designer scroll-free
+  // size the A4 to FIT both the available height AND width (reserving room for
+  // the right ruler + gaps) — responsive, never scrolls, rulers always visible
   function fit() {
-    var row = wrap.querySelector('.gd-stage-row');
-    var h = row.clientHeight || 400;
-    svg.style.width = Math.round(h * GD_W / GD_H) + 'px';
+    var mid = wrap.querySelector('.gd-mid');
+    var availH = Math.max(120, mid.clientHeight - 10);  // - hbar row
+    var availW = Math.max(120, mid.clientWidth - 12);   // - vbar + gap
+    var h = Math.min(availH, availW * GD_H / GD_W);
+    var w = h * GD_W / GD_H;
+    svg.style.width = Math.round(w) + 'px';
+    svg.style.height = Math.round(h) + 'px';
   }
-  window.addEventListener('resize', fit);
+  window.addEventListener('resize', function () { fit(); });
   function sync() {
     gdRedraw(svg, gd);
     var sv = gdSliderFor(gd);
@@ -285,6 +328,30 @@ function renderGridDesigner(box) {
   wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); gd.selSet = []; sync(); });
   slider.addEventListener('input', function () { gdApplySlider(gd, +slider.value); gdRedraw(svg, gd); });
   slider.addEventListener('change', function () { gdPush(gd); updatePillLabels(); renderProfile(); });
+  // grid presets — mathematically constructed compositions (replace the canvas)
+  wrap.querySelector('.gd-presets').addEventListener('change', function () {
+    var pr = gdPresetItems(this.value);
+    if (!pr) return;
+    gdPush(gd);
+    gd.items = pr.items.map(function (it) { it.symX = false; it.symY = false; return it; });
+    gd.gridOn = !!pr.grid;
+    if (pr.cell) gd.gridCell = pr.cell;
+    gd.selSet = []; gd.selGrid = false;
+    sync();
+  });
+  // mouse wheel nudges the slider (size / angle / cell of the selection)
+  var lastWheel = 0;
+  wrap.addEventListener('wheel', function (ev) {
+    if (slider.disabled) return;
+    ev.preventDefault();
+    var now = Date.now();
+    if (now - lastWheel > 400) gdPush(gd); // one undo step per wheel burst
+    lastWheel = now;
+    var v = Math.max(0, Math.min(100, (+slider.value) + (ev.deltaY > 0 ? -2 : 2)));
+    slider.value = v;
+    gdApplySlider(gd, v);
+    gdRedraw(svg, gd);
+  }, { passive: false });
 
   // ---- pointer interactions: move / marquee / ruler guides (Photoshop-like) ----
   function svgPoint(ev) {
@@ -310,10 +377,14 @@ function renderGridDesigner(box) {
       sync();
     }
   });
-  // ruler bars: press & drag onto the canvas — the guide follows the pointer
+  // ruler bars (Photoshop-like): the guide is grabbed at the pointer the moment
+  // you press, and follows the drag from there
   function startGuide(ev, type) {
     ev.preventDefault(); wrap.focus();
-    var it = type === 'vline' ? { type: 'vline', x: 1000 } : { type: 'hline', y: -200 };
+    var p = svgPoint(ev);
+    var it = type === 'vline'
+      ? { type: 'vline', x: Math.max(0, Math.min(1000, Math.round(p.fx))) }
+      : { type: 'hline', y: Math.max(-200, Math.min(800, Math.round(p.fy))) };
     it.symX = gd.symX; it.symY = gd.symY;
     gdPush(gd); gd.items.push(it);
     gd.selSet = [gd.items.length - 1]; gd.selGrid = false;

@@ -322,7 +322,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* The designer fills the panel — no scrolling. */
 .rune-list.gd-mode { overflow: hidden; padding: 10px; }
 .gd-wrap { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-height: 0; outline: none; }
-.gd-top { display: flex; align-items: flex-start; gap: 12px; flex: 0 0 auto; }
+.gd-top { display: flex; align-items: flex-start; gap: 8px; flex: 0 0 auto; flex-wrap: wrap; }
 .gd-toolcol { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .gd-tools { display: flex; gap: 6px; }
 .gd-tool {
@@ -330,7 +330,9 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: var(--sunk); border: 1px solid var(--edge); border-radius: 3px; cursor: pointer;
 }
 .gd-tool:hover { border-color: var(--edge-h); background: var(--ctrl-h); }
-.gd-tool.active { border-color: var(--accent); }
+.gd-tool.active { background: var(--accent); border-color: var(--accent); }
+.gd-tool.active span { background: #fff; }
+.gd-tool.active:hover { background: var(--accent-h); }
 /* tool icons — the user's SVGs, painted via mask so they follow the UI color */
 .gd-ic-circle, .gd-ic-dline, .gd-ic-grid {
   width: 20px; height: 20px; background: var(--txt);
@@ -339,31 +341,51 @@ button:disabled { opacity: 0.4; cursor: default; }
 .gd-ic-circle { -webkit-mask-image: url(../assets/gd/circle.svg); }
 .gd-ic-dline { -webkit-mask-image: url(../assets/gd/dline.svg); }
 .gd-ic-grid { -webkit-mask-image: url(../assets/gd/grid.svg); }
-.gd-slider { width: 120px; margin: 0; }
+.gd-slider {
+  -webkit-appearance: none; appearance: none;
+  width: 120px; height: 8px; margin: 4px 0 0;
+  background: var(--sunk); border: 1px solid var(--edge); border-radius: 4px;
+}
+.gd-slider::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 3px;
+  background: var(--accent); border: none; cursor: pointer;
+}
+.gd-slider:hover::-webkit-slider-thumb { background: var(--accent-h); }
 .gd-slider:disabled { opacity: 0.35; }
+/* mathematical grid presets */
+.gd-presets {
+  flex: 0 1 130px; min-width: 80px; height: 36px; padding: 0 6px;
+  background: var(--sunk); color: var(--txt); border: 1px solid var(--edge);
+  border-radius: 3px; font-size: 11px; font-family: inherit;
+}
+.gd-presets:hover { border-color: var(--edge-h); }
 /* symmetry (accent blue) + undo/redo (brand red) — 2x2 block */
 .gd-side { display: grid; grid-template-columns: 36px 36px; gap: 6px; margin-left: auto; }
 .gd-sym, .gd-hist { position: relative; height: 26px; padding: 0; border: 1px solid transparent; border-radius: 3px; cursor: pointer; }
-.gd-sym { background: var(--accent); opacity: 0.45; }
-.gd-sym:hover { background: var(--accent-h); opacity: 0.7; }
-.gd-sym.on { opacity: 1; }
+.gd-sym { background: var(--sunk); border: 1px solid var(--edge); }
+.gd-sym:hover { background: var(--ctrl-h); border-color: var(--edge-h); }
+.gd-sym::after { background: var(--txt); }
+.gd-sym.on { background: var(--accent); border-color: var(--accent); }
+.gd-sym.on:hover { background: var(--accent-h); }
+.gd-sym.on::after { background: #fff; }
 .gd-sym::after, .gd-hist::after {
   content: ''; position: absolute; left: 0; right: 0; top: 0; bottom: 0; margin: 5px;
-  background: #fff;
   -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; -webkit-mask-size: contain;
 }
 .gd-sym::after { -webkit-mask-image: url(../assets/gd/sym.svg); }
 .gd-sym[data-a=symX]::after { transform: rotate(90deg); }
-.gd-hist { background: var(--brand-red); opacity: 0.85; }
-.gd-hist:hover { opacity: 1; }
-.gd-hist::after { -webkit-mask-image: url(../assets/gd/undo.svg); }
+.gd-hist { background: var(--sunk); border: 1px solid var(--edge); }
+.gd-hist::after { background: var(--txt); -webkit-mask-image: url(../assets/gd/undo.svg); }
+.gd-hist[data-a=undo]:hover { background: var(--brand-red); border-color: var(--brand-red); }
+.gd-hist[data-a=redo]:hover { background: var(--accent); border-color: var(--accent); }
+.gd-hist:hover::after { background: #fff; }
 .gd-hist[data-a=redo]::after { transform: scaleX(-1); }
 /* canvas (white mini A4) sized to FIT the panel height + the guide bars */
 .gd-mid { flex: 1 1 auto; min-height: 0; display: flex; justify-content: center; }
 .gd-stage { display: flex; flex-direction: column; gap: 6px; height: 100%; }
 .gd-stage-row { flex: 1 1 auto; min-height: 0; display: flex; gap: 6px; }
-.gd-canvas { height: 100%; width: auto; aspect-ratio: 595 / 842; display: block; cursor: default; }
+.gd-canvas { display: block; cursor: default; }
 .gd-canvas [data-i] { cursor: move; }
 .gd-vbar { width: 4px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: ew-resize; }
-.gd-hbar { height: 4px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: ns-resize; margin-right: 10px; }
+.gd-hbar { height: 4px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: ns-resize; }
 .gd-vbar:hover, .gd-hbar:hover { background: var(--accent); opacity: 1; }
