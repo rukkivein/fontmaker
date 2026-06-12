@@ -83,6 +83,17 @@ function componentsToGrids(keys, d, upm) {
   return out;
 }
 
+// A user-designed grid (from the panel's grid designer canvas) -> effects.
+// Items are in font units (x 0..1000 across the em, y -200..800); symmetry
+// mirrors about x=500 / y=300. The artboard expands the mirrors itself.
+function designToGrids(gd, upm) {
+  upm = upm || 1000;
+  const out = [];
+  if (gd && gd.gridOn) out.push({ kind: 'emsquare', cell: Math.round(gd.gridCell || 50) });
+  if (gd && gd.items && gd.items.length) out.push({ kind: 'design', items: gd.items, symX: !!gd.symX, symY: !!gd.symY });
+  return out;
+}
+
 const DEFAULT_PRESET = 'Clean';
 function byName(name) {
   const all = QUICK.concat(ADVANCED);
@@ -105,6 +116,6 @@ function toGrids(d, upm) {
 
 module.exports = {
   PARAMS, BASE, QUICK, ADVANCED, DEFAULT_PRESET,
-  GRID_COMPONENTS, RECOMMENDED_GRID, componentsToGrids,
+  GRID_COMPONENTS, RECOMMENDED_GRID, componentsToGrids, designToGrids,
   byName, toGrids, dna,
 };

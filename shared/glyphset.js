@@ -64,11 +64,18 @@ function createProject(opts) {
     layers: emptyLayers(masters),
   }));
 
-  // Two ways to define the construction grid:
-  //  - Grid tier: an explicit set of grid components (gridComponents).
-  //  - Advanced tier: a DNA preset (preset) or a custom DNA (dna).
-  let d, grids, presetLabel, gridComponents = null;
-  if (opts.gridComponents) {
+  // Ways to define the construction grid:
+  //  - gridDesign: a user-designed canvas (circles / dashed lines / square grid
+  //    / guides + symmetry) from the panel's grid designer.
+  //  - gridComponents: an explicit set of grid components.
+  //  - preset / dna: a DNA preset or custom DNA (legacy/programmatic).
+  let d, grids, presetLabel, gridComponents = null, gridDesign = null;
+  if (opts.gridDesign) {
+    gridDesign = opts.gridDesign;
+    d = Object.assign({}, dna.BASE, opts.dna || {});
+    grids = dna.designToGrids(gridDesign, UPM);
+    presetLabel = 'Custom grid';
+  } else if (opts.gridComponents) {
     gridComponents = opts.gridComponents.slice();
     d = Object.assign({}, dna.BASE, opts.dna || {});
     grids = dna.componentsToGrids(gridComponents, d, UPM);
@@ -94,6 +101,7 @@ function createProject(opts) {
     dna: d,
     preset: presetLabel,
     gridComponents,
+    gridDesign,
     grids,
     alphabets: (opts.alphabets && opts.alphabets.length) ? opts.alphabets.slice() : DEFAULT_ALPHABETS.slice(),
     masters,

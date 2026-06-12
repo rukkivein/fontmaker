@@ -317,3 +317,47 @@ button:disabled { opacity: 0.4; cursor: default; }
   margin: 12px 4px 4px; padding-top: 10px; border-top: 1px solid var(--line);
   font-size: 10px; text-transform: uppercase; letter-spacing: .5px; color: var(--txt2);
 }
+
+/* ===== Grid designer (right panel when Grid is open) ===== */
+.gd-wrap { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.gd-top { display: flex; align-items: flex-start; gap: 12px; }
+.gd-toolcol { display: flex; flex-direction: column; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.gd-tools { display: flex; gap: 6px; }
+.gd-tool {
+  width: 36px; height: 36px; padding: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--sunk); border: 1px solid var(--edge); border-radius: 3px; cursor: pointer;
+}
+.gd-tool:hover { border-color: var(--edge-h); background: var(--ctrl-h); }
+.gd-tool.active { border-color: var(--accent); }
+.gd-ic-circle { width: 16px; height: 16px; border: 1.5px solid var(--txt); border-radius: 50%; }
+.gd-ic-dline { width: 18px; border-top: 2px dashed var(--txt); transform: rotate(-45deg); }
+.gd-ic-grid {
+  width: 16px; height: 16px;
+  background:
+    linear-gradient(var(--txt) 1px, transparent 1px) 0 0 / 5px 5px,
+    linear-gradient(90deg, var(--txt) 1px, transparent 1px) 0 0 / 5px 5px;
+}
+.gd-slider { width: 120px; margin: 0; }
+.gd-slider:disabled { opacity: 0.35; }
+/* symmetry (accent blue) + undo/redo (brand red) — 2×2 block, mirrors the layout */
+.gd-side { display: grid; grid-template-columns: 36px 36px; gap: 6px; margin-left: auto; }
+.gd-sym {
+  height: 24px; padding: 0; background: var(--accent); border: 1px solid transparent;
+  border-radius: 3px; cursor: pointer; opacity: 0.45;
+}
+.gd-sym:hover { background: var(--accent-h); opacity: 0.7; }
+.gd-sym.on { opacity: 1; }
+.gd-sym[data-a=symY] { background-image: linear-gradient(#fff, #fff); background-size: 1.5px 70%; background-position: center; background-repeat: no-repeat; }
+.gd-sym[data-a=symX] { background-image: linear-gradient(#fff, #fff); background-size: 70% 1.5px; background-position: center; background-repeat: no-repeat; }
+.gd-hist {
+  height: 16px; padding: 0; background: var(--brand-red); border: 1px solid transparent;
+  border-radius: 3px; cursor: pointer; opacity: 0.85;
+}
+.gd-hist:hover { opacity: 1; }
+/* canvas (white mini A4) + the guide-creation bars (right & bottom) */
+.gd-mid { display: flex; gap: 8px; align-items: stretch; }
+.gd-canvas { flex: 1 1 auto; min-width: 0; height: auto; display: block; cursor: default; }
+.gd-canvas [data-i] { cursor: move; }
+.gd-vbar { width: 3px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: copy; }
+.gd-hbar { height: 3px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: copy; flex: 0 0 auto; }
+.gd-vbar:hover, .gd-hbar:hover { background: var(--accent); opacity: 1; }

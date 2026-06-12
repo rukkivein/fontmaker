@@ -152,6 +152,48 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
     fmEllipse(layer, cx, fy(M.capHeight * 0.75), r * 2, r * 2);
     fmEllipse(layer, cx, fy(M.capHeight * 0.5), r * 2, r * 2);
   }
+  // user-designed grid items (panel canvas): font units, x 0..1000 across the
+  // glyph box, y -200..800; expand symmetry mirrors here.
+  var de = fmHas(grids, 'design');
+  if (de) {
+    var fx = function (u) { return left + (u / 1000) * w; };
+    var items = [];
+    for (var di = 0; di < de.items.length; di++) {
+      var it = de.items[di], vs = [it];
+      if (de.symY) vs.push(fmMirror(it, true, false));
+      if (de.symX) { var n = vs.length; for (var vi = 0; vi < n; vi++) vs.push(fmMirror(vs[vi], false, true)); }
+      for (var v = 0; v < vs.length; v++) items.push(vs[v]);
+    }
+    for (var ii = 0; ii < items.length; ii++) {
+      var g2 = items[ii];
+      if (g2.type === 'circle') {
+        var rr = g2.r * FM_SCALE;
+        fmEllipse(layer, fx(g2.cx), fy(g2.cy) + rr, rr * 2, rr * 2);
+      } else if (g2.type === 'dline') {
+        var a2 = g2.angle * Math.PI / 180, ddx = Math.cos(a2), ddy = Math.sin(a2);
+        fmStroke(layer, [[fx(g2.cx - 1600 * ddx), fy(g2.cy - 1600 * ddy)], [fx(g2.cx + 1600 * ddx), fy(g2.cy + 1600 * ddy)]], 210, 0.35, true);
+      } else if (g2.type === 'hline') {
+        fmStroke(layer, [[left, fy(g2.y)], [right, fy(g2.y)]], 150, 0.6);
+      } else if (g2.type === 'vline') {
+        fmStroke(layer, [[fx(g2.x), fy(M.descender)], [fx(g2.x), fy(M.ascender)]], 150, 0.6);
+      }
+    }
+  }
+}
+// Mirror a designed grid item about the vertical (x=500) / horizontal (y=300) axis.
+function fmMirror(it, vert, horz) {
+  var c = {}; for (var k in it) c[k] = it[k];
+  if (vert) {
+    if (c.cx != null) c.cx = 1000 - c.cx;
+    if (c.x != null) c.x = 1000 - c.x;
+    if (c.angle != null) c.angle = (180 - c.angle + 360) % 360;
+  }
+  if (horz) {
+    if (c.cy != null) c.cy = 600 - c.cy;
+    if (c.y != null) c.y = 600 - c.y;
+    if (c.angle != null) c.angle = (360 - c.angle) % 360;
+  }
+  return c;
 }
 // Stroked ellipse guide: centered at cx, top at topY, given width & height.
 function fmEllipse(layer, cx, topY, width, height) {

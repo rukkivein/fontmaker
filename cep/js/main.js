@@ -30,26 +30,13 @@ function evalScript(code) { return new Promise(function (r) { cs.evalScript(code
 // ============ PAGE 1 — New Font (RuneType Glyphmaker) ============
 // Holds settings only; nothing is generated until Start Creating.
 var draft = null;
-// The few DNA axes that actually shape the construction grid — exposed as
-// sliders so the grid (density, proportions, circles, nib) is adjustable.
-var GRID_PARAMS = [
-  { key: 'gridDensity', label: 'Grid density' },
-  { key: 'width', label: 'Width' },
-  { key: 'xHeight', label: 'x-Height' },
-  { key: 'overshoot', label: 'Overshoot' },
-  { key: 'penAngle', label: 'Pen angle' },
-];
 function newDraft() {
-  // Pre-select the most common Latin basics + the recommended grid components.
-  var gc = {};
-  dna.RECOMMENDED_GRID.forEach(function (k) { gc[k] = true; });
-  var gp = {};
-  GRID_PARAMS.forEach(function (p) { gp[p.key] = dna.BASE[p.key]; });
+  // Pre-select the most common Latin basics. The grid starts as a blank canvas
+  // the user designs on (circles / dashed lines / square grid / baselines).
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    gridComps: gc,     // which construction components are on
-    gridParams: gp,    // adjustable grid parameters
+    gridDesign: { items: [], gridOn: false, gridCell: 50, symX: false, symY: false, sel: -1, selGrid: false, undo: [], redo: [] },
     toggle: 'lang',
   };
 }
@@ -119,7 +106,7 @@ function setToggle(which) {
 }
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
-  if (draft.toggle === 'preset') return renderGrid(box);
+  if (draft.toggle === 'preset') return renderGridDesigner(box);
   // Language Support — multi-select character sets.
   charsets.ALPHABETS.forEach(function (it) {
     var on = !!draft.lang[it.key];
@@ -134,39 +121,172 @@ function renderRightList() {
     box.appendChild(row);
   });
 }
-// The construction GRID (from the preset PDF): composable, multi-select,
-// overlayable components, followed by the adjustable grid parameters.
-function renderGrid(box) {
-  dna.GRID_COMPONENTS.forEach(function (c) {
-    var on = !!draft.gridComps[c.key];
-    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (c.rec ? ' essential' : '');
-    var rec = c.rec ? ' <span class="ri-rec">Recommended</span>' : '';
-    var txt = document.createElement('div'); txt.className = 'ri-txt';
-    txt.innerHTML = '<div class="ri-t">' + c.label + rec + '</div><div class="ri-d">' + c.desc + '</div>';
-    var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
-    row.appendChild(txt); row.appendChild(btn);
-    row.addEventListener('click', function () { draft.gridComps[c.key] = !draft.gridComps[c.key]; renderRightList(); updatePillLabels(); renderProfile(); });
-    box.appendChild(row);
+// ===== GRID DESIGNER — a white mini-A4 canvas the user composes the
+// construction grid on: circles, dashed lines (0–360°), a square grid toggle,
+// baselines from the bottom/right bars, X/Y symmetry, undo/redo. Items are
+// stored in FONT UNITS (x 0..1000 across the em, y -200..800).
+var GD_W = 595, GD_H = 842, GD_PX = 36, GD_PY = 36; // mini A4 + canvas padding
+var GD_SX = (GD_W - 2 * GD_PX) / 1000, GD_SY = (GD_H - 2 * GD_PY) / 1000;
+function gdXs(fx) { return GD_PX + fx * GD_SX; }
+function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
+function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY }); }
+function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
+function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; }
+// All mirror copies of an item under the active symmetries (axes x=500, y=300).
+function gdVariants(it, gd) {
+  var v = [it];
+  function mx(o) { var c = Object.assign({}, o); if (c.cx != null) c.cx = 1000 - c.cx; if (c.x != null) c.x = 1000 - c.x; if (c.angle != null) c.angle = (180 - c.angle + 360) % 360; return c; }
+  function my(o) { var c = Object.assign({}, o); if (c.cy != null) c.cy = 600 - c.cy; if (c.y != null) c.y = 600 - c.y; if (c.angle != null) c.angle = (360 - c.angle) % 360; return c; }
+  if (gd.symY) v.push(mx(it));
+  if (gd.symX) v = v.concat(v.map(my));
+  return v.slice(1);
+}
+function gdItemSvg(it, color, width, dash, idx) {
+  var sel = idx != null ? (' data-i="' + idx + '"') : '';
+  var st = 'fill="none" stroke="' + color + '" stroke-width="' + width + '"' + (dash ? ' stroke-dasharray="5 4"' : '') + sel;
+  if (it.type === 'circle') return '<circle cx="' + gdXs(it.cx) + '" cy="' + gdYs(it.cy) + '" r="' + (it.r * GD_SX) + '" ' + st + '/>';
+  if (it.type === 'dline') {
+    var a = it.angle * Math.PI / 180, dx = Math.cos(a), dy = Math.sin(a);
+    return '<line x1="' + gdXs(it.cx - 1600 * dx) + '" y1="' + gdYs(it.cy - 1600 * dy) + '" x2="' + gdXs(it.cx + 1600 * dx) + '" y2="' + gdYs(it.cy + 1600 * dy) + '" ' + st + '/>';
+  }
+  if (it.type === 'hline') return '<line x1="' + gdXs(0) + '" y1="' + gdYs(it.y) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(it.y) + '" ' + st + '/>';
+  if (it.type === 'vline') return '<line x1="' + gdXs(it.x) + '" y1="' + gdYs(800) + '" x2="' + gdXs(it.x) + '" y2="' + gdYs(-200) + '" ' + st + '/>';
+  return '';
+}
+function gdRedraw(svg, gd) {
+  var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
+  s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
+  s += '<g clip-path="url(#gdclip)">';
+  if (gd.gridOn) {
+    var c = gd.gridCell || 50, sel = gd.selGrid;
+    var gc = sel ? '#9cc3f0' : '#dcdcdc';
+    for (var gx = 0; gx <= 1000; gx += c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    for (var gy = -200; gy <= 800; gy += c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+  }
+  if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.8" stroke-dasharray="7 5" opacity="0.55"/>';
+  if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.8" stroke-dasharray="7 5" opacity="0.55"/>';
+  gd.items.forEach(function (it, i) {
+    gdVariants(it, gd).forEach(function (m) { s += gdItemSvg(m, '#b9b9b9', 1, it.type === 'dline', null); });
+    var on = (i === gd.sel);
+    s += gdItemSvg(it, on ? '#1473e6' : '#3a3a3a', on ? 1.6 : 1.2, it.type === 'dline', i);
   });
-  // adjustable grid parameters
-  var head = document.createElement('div'); head.className = 'grid-adjust-h'; head.textContent = 'Adjust grid';
-  box.appendChild(head);
-  var wrap = document.createElement('div'); wrap.className = 'dna-sliders';
-  GRID_PARAMS.forEach(function (p) {
-    var row = document.createElement('div'); row.className = 'dna-slider';
-    row.innerHTML = '<span class="ds-k">' + p.label + '</span><input type="range" min="0" max="100" value="' + draft.gridParams[p.key] + '" /><span class="ds-v">' + draft.gridParams[p.key] + '</span>';
-    var inp = row.querySelector('input'), val = row.querySelector('.ds-v');
-    inp.addEventListener('input', function () { draft.gridParams[p.key] = +inp.value; val.textContent = inp.value; });
-    wrap.appendChild(row);
-  });
+  s += '</g>';
+  svg.innerHTML = s;
+}
+// slider <-> selected object mapping
+function gdSliderFor(gd) {
+  if (gd.selGrid) return Math.round((gd.gridCell - 25) / 100 * 100);
+  var it = gd.items[gd.sel];
+  if (!it) return null;
+  if (it.type === 'circle') return Math.round((it.r - 20) / 480 * 100);
+  if (it.type === 'dline') return Math.round(it.angle / 3.6);
+  if (it.type === 'hline') return Math.round((800 - it.y) / 10);
+  if (it.type === 'vline') return Math.round(it.x / 10);
+  return null;
+}
+function gdApplySlider(gd, v) {
+  if (gd.selGrid) { gd.gridCell = Math.round(25 + v); return; }
+  var it = gd.items[gd.sel];
+  if (!it) return;
+  if (it.type === 'circle') it.r = Math.round(20 + v / 100 * 480);
+  else if (it.type === 'dline') it.angle = Math.round(v * 3.6) % 360;
+  else if (it.type === 'hline') it.y = Math.round(800 - v * 10);
+  else if (it.type === 'vline') it.x = Math.round(v * 10);
+}
+function renderGridDesigner(box) {
+  var gd = draft.gridDesign;
+  var wrap = document.createElement('div'); wrap.className = 'gd-wrap';
+  wrap.innerHTML =
+    '<div class="gd-top">' +
+      '<div class="gd-toolcol">' +
+        '<div class="gd-tools">' +
+          '<button class="gd-tool" data-t="circle" title="Add circle"><span class="gd-ic-circle"></span></button>' +
+          '<button class="gd-tool" data-t="dline" title="Add dashed line (0–360°)"><span class="gd-ic-dline"></span></button>' +
+          '<button class="gd-tool" data-t="grid" title="Square grid on/off"><span class="gd-ic-grid"></span></button>' +
+        '</div>' +
+        '<input class="gd-slider" type="range" min="0" max="100" value="50" disabled title="Size / angle of the selection" />' +
+      '</div>' +
+      '<div class="gd-side">' +
+        '<button class="gd-sym" data-a="symY" title="Vertical symmetry"></button>' +
+        '<button class="gd-sym" data-a="symX" title="Horizontal symmetry"></button>' +
+        '<button class="gd-hist" data-a="undo" title="Undo"></button>' +
+        '<button class="gd-hist" data-a="redo" title="Redo"></button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="gd-mid">' +
+      '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
+      '<div class="gd-vbar" title="Add a vertical guide"></div>' +
+    '</div>' +
+    '<div class="gd-hbar" title="Add a baseline"></div>';
   box.appendChild(wrap);
+
+  var svg = wrap.querySelector('.gd-canvas');
+  var slider = wrap.querySelector('.gd-slider');
+  function sync() {
+    gdRedraw(svg, gd);
+    var sv = gdSliderFor(gd);
+    slider.disabled = (sv == null);
+    if (sv != null) slider.value = Math.max(0, Math.min(100, sv));
+    wrap.querySelector('[data-t=grid]').classList.toggle('active', gd.gridOn);
+    wrap.querySelector('[data-a=symY]').classList.toggle('on', gd.symY);
+    wrap.querySelector('[data-a=symX]').classList.toggle('on', gd.symX);
+    updatePillLabels(); renderProfile();
+  }
+  function select(i, grid) { gd.sel = i; gd.selGrid = !!grid; sync(); }
+  function addItem(it) { gdPush(gd); gd.items.push(it); select(gd.items.length - 1, false); }
+
+  wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
+  wrap.querySelector('[data-t=dline]').addEventListener('click', function () { addItem({ type: 'dline', cx: 500, cy: 300, angle: 45 }); });
+  wrap.querySelector('[data-t=grid]').addEventListener('click', function () { gdPush(gd); gd.gridOn = !gd.gridOn; select(-1, gd.gridOn); });
+  wrap.querySelector('.gd-hbar').addEventListener('click', function () { addItem({ type: 'hline', y: 0 }); });
+  wrap.querySelector('.gd-vbar').addEventListener('click', function () { addItem({ type: 'vline', x: 500 }); });
+  wrap.querySelector('[data-a=symY]').addEventListener('click', function () { gdPush(gd); gd.symY = !gd.symY; sync(); });
+  wrap.querySelector('[data-a=symX]').addEventListener('click', function () { gdPush(gd); gd.symX = !gd.symX; sync(); });
+  wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); sync(); });
+  wrap.querySelector('[data-a=redo]').addEventListener('click', function () { if (!gd.redo.length) return; gd.undo.push(gdSnap(gd)); gdRestore(gd, gd.redo.pop()); sync(); });
+  slider.addEventListener('input', function () { gdApplySlider(gd, +slider.value); gdRedraw(svg, gd); });
+  slider.addEventListener('change', function () { gdPush(gd); updatePillLabels(); renderProfile(); });
+
+  // select & drag items on the canvas
+  function svgPoint(ev) {
+    var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    var p = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { fx: (p.x - GD_PX) / GD_SX, fy: 800 - (p.y - GD_PY) / GD_SY };
+  }
+  var drag = null;
+  svg.addEventListener('mousedown', function (ev) {
+    var t = ev.target.closest ? ev.target.closest('[data-i]') : null;
+    if (!t) { select(-1, gd.gridOn && gd.selGrid); return; }
+    var i = +t.getAttribute('data-i'), p = svgPoint(ev), it = draft.gridDesign.items[i];
+    gdPush(gd);
+    drag = { i: i, ox: p.fx - (it.cx != null ? it.cx : (it.x != null ? it.x : 0)), oy: p.fy - (it.cy != null ? it.cy : (it.y != null ? it.y : 0)) };
+    select(i, false);
+  });
+  svg.addEventListener('mousemove', function (ev) {
+    if (!drag) return;
+    var p = svgPoint(ev), it = gd.items[drag.i];
+    if (it.cx != null) { it.cx = Math.max(0, Math.min(1000, Math.round(p.fx - drag.ox))); it.cy = Math.max(-200, Math.min(800, Math.round(p.fy - drag.oy))); }
+    else if (it.x != null) it.x = Math.max(0, Math.min(1000, Math.round(p.fx - drag.ox)));
+    else if (it.y != null) it.y = Math.max(-200, Math.min(800, Math.round(p.fy - drag.oy)));
+    gdRedraw(svg, gd);
+  });
+  window.addEventListener('mouseup', function () { if (drag) { drag = null; sync(); } });
+  sync();
 }
 function selectedLangLabels() {
   return charsets.ALPHABETS.filter(function (it) { return draft.lang[it.key]; }).map(function (it) { return it.label; });
 }
 function gridSummary() {
-  var labels = dna.GRID_COMPONENTS.filter(function (c) { return draft.gridComps[c.key]; }).map(function (c) { return c.label; });
-  return labels.length ? labels.join(', ') : '—';
+  var gd = draft.gridDesign;
+  var n = { circle: 0, dline: 0, hline: 0, vline: 0 };
+  gd.items.forEach(function (it) { n[it.type]++; });
+  var parts = [];
+  if (n.circle) parts.push(n.circle + ' circle' + (n.circle > 1 ? 's' : ''));
+  if (n.dline) parts.push(n.dline + ' line' + (n.dline > 1 ? 's' : ''));
+  if (n.hline + n.vline) parts.push((n.hline + n.vline) + ' guide' + (n.hline + n.vline > 1 ? 's' : ''));
+  if (gd.gridOn) parts.push('grid');
+  if (gd.symX || gd.symY) parts.push('symmetry');
+  return parts.length ? parts.join(', ') : 'blank';
 }
 function updatePillLabels() {
   var l = selectedLangLabels();
@@ -209,9 +329,8 @@ function onStartCreating() {
     familyName: ($('nf-family').value.trim() || 'Untitled'),
     masterName: m0.name, masterType: m0.name, alphabets: alphabets,
   };
-  var comps = Object.keys(draft.gridComps).filter(function (k) { return draft.gridComps[k]; });
-  opts.gridComponents = comps.length ? comps : dna.RECOMMENDED_GRID.slice();
-  opts.dna = draft.gridParams;   // adjustable grid parameters
+  var gd = draft.gridDesign;
+  opts.gridDesign = { items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY };
   var project = glyphset.createProject(opts);
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};
