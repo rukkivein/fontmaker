@@ -38,7 +38,7 @@ function newDraft() {
     lang: { latinUpper: true, latinLower: true, numbers: true },
     gridDesign: (function () {
       var pv = gdPresetItems('copyvector');
-      return { items: pv.items.map(function (it) { it.symX = false; it.symY = false; return it; }),
+      return { items: pv.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; }),
                gridOn: true, gridCell: pv.cell || 50, gridMul: pv.mul || 1, preset: 'copyvector',
                symX: false, symY: false, sel: -1, selGrid: false, selSet: [], undo: [], redo: [] };
     })(),
@@ -158,10 +158,13 @@ function gdLetterBox(xh) {
   function h(y) { return { type: 'hline', y: Math.round(y) }; }
   function v(x) { return { type: 'vline', x: Math.round(x) }; }
   return { grid: true, cell: 50, items: [
-    // solid rectangle
-    h(0), h(CAP), v(L), v(Rt),
-    // optical allowance of the rectangle (dashed, all four sides)
-    dl(500, -OV, 0), dl(500, CAP + OV, 0), dl(L - OV, 300, 90), dl(Rt + OV, 300, 90),
+    // solid rectangle — the SIDE lines are ONE symmetric red item each (solid +
+    // dashed optical): symY keeps left/right mirrored no matter how they move
+    h(0), h(CAP),
+    { type: 'vline', x: L, symY: true, red: true },
+    { type: 'dline', cx: L - OV, cy: 300, angle: 90, symY: true, red: true },
+    // top/bottom optical allowance (dashed)
+    dl(500, -OV, 0), dl(500, CAP + OV, 0),
     // the uppercase/lowercase divide + its optical allowance
     h(xh), dl(500, xh - OV, 0), dl(500, xh + OV, 0),
   ] };
@@ -249,14 +252,20 @@ function gdRedraw(svg, gd) {
   }
   if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
   if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
-  // ghosts (mirrors) under the originals; thick visible strokes; fat invisible hit layer on top
+  // ghosts (mirrors) under the originals; thick visible strokes; fat invisible
+  // hit layer on top. RED items (e.g. the letterbox side lines) stay red — and
+  // their mirrors draw at full strength so both sides read as one pair.
   gd.items.forEach(function (it) {
-    gdVariants(it).forEach(function (m) { s += gdItemSvg(m, '#b5b5b5', 1.8, it.type === 'dline', null, false); });
+    gdVariants(it).forEach(function (m) {
+      s += gdItemSvg(m, it.red ? '#c0271d' : '#b5b5b5', it.red ? 2.4 : 1.8, it.type === 'dline', null, false);
+    });
   });
   gd.items.forEach(function (it, i) {
     var on = gdSelected(gd, i);
     var guide = it.type === 'hline' || it.type === 'vline';
-    var col = guide ? (on ? '#0d66d0' : '#1473e6') : (on ? '#1473e6' : '#333333');
+    var col = it.red ? (on ? '#e0392b' : '#c0271d')
+            : guide ? (on ? '#0d66d0' : '#1473e6')
+            : (on ? '#1473e6' : '#333333');
     s += gdItemSvg(it, col, on ? 3 : 2.4, it.type === 'dline', i, false);
   });
   gd.items.forEach(function (it, i) { s += gdItemSvg(it, null, 0, false, i, true); });
@@ -386,7 +395,7 @@ function renderGridDesigner(box) {
     if (!pr) return;
     gdPush(gd);
     gd.preset = this.value;
-    gd.items = pr.items.map(function (it) { it.symX = false; it.symY = false; return it; });
+    gd.items = pr.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; });
     gd.gridOn = !!pr.grid;
     gd.gridMul = pr.mul || 1;
     if (pr.cell) gd.gridCell = pr.cell;

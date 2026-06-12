@@ -84,7 +84,12 @@ function fmPing() {
  * draw on. SCALE maps font units → points so everything is consistent. */
 var FM_SCALE = 0.25; // points per font unit
 
-function fmColor(g) { var c = new RGBColor(); c.red = g; c.green = g; c.blue = g; return c; }
+function fmColor(g) {
+  var c = new RGBColor();
+  if (g && g.length === 3) { c.red = g[0]; c.green = g[1]; c.blue = g[2]; }
+  else { c.red = g; c.green = g; c.blue = g; }
+  return c;
+}
 function fmStroke(layer, pts, gray, width, dashed) {
   var p = layer.pathItems.add();
   p.setEntirePath(pts);
@@ -178,16 +183,17 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
     }
     for (var ii = 0; ii < items.length; ii++) {
       var g2 = items[ii];
+      var red = g2.red ? [192, 39, 29] : null; // brand red for flagged items
       if (g2.type === 'circle') {
         var rr = g2.r * FM_SCALE;
         fmEllipse(layer, fx(g2.cx), fy(g2.cy) + rr, rr * 2, rr * 2);
       } else if (g2.type === 'dline') {
         var a2 = g2.angle * Math.PI / 180, ddx = Math.cos(a2), ddy = Math.sin(a2);
-        fmStroke(layer, [[fx(g2.cx - 1600 * ddx), fy(g2.cy - 1600 * ddy)], [fx(g2.cx + 1600 * ddx), fy(g2.cy + 1600 * ddy)]], 210, 0.35, true);
+        fmStroke(layer, [[fx(g2.cx - 1600 * ddx), fy(g2.cy - 1600 * ddy)], [fx(g2.cx + 1600 * ddx), fy(g2.cy + 1600 * ddy)]], red || 210, 0.35, true);
       } else if (g2.type === 'hline') {
-        fmStroke(layer, [[left, fy(g2.y)], [right, fy(g2.y)]], 150, 0.6);
+        fmStroke(layer, [[left, fy(g2.y)], [right, fy(g2.y)]], red || 150, 0.6);
       } else if (g2.type === 'vline') {
-        fmStroke(layer, [[fx(g2.x), fy(M.descender)], [fx(g2.x), fy(M.ascender)]], 150, 0.6);
+        fmStroke(layer, [[fx(g2.x), fy(M.descender)], [fx(g2.x), fy(M.ascender)]], red || 150, 0.6);
       }
     }
   }
