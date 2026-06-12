@@ -36,7 +36,7 @@ function newDraft() {
   return {
     masters: [{ name: 'Regular' }],
     lang: { latinUpper: true, latinLower: true, numbers: true },
-    gridDesign: { items: [], gridOn: false, gridCell: 50, symX: false, symY: false, sel: -1, selGrid: false, undo: [], redo: [] },
+    gridDesign: { items: [], gridOn: false, gridCell: 50, gridMul: 1, symX: false, symY: false, sel: -1, selGrid: false, undo: [], redo: [] },
     toggle: 'lang',
   };
 }
@@ -132,41 +132,65 @@ var GD_SX = (GD_W - 2 * GD_PX) / 1000, GD_SY = (GD_H - 2 * GD_PY) / 1000;
 // 519, cap-box centre (500,358), φ = 1.618) ----
 var GD_PHI = 1.61803398875;
 var GD_PRESETS = [
+  { key: 'construction', label: 'Construction Web' },
   { key: 'golden', label: 'Golden Ratio' },
-  { key: 'geometric', label: 'Geometric' },
-  { key: 'grotesk', label: 'Grotesk' },
+  { key: 'lettering', label: 'Lettering Grid' },
   { key: 'calligraphic', label: 'Calligraphic' },
-  { key: 'serif', label: 'Serif' },
-  { key: 'sans', label: 'Sans' },
+  { key: 'modular', label: 'Modular' },
+  { key: 'copyvector', label: 'Copy/Paste Vector' },
 ];
 function gdPresetItems(key) {
-  var CAP = 716, XH = 519, CY = 358, R = 358; // cap box: centre (500,358), half-height 358
+  // em geometry: x 0..1000, baseline 0, cap 716, x-height 519, centre (500,358)
+  var CAP = 716, XH = 519, CY = 358, R = 358;
+  var XA = Math.atan2(CAP, 1000) * 180 / Math.PI;  // corner-to-corner X  (35.6°)
+  var AP = Math.atan2(CAP, 500) * 180 / Math.PI;   // corner-to-mid apex  (55.1°)
   function c(cx, cy, r) { return { type: 'circle', cx: cx, cy: cy, r: Math.round(r) }; }
-  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: a }; }
+  function dl(cx, cy, a) { return { type: 'dline', cx: cx, cy: cy, angle: Math.round(a * 10) / 10 }; }
   function h(y) { return { type: 'hline', y: Math.round(y) }; }
   function v(x) { return { type: 'vline', x: Math.round(x) }; }
-  var G = 1000 / GD_PHI; // 618 — the golden cut of the em
   switch (key) {
-    case 'golden': // golden cuts of the em + a φ-progression of circles
-      return { grid: false, items: [v(1000 - G), v(G), h(CAP - CAP / GD_PHI), h(CAP / GD_PHI), c(500, CY, R), c(500, CY, R / GD_PHI), c(500, CY, R / GD_PHI / GD_PHI)] };
-    case 'geometric': // pure compass-and-square: em grid, Ø=cap circle, half circle, 45° diagonals
-      return { grid: true, cell: 50, items: [h(0), h(CAP), c(500, CY, R), c(500, CY, R / 2), dl(500, CY, 45), dl(500, CY, 135)] };
-    case 'grotesk': // metric lines + cap & x-height bowls + sidebearings
-      return { grid: false, items: [h(0), h(CAP), h(XH), v(60), v(940), c(500, CY, R), c(500, XH / 2, XH / 2)] };
-    case 'calligraphic': // 30° broad-nib slant family (60° from horizontal) over the metrics
-      return { grid: false, items: [h(0), h(XH), h(CAP), dl(250, CY, 60), dl(500, CY, 60), dl(750, CY, 60)] };
-    case 'serif': // metrics + overshoot lines + bracket circles at the feet
-      return { grid: false, items: [h(0), h(CAP), h(XH), h(-28), h(CAP + 28), v(500), c(280, 84, 84), c(720, 84, 84)] };
-    case 'sans': // em grid + metrics + central axis + cap bowl
-      return { grid: true, cell: 62, items: [h(0), h(CAP), h(XH), v(500), c(500, CY, R)] };
+    case 'construction': // the classic type-construction web: rows/cols + full diagonal web + stacked circles
+      return { grid: false, items: [
+        h(0), h(CAP), h(CAP / 4), h(CAP / 2), h(3 * CAP / 4),
+        v(250), v(500), v(750),
+        dl(500, CY, XA), dl(500, CY, 180 - XA),                       // corner X
+        dl(250, CY, AP), dl(750, CY, 180 - AP),                       // up to the apex
+        dl(250, CY, 180 - AP), dl(750, CY, AP),                       // down to the bottom mid
+        c(500, CY, R), c(500, CAP / 4, CAP / 4), c(500, CY, CAP / 4), c(500, 3 * CAP / 4, CAP / 4),
+      ] };
+    case 'golden': // golden cuts of the em + φ circle progression + corner X
+      return { grid: false, items: [
+        h(0), h(CAP), v(1000 - 1000 / GD_PHI), v(1000 / GD_PHI),
+        h(CAP - CAP / GD_PHI), h(CAP / GD_PHI),
+        dl(500, CY, XA), dl(500, CY, 180 - XA),
+        c(500, CY, R), c(500, CY, R / GD_PHI), c(500, CY, R / GD_PHI / GD_PHI),
+      ] };
+    case 'lettering': // lettering typography grid: quarter arcs in the corners + half arcs + columns
+      return { grid: false, items: [
+        h(0), h(CAP), h(CAP / 2), v(232), v(500), v(768),
+        c(0, 0, 268), c(1000, 0, 268), c(0, CAP, 268), c(1000, CAP, 268),
+        c(500, 0, 268), c(500, CAP, 268), c(500, CY, 134),
+      ] };
+    case 'calligraphic': // 30° broad-nib slant family over the metrics
+      return { grid: false, items: [
+        h(0), h(XH), h(CAP),
+        dl(250, CY, 60), dl(500, CY, 60), dl(750, CY, 60),
+      ] };
+    case 'modular': // coarse em grid + stacked circles on the centre axis
+      return { grid: true, cell: 125, mul: 2, items: [
+        v(500), h(CAP / 2),
+        c(500, CAP / 4, CAP / 4), c(500, CY, CAP / 4), c(500, 3 * CAP / 4, CAP / 4),
+      ] };
+    case 'copyvector': // paste-safe area: only baselines carving margins on all four sides
+      return { grid: false, items: [h(-100), h(700), v(100), v(900)] };
   }
   return null;
 }
 function gdXs(fx) { return GD_PX + fx * GD_SX; }
 function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
-function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY }); }
+function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY }); }
 function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
-function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; }
+function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.gridMul = o.gridMul || 1; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; gd.selSet = []; }
 // Mirror copies of an item under ITS OWN symmetry flags (stamped at creation,
 // so turning symmetry off later never removes existing mirrors). Axes: x=500, y=300.
 function gdVariants(it) {
@@ -197,13 +221,25 @@ function gdRedraw(svg, gd) {
   s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
   s += '<g clip-path="url(#gdclip)">';
   if (gd.gridOn) {
-    // the square grid is always centre-aligned: lines run outward from x=500 / y=300
-    var c = gd.gridCell || 50, gc = gd.selGrid ? '#9cc3f0' : '#e2e2e2';
-    var gx, gy;
-    for (gx = 500; gx <= 1000; gx += c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
-    for (gx = 500 - c; gx >= 0; gx -= c) s += '<line x1="' + gdXs(gx) + '" y1="' + gdYs(800) + '" x2="' + gdXs(gx) + '" y2="' + gdYs(-200) + '" stroke="' + gc + '" stroke-width="0.7"/>';
-    for (gy = 300; gy <= 800; gy += c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
-    for (gy = 300 - c; gy >= -200; gy -= c) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(gy) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(gy) + '" stroke="' + gc + '" stroke-width="0.7"/>';
+    // centre-aligned grid; with the ×2 coefficient every 2nd line (from the
+    // centre out) is drawn twice as thick, in red
+    var c = gd.gridCell || 50, mul = gd.gridMul || 1;
+    var minor = gd.selGrid ? '#9cc3f0' : '#e2e2e2';
+    var gl = function (x1, y1, x2, y2, major) {
+      s += '<line x1="' + gdXs(x1) + '" y1="' + gdYs(y1) + '" x2="' + gdXs(x2) + '" y2="' + gdYs(y2) +
+           '" stroke="' + (major ? '#c0271d' : minor) + '" stroke-width="' + (major ? 1.4 : 0.7) + '"' + (major ? ' opacity="0.55"' : '') + '/>';
+    };
+    var k, q;
+    for (k = 0; 500 + k * c <= 1000 || 500 - k * c >= 0; k++) {
+      q = (mul === 2 && k % 2 === 0);
+      if (500 + k * c <= 1000) gl(500 + k * c, 800, 500 + k * c, -200, q);
+      if (k > 0 && 500 - k * c >= 0) gl(500 - k * c, 800, 500 - k * c, -200, q);
+    }
+    for (k = 0; 300 + k * c <= 800 || 300 - k * c >= -200; k++) {
+      q = (mul === 2 && k % 2 === 0);
+      if (300 + k * c <= 800) gl(0, 300 + k * c, 1000, 300 + k * c, q);
+      if (k > 0 && 300 - k * c >= -200) gl(0, 300 - k * c, 1000, 300 - k * c, q);
+    }
   }
   if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
   if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
@@ -309,7 +345,9 @@ function renderGridDesigner(box) {
     var sv = gdSliderFor(gd);
     slider.disabled = (sv == null);
     if (sv != null) slider.value = Math.max(0, Math.min(100, sv));
-    wrap.querySelector('[data-t=grid]').classList.toggle('active', gd.gridOn);
+    var gbtn = wrap.querySelector('[data-t=grid]');
+    gbtn.classList.toggle('active', gd.gridOn);
+    gbtn.classList.toggle('mul2', gd.gridOn && (gd.gridMul || 1) === 2);
     wrap.querySelector('[data-a=symY]').classList.toggle('on', gd.symY);
     wrap.querySelector('[data-a=symX]').classList.toggle('on', gd.symX);
     updatePillLabels(); renderProfile();
@@ -321,7 +359,14 @@ function renderGridDesigner(box) {
   }
   wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
   wrap.querySelector('[data-t=dline]').addEventListener('click', function () { addItem({ type: 'dline', cx: 500, cy: 300, angle: 45 }); });
-  wrap.querySelector('[data-t=grid]').addEventListener('click', function () { gdPush(gd); gd.gridOn = !gd.gridOn; gd.selGrid = gd.gridOn; gd.selSet = []; sync(); });
+  wrap.querySelector('[data-t=grid]').addEventListener('click', function () {
+    gdPush(gd);
+    if (!gd.gridOn) { gd.gridOn = true; gd.gridMul = 1; }        // off -> x1
+    else if ((gd.gridMul || 1) === 1) { gd.gridMul = 2; }        // x1  -> x2 (red)
+    else { gd.gridOn = false; gd.gridMul = 1; }                  // x2  -> off
+    gd.selGrid = gd.gridOn; gd.selSet = [];
+    sync();
+  });
   wrap.querySelector('[data-a=symY]').addEventListener('click', function () { gd.symY = !gd.symY; sync(); });
   wrap.querySelector('[data-a=symX]').addEventListener('click', function () { gd.symX = !gd.symX; sync(); });
   wrap.querySelector('[data-a=undo]').addEventListener('click', function () { if (!gd.undo.length) return; gd.redo.push(gdSnap(gd)); gdRestore(gd, gd.undo.pop()); gd.selSet = []; sync(); });
@@ -335,6 +380,7 @@ function renderGridDesigner(box) {
     gdPush(gd);
     gd.items = pr.items.map(function (it) { it.symX = false; it.symY = false; return it; });
     gd.gridOn = !!pr.grid;
+    gd.gridMul = pr.mul || 1;
     if (pr.cell) gd.gridCell = pr.cell;
     gd.selSet = []; gd.selGrid = false;
     sync();
@@ -448,7 +494,7 @@ function gridSummary() {
   if (n.circle) parts.push(n.circle + ' circle' + (n.circle > 1 ? 's' : ''));
   if (n.dline) parts.push(n.dline + ' line' + (n.dline > 1 ? 's' : ''));
   if (n.hline + n.vline) parts.push((n.hline + n.vline) + ' guide' + (n.hline + n.vline > 1 ? 's' : ''));
-  if (gd.gridOn) parts.push('grid');
+  if (gd.gridOn) parts.push((gd.gridMul || 1) === 2 ? 'grid \u00d72' : 'grid');
   if (gd.symX || gd.symY) parts.push('symmetry');
   return parts.length ? parts.join(', ') : 'blank';
 }
@@ -494,7 +540,7 @@ function onStartCreating() {
     masterName: m0.name, masterType: m0.name, alphabets: alphabets,
   };
   var gd = draft.gridDesign;
-  opts.gridDesign = { items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, symX: gd.symX, symY: gd.symY };
+  opts.gridDesign = { items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY };
   var project = glyphset.createProject(opts);
   for (var i = 1; i < draft.masters.length; i++) glyphset.addMaster(project, draft.masters[i].name, draft.masters[i].name);
   fonts.push(project); activeFont = fonts.length - 1; selectedSlot = -1; lastSig = {};

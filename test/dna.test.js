@@ -35,6 +35,8 @@ ok(!ge.some(g => g.kind === 'circle'), 'unselected components are absent');
 var gd = { items: [{ type: 'circle', cx: 500, cy: 300, r: 200 }, { type: 'dline', cx: 500, cy: 300, angle: 45 }], gridOn: true, gridCell: 60, symX: false, symY: true };
 var dg = dna.designToGrids(gd, 1000);
 ok(dg.some(g => g.kind === 'emsquare' && g.cell === 60), 'designToGrids: gridOn → emsquare with the chosen cell');
+var dgm = dna.designToGrids({ items: [], gridOn: true, gridCell: 50, gridMul: 2 }, 1000);
+ok(dgm[0].mul === 2, 'designToGrids: grid coefficient (mul) passes through');
 var dd = dg.find(g => g.kind === 'design');
 ok(dd && dd.items.length === 2 && dd.symY === true, 'designToGrids: items + symmetry flags pass through');
 ok(dna.designToGrids({ items: [], gridOn: false }, 1000).length === 0, 'designToGrids: empty design → no effects');

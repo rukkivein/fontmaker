@@ -114,9 +114,20 @@ function fmDrawGrids(layer, grids, M, left, right, bottom) {
   }
   var em = fmHas(grids, 'emsquare');
   if (em) {
-    var cell = (em.cell || 62) * FM_SCALE;
-    for (var x = left + cell; x < right; x += cell) fmStroke(layer, [[x, fy(M.descender)], [x, fy(M.ascender)]], 230, 0.3);
-    for (var y = fy(M.descender) + cell; y < fy(M.ascender); y += cell) fmStroke(layer, [[left, y], [right, y]], 230, 0.3);
+    // centre-aligned (like the designer); with mul=2 every 2nd line from the
+    // centre is a thicker, darker major line
+    var cell = (em.cell || 62) * FM_SCALE, mul = em.mul || 1;
+    var midY = (fy(M.descender) + fy(M.ascender)) / 2, k, q;
+    for (k = 0; cx + k * cell < right || cx - k * cell > left; k++) {
+      q = (mul === 2 && k % 2 === 0);
+      if (cx + k * cell < right) fmStroke(layer, [[cx + k * cell, fy(M.descender)], [cx + k * cell, fy(M.ascender)]], q ? 150 : 230, q ? 0.6 : 0.3);
+      if (k > 0 && cx - k * cell > left) fmStroke(layer, [[cx - k * cell, fy(M.descender)], [cx - k * cell, fy(M.ascender)]], q ? 150 : 230, q ? 0.6 : 0.3);
+    }
+    for (k = 0; midY + k * cell < fy(M.ascender) || midY - k * cell > fy(M.descender); k++) {
+      q = (mul === 2 && k % 2 === 0);
+      if (midY + k * cell < fy(M.ascender)) fmStroke(layer, [[left, midY + k * cell], [right, midY + k * cell]], q ? 150 : 230, q ? 0.6 : 0.3);
+      if (k > 0 && midY - k * cell > fy(M.descender)) fmStroke(layer, [[left, midY - k * cell], [right, midY - k * cell]], q ? 150 : 230, q ? 0.6 : 0.3);
+    }
   }
   if (fmHas(grids, 'web')) { // diagonal web: corner X + diagonals to apex & bottom mid
     var b = fy(0), t = fy(M.capHeight);

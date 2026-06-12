@@ -89,7 +89,7 @@ function componentsToGrids(keys, d, upm) {
 function designToGrids(gd, upm) {
   upm = upm || 1000;
   const out = [];
-  if (gd && gd.gridOn) out.push({ kind: 'emsquare', cell: Math.round(gd.gridCell || 50) });
+  if (gd && gd.gridOn) out.push({ kind: 'emsquare', cell: Math.round(gd.gridCell || 50), mul: gd.gridMul || 1 });
   if (gd && gd.items && gd.items.length) out.push({ kind: 'design', items: gd.items, symX: !!gd.symX, symY: !!gd.symY });
   return out;
 }

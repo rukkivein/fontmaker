@@ -389,3 +389,8 @@ button:disabled { opacity: 0.4; cursor: default; }
 .gd-vbar { width: 4px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: ew-resize; }
 .gd-hbar { height: 4px; border-radius: 2px; background: var(--txt); opacity: 0.8; cursor: ns-resize; }
 .gd-vbar:hover, .gd-hbar:hover { background: var(--accent); opacity: 1; }
+
+/* grid coefficient x2: the tool button turns red */
+.gd-tool.mul2 { background: var(--brand-red); border-color: var(--brand-red); }
+.gd-tool.mul2 span { background: #fff; }
+.gd-tool.mul2:hover { background: #a82018; }
