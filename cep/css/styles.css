@@ -535,6 +535,10 @@ button:disabled { opacity: 0.4; cursor: default; }
   border-radius: 999px; font-size: 10px; padding: 2px 10px; font-family: inherit;
 }
 .w-paper input { width: 100%; flex: 1 1 auto; min-height: 0; border: none; outline: none; background: transparent; color: inherit; font-size: 24px; line-height: 1.1; padding: 2px 0; }
+.w-ttext {
+  width: 100%; flex: 1 1 auto; min-height: 0; overflow: hidden; white-space: nowrap;
+  outline: none; color: inherit; font-size: 24px; line-height: 1.6; padding: 2px 0;
+}
 .w-testctl { display: flex; gap: 14px; align-items: center; }
 .w-testctl label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--txt2); }
 .w-testctl .dim { opacity: 0.5; }

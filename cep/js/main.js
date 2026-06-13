@@ -988,6 +988,7 @@ function onAutoAll() {
   var f = curFont(), n = 0;
   f.glyphs.forEach(function (g, i) { if (autoFitGlyph(f, i)) { n++; syncOpenGlyph(g); } });
   if (!n) { setStatus('Nothing to fit yet — assign some shapes first.', 'err'); return; }
+  flatCache = {}; kernCache = {};
   renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
   setStatus('Auto-fitted ' + n + ' glyph(s): heights per class, spacing per width.', 'ok');
 }
@@ -1507,6 +1508,116 @@ function onAssign() {
   });
 }
 
+// ===== kerning — Optical is computed live from the outlines; Metric reads the
+// project's kern table; Auto Kern bakes the optical pass INTO that table.
+var flatCache = {}, kernCache = {};
+function flattenContours(contours) {
+  // contours -> straight segments (beziers sampled), for scanline profiling
+  var segs = [];
+  contours.forEach(function (c) {
+    var pts = c.points, n = pts.length;
+    if (n < 2) return;
+    var count = c.closed ? n : n - 1;
+    for (var i = 0; i < count; i++) {
+      var a = pts[i], b = pts[(i + 1) % n];
+      var hasO = a.handleOut && (a.handleOut.x !== a.x || a.handleOut.y !== a.y);
+      var hasI = b.handleIn && (b.handleIn.x !== b.x || b.handleIn.y !== b.y);
+      if (hasO || hasI) {
+        var c1 = a.handleOut || a, c2 = b.handleIn || b, px = a.x, py = a.y;
+        for (var k = 1; k <= 8; k++) {
+          var t = k / 8, u = 1 - t;
+          var x = u*u*u*a.x + 3*u*u*t*c1.x + 3*u*t*t*c2.x + t*t*t*b.x;
+          var y = u*u*u*a.y + 3*u*u*t*c1.y + 3*u*t*t*c2.y + t*t*t*b.y;
+          segs.push([px, py, x, y]); px = x; py = y;
+        }
+      } else segs.push([a.x, a.y, b.x, b.y]);
+    }
+  });
+  return segs;
+}
+function glyphFlat(g) {
+  var sig = glyphset.layerSignature(g, curMasterId());
+  if (!sig) return null;
+  var key = g.name + '|' + sig;
+  if (!flatCache[key]) flatCache[key] = flattenContours(g.layers[curMasterId()].contours);
+  return flatCache[key];
+}
+function profileAt(segs, y) {
+  var min = 1e9, max = -1e9;
+  for (var i = 0; i < segs.length; i++) {
+    var sg = segs[i], y1 = sg[1], y2 = sg[3];
+    if ((y1 <= y && y2 >= y) || (y2 <= y && y1 >= y)) {
+      var x = (y2 === y1) ? sg[0] : sg[0] + (sg[2] - sg[0]) * (y - y1) / (y2 - y1);
+      if (x < min) min = x;
+      if (x > max) max = x;
+    }
+  }
+  return min > max ? null : { min: min, max: max };
+}
+// optical pair value: even out the visual air between the two ink profiles
+function opticalKern(f, gL, gR) {
+  var fl = glyphFlat(gL), fr = glyphFlat(gR);
+  if (!fl || !fr) return 0;
+  var key = gL.name + '>' + gR.name + '|' + glyphset.layerSignature(gL, curMasterId()) + '|' + glyphset.layerSignature(gR, curMasterId());
+  if (kernCache[key] != null) return kernCache[key];
+  var M = f.metrics, minGap = 1e9;
+  for (var k = 0; k <= 22; k++) {
+    var y = 5 + (M.capHeight - 10) * k / 22;
+    var pl = profileAt(fl, y), pr = profileAt(fr, y);
+    if (!pl || !pr) continue;
+    var gap = (gL.advanceWidth - pl.max) + pr.min;  // RSB of left + LSB of right at this height
+    if (gap < minGap) minGap = gap;
+  }
+  var v = 0;
+  if (minGap < 1e9) {
+    // aim for the FONT'S own typical pair gap, so straight pairs stay at 0 and
+    // only pairs with extra (or missing) air get values; tiny values are noise
+    var target = fontAirTarget(f);
+    v = Math.round(Math.max(-0.12 * f.unitsPerEm, Math.min(0.06 * f.unitsPerEm, target - minGap)));
+    if (Math.abs(v) < 12) v = 0;
+  }
+  kernCache[key] = v;
+  return v;
+}
+// the typical RSB+LSB of this font's placed glyphs (median of each side)
+function fontAirTarget(f) {
+  var ls = [], rs = [];
+  f.glyphs.forEach(function (g) {
+    if (!isFilled(g)) return;
+    var b = glyphset.contoursBounds(g.layers[curMasterId()].contours);
+    if (!b) return;
+    ls.push(Math.max(0, b.minX));
+    rs.push(Math.max(0, g.advanceWidth - b.maxX));
+  });
+  function med(a) { if (!a.length) return 0; a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; }
+  var t = med(ls) + med(rs);
+  return Math.max(60, Math.min(0.14 * f.unitsPerEm, t || 0.085 * f.unitsPerEm));
+}
+function pairKern(f, gL, gR, mode) {
+  if (!gL || !gR) return 0;
+  if (mode === 'optical') return opticalKern(f, gL, gR);
+  var t = f.kerning || {};
+  return t[gL.name + ',' + gR.name] || 0;
+}
+// Auto Kern: bake the optical pass into the project's kern table (Metric mode
+// then shows the same quality without recomputing).
+function onAutoKern() {
+  var f = curFont();
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilled(g) && g.char) filled.push(g); });
+  if (filled.length < 2) { setStatus('Need at least two placed glyphs to kern.', 'err'); return; }
+  f.kerning = f.kerning || {};
+  var n = 0;
+  for (var i = 0; i < filled.length; i++) {
+    for (var j = 0; j < filled.length; j++) {
+      var v = opticalKern(f, filled[i], filled[j]);
+      if (v) { f.kerning[filled[i].name + ',' + filled[j].name] = v; n++; }
+    }
+  }
+  renderTesterText(); autosave();
+  setStatus('Auto-kerned ' + filled.length + ' glyphs — ' + n + ' pair(s) baked into the kern table.', 'ok');
+}
+
 // ---- live font tester (@font-face from the built OTF) ----
 function refreshTester() {
   var f = curFont(); if (!f) return;
@@ -1533,9 +1644,55 @@ function refreshTester() {
 function applyTesterCtl() {
   var t = $('t-text');
   t.style.fontSize = $('t-size').value + 'px';
-  t.style.letterSpacing = ($('t-track').value / 10) + 'px';
-  t.style.fontKerning = $('t-kern').value;
-  t.style.fontFeatureSettings = $('t-kern').value === 'none' ? '"kern" 0' : '"kern" 1';
+  t.style.fontKerning = 'none';            // WE drive the pair spacing below
+  renderTesterText();
+}
+// Rebuild the line as spans: each gap = track + the pair's kern (Optical live /
+// Metric from the table), scaled to the current size. Caret is preserved.
+function testerText() { return $('t-text').textContent; }
+function caretOffset(el) {
+  var sel = window.getSelection();
+  if (!sel.rangeCount) return -1;
+  var r = sel.getRangeAt(0);
+  if (!el.contains(r.startContainer)) return -1;
+  var pre = r.cloneRange(); pre.selectNodeContents(el); pre.setEnd(r.startContainer, r.startOffset);
+  return pre.toString().length;
+}
+function setCaret(el, off) {
+  if (off < 0) return;
+  var sel = window.getSelection(), range = document.createRange(), seen = 0;
+  function walk(node) {
+    if (node.nodeType === 3) {
+      var next = seen + node.length;
+      if (off <= next) { range.setStart(node, off - seen); return true; }
+      seen = next;
+    } else for (var i = 0; i < node.childNodes.length; i++) if (walk(node.childNodes[i])) return true;
+    return false;
+  }
+  if (walk(el)) { range.collapse(true); sel.removeAllRanges(); sel.addRange(range); }
+}
+function renderTesterText() {
+  var el = $('t-text'); if (!el) return;
+  var f = fonts.length ? curFont() : null;
+  var text = testerText();
+  var mode = $('t-kern').value;
+  var fsPx = parseFloat($('t-size').value);
+  var trackPx = $('t-track').value / 10;
+  var off = caretOffset(el);
+  var html = '';
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i], kernPx = 0;
+    if (f && i < text.length - 1) {
+      var gL = null, gR = null;
+      f.glyphs.forEach(function (g) { if (g.char === ch) gL = g; if (g.char === text[i + 1]) gR = g; });
+      var k = pairKern(f, gL, gR, mode);
+      kernPx = k / f.unitsPerEm * fsPx;
+    }
+    html += '<span style="margin-right:' + (trackPx + kernPx).toFixed(2) + 'px">' +
+            (ch === ' ' ? '&nbsp;' : ch.replace(/&/g, '&amp;').replace(/</g, '&lt;')) + '</span>';
+  }
+  el.innerHTML = html || '';
+  setCaret(el, off);
 }
 function setTesterBg(darkBg) {
   $('t-paper').classList.toggle('dark', darkBg);
@@ -1610,6 +1767,7 @@ function boot() {
   });
   $('autoAll').addEventListener('click', onAutoAll);
   $('autoOne').addEventListener('click', onAutoOne);
+  $('autoKern').addEventListener('click', onAutoKern);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
@@ -1620,6 +1778,7 @@ function boot() {
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
   $('t-kern').addEventListener('change', applyTesterCtl);
+  $('t-text').addEventListener('input', function () { renderTesterText(); });
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

@@ -119,6 +119,7 @@
         <div class="w-modauto">
           <button id="autoAll" class="rune-btn blue sm2">Auto Fit All</button>
           <button id="autoOne" class="rune-btn outline sm2" disabled>Auto Fit Selected</button>
+          <button id="autoKern" class="rune-btn outline sm2" title="Measure every filled pair optically and bake it into the font's kerning table">Auto Kern</button>
         </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>
@@ -137,9 +138,9 @@
                 <i id="bg-w" class="bgdot light" title="White background"></i>
                 <i id="bg-b" class="bgdot darkdot on" title="Black background"></i>
               </span>
-              <select id="t-kern" class="w-kern"><option value="normal">Optical</option><option value="none">Metric</option></select>
+              <select id="t-kern" class="w-kern"><option value="optical">Optical</option><option value="metric">Metric</option></select>
             </div>
-            <input id="t-text" type="text" value="Lazy fox jumps over the brown dog." spellcheck="false" />
+            <div id="t-text" class="w-ttext" contenteditable="true" spellcheck="false">Lazy fox jumps over the brown dog.</div>
           </div>
           <div class="w-testctl">
             <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="54" value="24" /></label>
