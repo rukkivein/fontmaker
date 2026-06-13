@@ -344,6 +344,7 @@ function gdRedraw(svg, gd) {
     var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
     s += '<rect x="' + gdXs(x1) + '" y="' + gdYs(y2) + '" width="' + ((x2 - x1) * GD_SX) + '" height="' + ((y2 - y1) * GD_SY) + '" fill="#1473e6" fill-opacity="0.08" stroke="#1473e6" stroke-width="1" stroke-dasharray="4 3"/>';
   }
+  s += '</g>';   // close the em clip — the SHAPE may overflow it (optical protrusion)
   // the glyph's current shape (page 2): solid dark fill, draggable; when
   // selected it gets Illustrator-style transform controls (8 handles)
   if (gd._shape && gd._shape.length) {
@@ -365,7 +366,6 @@ function gdRedraw(svg, gd) {
       }
     }
   }
-  s += '</g>';   // clip
   s += '</g>';   // view transform
   svg.innerHTML = s;
 }
@@ -1028,11 +1028,11 @@ function mxRedraw(svg) {
       var sdy = (mxDrag && mxDrag.mode === 'shape') ? mxDrag.dy : 0;
       s += '<path d="' + gdShapePath(shape, sdx, sdy) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
       var b = gdShapeBounds(shape, sdx, sdy);
+      // the glyph box's LEFT boundary (x=0) — fixed; the ink may cross it for
+      // optical protrusion (negative LSB)
+      var lx = gdXs(0);
+      s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
       if (b) {
-        // LSB line at the ink's left edge (blue)
-        var lx = gdXs(b.minX);
-        s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
-        s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
         if (mxSel) {
           var x1 = gdXs(b.minX), x2 = gdXs(b.maxX), yT = gdYs(b.maxY), yB = gdYs(b.minY);
           var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
@@ -1043,7 +1043,8 @@ function mxRedraw(svg) {
             s += '<rect data-h="' + HD[hi][0] + '" x="' + (HD[hi][1] - 4) + '" y="' + (HD[hi][2] - 4) + '" width="8" height="8" fill="#fff" stroke="#1473e6" stroke-width="1.2" style="cursor:' + HD[hi][3] + '"/>';
           }
         }
-        s += '<text x="' + gdXs(b.minX) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">LSB ' + Math.round(b.minX) + '</text>';
+        s += '<text x="' + (gdXs(0) + 4) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#1473e6">LSB ' + Math.round(b.minX) + '</text>';
+        s += '<text x="' + (gdXs(adv) - 110) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">RSB ' + Math.round(adv - b.maxX) + '</text>';
       }
     }
     // advance line (red) — the glyph's total width
