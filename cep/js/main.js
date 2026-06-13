@@ -43,6 +43,7 @@ var openGlyphIndex = -1; // glyph currently open for editing in Illustrator
 var searchQuery = '';
 var alphaFilters = []; // selected alphabet keys (multi); empty = all
 var activeMaster = 0;   // index into curFont().masters
+var activeSection = 'glyphs'; // glyphs | mod | test
 var faceSeq = 0;         // unique @font-face family per rebuild
 
 function $(id) { return document.getElementById(id); }
@@ -765,19 +766,33 @@ function setStatus(m, k) { var el = $('status'); if (el) { el.textContent = m; e
 function selGlyph() { return selectedSlot >= 0 ? curFont().glyphs[selectedSlot] : null; }
 function glyphLabel(g) { return g.char == null ? g.name : (g.char === ' ' ? '␣' : g.char); }
 
-// ---- master tabs (top bar) ----
-function renderMastersBar() {
-  var bar = $('w-masters'); bar.innerHTML = '';
+// ---- top bar: SECTION tabs (glyphs/mod/test/save) + master picker ----
+function renderMasterSelect() {
+  var sel = $('w-masterSel'); sel.innerHTML = '';
   curFont().masters.forEach(function (m, i) {
-    var t = document.createElement('button');
-    t.className = 'w-mtab' + (i === activeMaster ? ' active' : '');
-    t.textContent = m.name;
-    t.addEventListener('click', function () {
-      activeMaster = i; lastSig = {};
-      renderMastersBar(); renderGrid(); refreshTester(); renderWorkDesigner(); updateAssign();
-    });
-    bar.appendChild(t);
+    var o = document.createElement('option');
+    o.value = i; o.textContent = m.name;
+    sel.appendChild(o);
   });
+  sel.value = activeMaster;
+}
+function setSection(sec) {
+  if (sec === 'save') { $('saveModal').classList.remove('hidden'); return; } // save. = export
+  activeSection = sec;
+  $('sec-glyphs').classList.toggle('hidden', sec !== 'glyphs');
+  $('sec-mod').classList.toggle('hidden', sec !== 'mod');
+  $('sec-test').classList.toggle('hidden', sec !== 'test');
+  $('w-rightPane').classList.toggle('hidden', sec === 'test');
+  var tabs = document.querySelectorAll('#w-tabsec .w-mtab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-sec') === sec);
+  if (sec === 'mod') renderModGrid();
+  if (sec === 'test') refreshTester();
+  renderRight();
+}
+// the right pane follows the section: construction designer or metrics editor
+function renderRight() {
+  if (activeSection === 'mod') renderMetricsEditor();
+  else renderWorkDesigner();
 }
 
 // ---- per-glyph construction grid (clones the font standard on first edit) ----
@@ -826,7 +841,7 @@ function shiftGlyphShape(g, dx, dy) {
   });
   lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
   evalScript('fmShiftArt(' + JSON.stringify(JSON.stringify({ name: g.name, dx: dx * FM_SCALE_PANEL, dy: dy * FM_SCALE_PANEL })) + ')');
-  renderGrid(); scheduleTester(); autosave(); renderWorkDesigner();
+  renderGrid(); scheduleTester(); autosave(); renderRight();
   setStatus('Shape moved ' + dx + ', ' + dy + ' — synced to Illustrator.', 'ok');
 }
 // Commit a transformed outline (scaling) — the Illustrator artwork is redrawn
@@ -835,7 +850,7 @@ function applyShapeContours(g, contours) {
   glyphset.setGlyphContours(curFont(), selectedSlot, curMasterId(), contours, g.advanceWidth);
   lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
   evalScript('fmSetArt(' + JSON.stringify(JSON.stringify({ name: g.name, contours: contours, metrics: curFont().metrics })) + ')');
-  renderGrid(); scheduleTester(); autosave(); renderWorkDesigner();
+  renderGrid(); scheduleTester(); autosave(); renderRight();
   setStatus('Shape transformed — synced to Illustrator.', 'ok');
 }
 
@@ -892,16 +907,238 @@ function renderGrid() {
     cell.title = g.name + ' — right-click to open in Illustrator';
     cell.addEventListener('click', function () {
       selectedSlot = i;
-      updateAssign(); renderGrid(); renderWorkDesigner();
+      updateAssign(); renderGrid(); renderRight();
     });
     cell.addEventListener('contextmenu', function (ev) {
       ev.preventDefault();
       selectedSlot = i;
-      updateAssign(); renderGrid(); renderWorkDesigner();
+      updateAssign(); renderGrid(); renderRight();
       openGlyph(i); // right-click = open in AI
     });
     grid.appendChild(cell);
   });
+}
+
+// ---- modification. — only the glyphs that have outlines ----
+function renderModGrid() {
+  var grid = $('modGrid'); if (!grid) return;
+  grid.innerHTML = '';
+  var f = curFont();
+  var shown = 0;
+  f.glyphs.forEach(function (g, i) {
+    if (!isFilled(g)) return;
+    shown++;
+    var cell = document.createElement('div');
+    cell.className = 'cell filled' + (i === selectedSlot ? ' selected' : '');
+    cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + glyphLabel(g) + '</span>';
+    cell.title = g.name;
+    cell.addEventListener('click', function () {
+      selectedSlot = i;
+      updateAssign(); renderModGrid(); renderRight();
+    });
+    grid.appendChild(cell);
+  });
+  if (!shown) grid.innerHTML = '<div class="w-modempty">Nothing placed yet — assign shapes on the glyphs. page first.</div>';
+}
+
+// ===== AUTOMATION — class-aware fitting: A reaches the cap, a the x-height,
+// b/d/k the ascender, g/p/y hangs its tail; W stays wide, I stays thin and
+// breathes more. Heights normalize per class, widths stay natural, spacing
+// scales with the glyph's width.
+var FIT_ASC = 'bdfhklt', FIT_DESC = 'gjpqy';
+function transformContours(contours, sc, x0, y0) {
+  return contours.map(function (c) {
+    return { closed: c.closed, points: c.points.map(function (pt) {
+      return {
+        x: pt.x * sc + x0, y: pt.y * sc + y0, type: pt.type,
+        handleIn: pt.handleIn ? { x: pt.handleIn.x * sc + x0, y: pt.handleIn.y * sc + y0 } : null,
+        handleOut: pt.handleOut ? { x: pt.handleOut.x * sc + x0, y: pt.handleOut.y * sc + y0 } : null,
+      };
+    }) };
+  });
+}
+function autoFitGlyph(f, i) {
+  var g = f.glyphs[i], mid = curMasterId(), l = g.layers[mid];
+  if (!l || !l.contours || !l.contours.length) return false;
+  var b = glyphset.contoursBounds(l.contours);
+  if (!b || b.h <= 2) return false;
+  var M = f.metrics, ch = g.char || '', U = f.unitsPerEm;
+  var topAlign = null, target;
+  if (/^[A-Z0-9]$/.test(ch)) target = M.capHeight;
+  else if (/^[a-z]$/.test(ch)) {
+    if (FIT_DESC.indexOf(ch) >= 0) { target = M.xHeight - M.descender; topAlign = M.xHeight; }
+    else if (FIT_ASC.indexOf(ch) >= 0) target = M.capHeight;
+    else target = M.xHeight;
+  } else target = Math.min(b.h, M.capHeight); // punctuation & symbols stay sane
+  var sc = target / b.h, w = b.w * sc;
+  // spacing aware of width: thin glyphs (I) breathe, wide ones (W) tighten
+  var side = Math.round(0.055 * U * (w < 0.22 * U ? 1.5 : w > 0.75 * U ? 0.75 : 1));
+  var x0 = -b.minX * sc + side;
+  var y0 = topAlign != null ? topAlign - b.maxY * sc : -b.minY * sc;
+  l.contours = transformContours(l.contours, sc, x0, y0);
+  g.advanceWidth = Math.round(w + 2 * side);
+  lastSig[i] = glyphset.layerSignature(g, mid);
+  return true;
+}
+function syncOpenGlyph(g) {
+  var l = g.layers[curMasterId()];
+  evalScript('fmSetArt(' + JSON.stringify(JSON.stringify({ name: g.name, contours: (l && l.contours) || [], metrics: curFont().metrics })) + ')');
+}
+function onAutoAll() {
+  var f = curFont(), n = 0;
+  f.glyphs.forEach(function (g, i) { if (autoFitGlyph(f, i)) { n++; syncOpenGlyph(g); } });
+  if (!n) { setStatus('Nothing to fit yet — assign some shapes first.', 'err'); return; }
+  renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
+  setStatus('Auto-fitted ' + n + ' glyph(s): heights per class, spacing per width.', 'ok');
+}
+function onAutoOne() {
+  if (selectedSlot < 0) return;
+  var f = curFont();
+  if (!autoFitGlyph(f, selectedSlot)) { setStatus('This glyph has no outline yet.', 'err'); return; }
+  syncOpenGlyph(f.glyphs[selectedSlot]);
+  renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
+  setStatus('Auto-fitted "' + glyphLabel(f.glyphs[selectedSlot]) + '".', 'ok');
+}
+
+// ===== metrics & spacing editor (right pane of modification.) — ghost metric
+// lines + optic allowances; drag the shape, its transform handles, the blue
+// ink-left line (LSB) or the red advance line.
+var mxSel = false, mxDrag = null;
+function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
+function mxRedraw(svg) {
+  var f = curFont(), g = selGlyph(), M = f.metrics;
+  var s = '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
+  function HL(y, col, wd, dash) {
+    s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(y) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(y) +
+         '" stroke="' + col + '" stroke-width="' + wd + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + '/>';
+  }
+  // ghost metrics + optic (overshoot) allowances
+  HL(M.ascender, '#c6c6c6', 0.8); HL(M.capHeight, '#9a9a9a', 1.1); HL(M.xHeight, '#9a9a9a', 1.1);
+  HL(0, '#555555', 1.5); HL(M.descender, '#c6c6c6', 0.8);
+  var OV = 15;
+  HL(-OV, '#cfcfcf', 0.8, true); HL(M.capHeight + OV, '#cfcfcf', 0.8, true); HL(M.xHeight + OV, '#cfcfcf', 0.8, true);
+  if (g) {
+    var l = g.layers[curMasterId()];
+    var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
+    var adv = (mxDrag && mxDrag.mode === 'adv') ? mxDrag.adv : (g.advanceWidth || 600);
+    if (cs2) {
+      var shape = (mxDrag && mxDrag.mode === 'scale') ? mxDrag.live : cs2;
+      var sdx = (mxDrag && (mxDrag.mode === 'shape' || mxDrag.mode === 'lsb')) ? mxDrag.dx : 0;
+      var sdy = (mxDrag && mxDrag.mode === 'shape') ? mxDrag.dy : 0;
+      s += '<path d="' + gdShapePath(shape, sdx, sdy) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
+      var b = gdShapeBounds(shape, sdx, sdy);
+      if (b) {
+        // LSB line at the ink's left edge (blue)
+        var lx = gdXs(b.minX);
+        s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
+        s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
+        if (mxSel) {
+          var x1 = gdXs(b.minX), x2 = gdXs(b.maxX), yT = gdYs(b.maxY), yB = gdYs(b.minY);
+          var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
+          s += '<rect x="' + x1 + '" y="' + yT + '" width="' + (x2 - x1) + '" height="' + (yB - yT) + '" fill="none" stroke="#1473e6" stroke-width="1"/>';
+          var HD = [['nw', x1, yT, 'nwse-resize'], ['n', cxm, yT, 'ns-resize'], ['ne', x2, yT, 'nesw-resize'], ['e', x2, cym, 'ew-resize'],
+                    ['se', x2, yB, 'nwse-resize'], ['s', cxm, yB, 'ns-resize'], ['sw', x1, yB, 'nesw-resize'], ['w', x1, cym, 'ew-resize']];
+          for (var hi = 0; hi < HD.length; hi++) {
+            s += '<rect data-h="' + HD[hi][0] + '" x="' + (HD[hi][1] - 4) + '" y="' + (HD[hi][2] - 4) + '" width="8" height="8" fill="#fff" stroke="#1473e6" stroke-width="1.2" style="cursor:' + HD[hi][3] + '"/>';
+          }
+        }
+        s += '<text x="' + gdXs(b.minX) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">LSB ' + Math.round(b.minX) + '</text>';
+      }
+    }
+    // advance line (red) — the glyph's total width
+    var rx = gdXs(adv);
+    s += '<line x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#c0271d" stroke-width="2.2"/>';
+    s += '<line data-mx="adv" x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
+    s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
+  }
+  svg.innerHTML = s;
+}
+function mxCommit(g, contours, adv) {
+  glyphset.setGlyphContours(curFont(), selectedSlot, curMasterId(), contours, adv != null ? adv : g.advanceWidth);
+  lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
+  syncOpenGlyph(g);
+  renderGrid(); renderModGrid(); scheduleTester(); autosave();
+}
+function renderMetricsEditor() {
+  var box = $('w-designer'); if (!box) return;
+  box.innerHTML = '';
+  var wrap = document.createElement('div'); wrap.className = 'gd-wrap';
+  wrap.innerHTML = '<div class="gd-mid"><div class="gd-stage">' +
+    '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
+    '</div></div>';
+  box.appendChild(wrap);
+  var svg = wrap.querySelector('.gd-canvas');
+  function fit() {
+    var mid = wrap.querySelector('.gd-mid');
+    var availH = Math.max(120, mid.clientHeight - 2), availW = Math.max(120, mid.clientWidth - 2);
+    var h = Math.min(availH, availW * GD_H / GD_W);
+    svg.style.width = Math.round(h * GD_W / GD_H) + 'px';
+    svg.style.height = Math.round(h) + 'px';
+  }
+  function pointOf(ev) {
+    var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
+    return { fx: (pp.x - GD_PX) / GD_SX, fy: 800 - (pp.y - GD_PY) / GD_SY };
+  }
+  svg.addEventListener('mousedown', function (ev) {
+    ev.preventDefault();
+    var g = selGlyph(); if (!g) return;
+    var l = g.layers[curMasterId()];
+    var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
+    var pq = pointOf(ev);
+    var hd = ev.target.closest ? ev.target.closest('[data-h]') : null;
+    if (hd && cs2) {
+      mxDrag = { mode: 'scale', h: hd.getAttribute('data-h'), b: gdShapeBounds(cs2, 0, 0), orig: JSON.parse(JSON.stringify(cs2)), live: cs2 };
+      return;
+    }
+    var mk = ev.target.closest ? ev.target.closest('[data-mx]') : null;
+    if (mk) { mxDrag = { mode: mk.getAttribute('data-mx'), sx: pq.fx, dx: 0, adv: g.advanceWidth || 600, adv0: g.advanceWidth || 600 }; return; }
+    var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
+    if (sh && cs2) { mxSel = true; mxDrag = { mode: 'shape', sx: pq.fx, sy: pq.fy, dx: 0, dy: 0 }; mxRedraw(svg); return; }
+    mxSel = false; mxRedraw(svg);
+  });
+  function onMove(ev) {
+    if (!mxDrag) return;
+    var pq = pointOf(ev);
+    if (mxDrag.mode === 'shape' || mxDrag.mode === 'lsb') {
+      mxDrag.dx = Math.round(pq.fx - mxDrag.sx);
+      if (mxDrag.mode === 'shape') mxDrag.dy = Math.round(pq.fy - mxDrag.sy);
+      mxRedraw(svg);
+    } else if (mxDrag.mode === 'adv') {
+      mxDrag.adv = Math.max(20, Math.round(mxDrag.adv0 + (pq.fx - mxDrag.sx)));
+      mxRedraw(svg);
+    } else if (mxDrag.mode === 'scale') {
+      var b = mxDrag.b, h = mxDrag.h;
+      var ax = h.indexOf('w') >= 0 ? b.maxX : (h.indexOf('e') >= 0 ? b.minX : (b.minX + b.maxX) / 2);
+      var ay = h.indexOf('s') >= 0 ? b.maxY : (h.indexOf('n') >= 0 ? b.minY : (b.minY + b.maxY) / 2);
+      var hx0 = h.indexOf('w') >= 0 ? b.minX : (h.indexOf('e') >= 0 ? b.maxX : null);
+      var hy0 = h.indexOf('s') >= 0 ? b.minY : (h.indexOf('n') >= 0 ? b.maxY : null);
+      var sx = hx0 != null ? (pq.fx - ax) / (hx0 - ax) : null;
+      var sy = hy0 != null ? (pq.fy - ay) / (hy0 - ay) : null;
+      var SX, SY;
+      if (ev.shiftKey) { SX = sx != null ? Math.max(0.05, sx) : 1; SY = sy != null ? Math.max(0.05, sy) : 1; }
+      else { var sP = sx != null && sy != null ? Math.max(Math.abs(sx), Math.abs(sy)) : (sx != null ? Math.abs(sx) : Math.abs(sy)); SX = SY = Math.max(0.05, sP); }
+      mxDrag.live = gdScaleContours(mxDrag.orig, ax, ay, SX, SY);
+      mxRedraw(svg);
+    }
+  }
+  function onUp() {
+    if (!mxDrag) return;
+    var g = selGlyph();
+    if (g) {
+      var l = g.layers[curMasterId()];
+      var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
+      if (mxDrag.mode === 'shape' && cs2 && (mxDrag.dx || mxDrag.dy)) mxCommit(g, shiftContoursXY(cs2, mxDrag.dx, mxDrag.dy));
+      else if (mxDrag.mode === 'lsb' && cs2 && mxDrag.dx) mxCommit(g, shiftContoursXY(cs2, mxDrag.dx, 0)); // spacing shift inside the same advance
+      else if (mxDrag.mode === 'adv') mxCommit(g, cs2 || [], mxDrag.adv);
+      else if (mxDrag.mode === 'scale' && mxDrag.live) mxCommit(g, mxDrag.live);
+    }
+    mxDrag = null;
+    mxRedraw(svg);
+  }
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  fit(); mxRedraw(svg);
 }
 
 // ---- language filter tabs (multi-select; overflow fades into …) ----
@@ -962,6 +1199,9 @@ function updateAssign() {
   $('openInAi').disabled = !g;
   $('assignChip').textContent = g ? glyphLabel(g) : '';   // empty when nothing selected
   $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
+  $('gotoBtn').disabled = !g;
+  $('gotoChip').textContent = g ? glyphLabel(g) : '';
+  $('autoOne').disabled = !(g && isFilled(g));
 }
 
 // ---- modification: alternates & ligatures ----
@@ -975,7 +1215,7 @@ function onAlt() {
   else { setStatus('Type a letter (or select a glyph) to alternate.', 'err'); return; }
   var idx = glyphset.createAlternate(curFont(), base);
   if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
-  selectedSlot = idx; renderGrid(); updateAssign(); renderWorkDesigner();
+  selectedSlot = idx; renderGrid(); updateAssign(); renderRight();
   openGlyph(idx);
   setStatus('Created alternate "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
   autosave();
@@ -988,7 +1228,7 @@ function onLig() {
   }
   var idx = glyphset.createLigature(curFont(), str);
   if (idx < 0) { setStatus('Could not create ligature.', 'err'); return; }
-  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign(); renderWorkDesigner();
+  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign(); renderRight();
   openGlyph(idx);
   setStatus('Created ligature "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
   autosave();
@@ -1241,12 +1481,13 @@ function onAutoMetrics() {
   var asc = Math.round(Math.max(percentileOf(tops, 0.9), 0.5 * f.unitsPerEm));
   var desc = -Math.round(Math.max(percentileOf(bots, 0.9), 0.2 * f.unitsPerEm));
   f.metrics.ascender = asc; f.metrics.descender = desc;
-  refreshTester(); renderWorkDesigner(); autosave();
+  refreshTester(); renderRight(); autosave();
   setStatus('Metrics fitted to your glyphs: ascender ' + asc + ', descender ' + desc + '.', 'ok');
 }
 
 function renderWorkspace() {
-  renderMastersBar(); renderFilters(); renderGrid(); updateAssign(); refreshTester(); renderWorkDesigner();
+  renderMasterSelect(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
+  setSection('glyphs');
   setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
 
@@ -1262,7 +1503,7 @@ function onAssign() {
     if (!glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMasterId())) { setStatus('Could not place selection.', 'err'); return; }
     var g = curFont().glyphs[selectedSlot];
     setStatus('Assigned ' + contours.length + ' contour(s) → "' + glyphLabel(g) + '".', 'ok');
-    renderGrid(); refreshTester(); renderWorkDesigner(); autosave();
+    renderGrid(); refreshTester(); renderRight(); autosave();
   });
 }
 
@@ -1326,7 +1567,8 @@ function pollActive() {
     if (sig === lastSig[idx]) return;
     lastSig[idx] = sig;
     renderGrid();
-    if (idx === selectedSlot) renderWorkDesigner();
+    if (activeSection === 'mod') renderModGrid();
+    if (idx === selectedSlot) renderRight();
     setStatus('Live · "' + glyphLabel(f.glyphs[idx]) + '" updated from its project', 'ok');
     scheduleTester(); autosave();
   });
@@ -1357,8 +1599,18 @@ function boot() {
   $('sigBtn').addEventListener('click', openSig);
   $('sigSave').addEventListener('click', saveSig);
   $('sigCancel').addEventListener('click', function () { $('sigModal').classList.add('hidden'); });
-  $('saveBtn').addEventListener('click', function () { $('saveModal').classList.remove('hidden'); });
   $('saveCancel').addEventListener('click', function () { $('saveModal').classList.add('hidden'); });
+  var secTabs = document.querySelectorAll('#w-tabsec .w-mtab');
+  for (var st = 0; st < secTabs.length; st++) (function (t) {
+    t.addEventListener('click', function () { setSection(t.getAttribute('data-sec')); });
+  })(secTabs[st]);
+  $('w-masterSel').addEventListener('change', function () {
+    activeMaster = +this.value; lastSig = {};
+    renderGrid(); renderModGrid(); refreshTester(); renderRight(); updateAssign();
+  });
+  $('autoAll').addEventListener('click', onAutoAll);
+  $('autoOne').addEventListener('click', onAutoOne);
+  $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
   $('installBtn').addEventListener('click', onInstallFont);

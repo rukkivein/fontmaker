@@ -78,48 +78,58 @@
 
   <!-- ============ PAGE 2 — Workspace ============ -->
   <div id="view-work" class="view rune hidden">
-    <!-- top: mini logo + master tabs -->
+    <!-- top: logo + SECTION tabs + master picker -->
     <header class="w-head">
       <img id="w-home" class="w-logo" src="assets/logomini.png" alt="RuneType" title="New font" />
-      <div id="w-masters" class="w-masters"></div>
+      <div id="w-tabsec" class="w-masters">
+        <button class="w-mtab" data-sec="glyphs">glyphs<span class="tdot">.</span></button>
+        <button class="w-mtab" data-sec="mod">modification<span class="tdot">.</span></button>
+        <button class="w-mtab" data-sec="test">testing<span class="tdot">.</span></button>
+        <button class="w-mtab" data-sec="save">save<span class="tdot">.</span></button>
+      </div>
+      <span class="gd-preset-caret w-msel"><select id="w-masterSel" class="gd-presets" title="Active master"></select></span>
     </header>
 
     <div class="w-body">
-      <div class="w-left">
-        <!-- glyphs. + language filter tabs -->
+      <!-- ===== glyphs. — assign drawn vectors to glyph slots, nothing else ===== -->
+      <div id="sec-glyphs" class="w-left">
         <div class="w-glyphrow">
-          <div class="hword sm">glyphs<span class="dot">.</span></div>
           <div id="w-filters" class="w-filters"></div>
         </div>
         <div class="ul ul-sm ul-o1"></div>
-
         <div class="w-searchrow">
           <button id="openInAi" class="w-import" disabled>Import Glyph to Illustrator</button>
           <input id="glyphSearch" class="w-search" type="text" placeholder="Search Glyph" spellcheck="false" />
         </div>
         <div class="w-gridwrap"><div id="grid" class="grid"></div></div>
-
-        <!-- modification. -->
-        <div class="hword sm w-sec">modification<span class="dot">.</span></div>
-        <div class="ul ul-sm ul-o2"></div>
         <div class="w-modrow">
           <button id="altBtn" class="rune-btn outline sm2">+ Alternate</button>
           <input id="altChip" class="w-chip w-chip-in" type="text" maxlength="2" />
           <button id="ligBtn" class="rune-btn outline sm2">+ Ligature</button>
           <input id="ligInput" class="w-chip w-chip-in" type="text" placeholder="fi" maxlength="4" />
-          <button id="sigBtn" class="w-sig" title="Font info &amp; metadata"></button>
-          <button id="saveBtn" class="rune-btn blue sm2 w-savebtn">Save</button>
         </div>
-
-        <!-- the main CTA -->
         <div class="w-assign">
-          <span id="assignChip" class="w-assignchip">A</span>
+          <span id="assignChip" class="w-assignchip"></span>
           <button id="assignBtn" class="w-assignbtn" disabled>Assign Shape</button>
         </div>
+      </div>
 
-        <!-- testing. -->
-        <div class="hword sm w-sec">testing<span class="dot">.</span></div>
-        <div class="ul ul-sm ul-o3"></div>
+      <!-- ===== modification. — kerning & metrics; only the placed glyphs ===== -->
+      <div id="sec-mod" class="w-left hidden">
+        <div class="w-modauto">
+          <button id="autoAll" class="rune-btn blue sm2">Auto Fit All</button>
+          <button id="autoOne" class="rune-btn outline sm2" disabled>Auto Fit Selected</button>
+        </div>
+        <div class="ul ul-sm ul-o2"></div>
+        <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>
+        <div class="w-assign">
+          <span id="gotoChip" class="w-assignchip"></span>
+          <button id="gotoBtn" class="w-assignbtn" disabled>Go to Glyph</button>
+        </div>
+      </div>
+
+      <!-- ===== testing. — its own page ===== -->
+      <div id="sec-test" class="w-testpage hidden">
         <div class="w-tester">
           <div id="t-paper" class="w-paper dark">
             <div class="w-paper-top">
@@ -137,12 +147,13 @@
             <label class="dim">Variable<input id="t-var" class="gd-slider wctl" type="range" min="0" max="100" value="50" disabled /></label>
           </div>
         </div>
-        <div id="status" class="status"></div>
       </div>
 
-      <!-- right: the per-glyph grid designer + the live shape -->
-      <div class="w-right"><div id="w-designer" class="w-designer"></div></div>
+      <!-- right pane: the construction-grid designer (glyphs.) or the
+           metrics & spacing editor (modification.) -->
+      <div id="w-rightPane" class="w-right"><div id="w-designer" class="w-designer"></div></div>
     </div>
+    <div id="status" class="status w-status"></div>
 
     <footer class="rune-credit">
       <div class="credit-txt">RuneType&trade; Glyphmaker by BRST STUDIO&trade;<br/>2026 All rights reserved.<br/>v 1.00</div>
@@ -160,9 +171,10 @@
       </div>
     </div></div>
 
-    <!-- save. — project file or font export -->
+    <!-- save. — project file, install, export -->
     <div id="saveModal" class="fm-modal hidden"><div class="fm-box">
       <div class="fm-title">save<span class="dot">.</span></div>
+      <button id="sigBtn" class="rune-btn outline">Font Info (signature.)</button>
       <button id="saveProject" class="rune-btn outline">Save Project (.runetype)</button>
       <div class="fm-exh">Use in Illustrator</div>
       <div class="fm-row2">

@@ -622,3 +622,13 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 /* modal helper rows */
 .fm-row2 { display: flex; gap: 8px; }
 .fm-row2 .rune-btn { width: auto; flex: 1 1 0; }
+
+/* ===== section tabs + modification/testing pages ===== */
+.w-mtab .tdot { color: var(--brand-red); }
+.w-msel { flex: 0 0 150px; align-self: center; margin-bottom: 8px; display: flex; }
+#w-masterSel { height: 34px; font-size: 12px; width: 100%; }
+.w-modauto { display: flex; gap: 8px; margin-top: 18px; }
+.w-modauto .rune-btn { width: auto; flex: 0 0 auto; }
+.w-modempty { color: var(--txt3); font-size: 12px; padding: 18px 6px; }
+.w-testpage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 18px; }
+.w-status { padding: 2px 14px 4px; }
