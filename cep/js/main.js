@@ -42,6 +42,7 @@ var selectedSlot = -1;
 var openGlyphIndex = -1; // glyph currently open for editing in Illustrator
 var searchQuery = '';
 var alphaFilters = []; // selected alphabet keys (multi); empty = all
+var selSourceContours = null; // the current Illustrator selection, captured live (font units)
 var activeMaster = 0;   // index into curFont().masters
 var activeSection = 'glyphs'; // glyphs | mod | test
 var faceSeq = 0;         // unique @font-face family per rebuild
@@ -251,6 +252,21 @@ function gdSelected(gd, i) { return gd.selSet && gd.selSet.indexOf(i) >= 0; }
 // The white page is sized from the WINDOW (which never changes between
 // sections) with a fixed reserve that already accounts for the toolbar — so it
 // is byte-identical on glyphs. and modification., no matter the layout reflow.
+// Only ONE pane editor is visible at a time, but its drag needs window-level
+// move/up. Register through here so re-renders/section-switches never stack
+// duplicate listeners (which would fire a drag several times).
+function bindPaneWindow(onMove, onUp, onResize) {
+  var h = window.__paneHandlers;
+  if (h) {
+    if (h.move) window.removeEventListener('mousemove', h.move);
+    if (h.up) window.removeEventListener('mouseup', h.up);
+    if (h.resize) window.removeEventListener('resize', h.resize);
+  }
+  window.__paneHandlers = { move: onMove, up: onUp, resize: onResize };
+  if (onMove) window.addEventListener('mousemove', onMove);
+  if (onUp) window.addEventListener('mouseup', onUp);
+  if (onResize) window.addEventListener('resize', onResize);
+}
 function paneCanvasSize() {
   var H = window.innerHeight - 230;        // header + toolbar + footer + paddings
   var W = window.innerWidth * 0.5 - 56;    // right half, minus pane paddings
@@ -452,7 +468,7 @@ function renderGridDesigner(box, gd, onChange) {
     svg.style.width = sz.w + 'px';
     svg.style.height = sz.h + 'px';
   }
-  window.addEventListener('resize', function () { fit(); });
+  var gdResize = function () { fit(); };
   function sync() {
     gdRedraw(svg, gd);
     var sv = gdSliderFor(gd);
@@ -611,7 +627,7 @@ function renderGridDesigner(box, gd, onChange) {
   }
   wrap.querySelector('.gd-vbar').addEventListener('mousedown', function (ev) { startGuide(ev, 'vline'); });
   wrap.querySelector('.gd-hbar').addEventListener('mousedown', function (ev) { startGuide(ev, 'hline'); });
-  window.addEventListener('mousemove', function (ev) {
+  function gdMove(ev) {
     if (!drag) return;
     var p = svgPoint(ev);
     if (drag.mode === 'pan') {
@@ -665,8 +681,8 @@ function renderGridDesigner(box, gd, onChange) {
       else it.y = Math.max(-200, Math.min(800, Math.round(p.fy)));
       gdRedraw(svg, gd);
     }
-  });
-  window.addEventListener('mouseup', function () {
+  }
+  function gdUp() {
     if (!drag) return;
     if (drag.mode === 'marq' && gd._marq) {
       var m = gd._marq, x1 = Math.min(m.x1, m.x2), x2 = Math.max(m.x1, m.x2), y1 = Math.min(m.y1, m.y2), y2 = Math.max(m.y1, m.y2);
@@ -681,7 +697,8 @@ function renderGridDesigner(box, gd, onChange) {
       if (typeof gd._onShapeScale === 'function') gd._onShapeScale(gd._shape);
     }
     drag = null; sync();
-  });
+  }
+  bindPaneWindow(gdMove, gdUp, gdResize);
   // Delete / Backspace removes the selection
   wrap.addEventListener('keydown', function (ev) {
     if ((ev.key === 'Delete' || ev.key === 'Backspace') && gd.selSet.length) {
@@ -902,7 +919,9 @@ function contoursToSVG(contours) {
   return d;
 }
 function glyphThumb(g) {
-  var contours = g.layers[curMasterId()].contours;
+  var l = g.layers[curMasterId()];
+  if (!l || !l.contours) return null;
+  var contours = l.contours;
   var b = glyphset.contoursBounds(contours); if (!b) return null;
   var pad = Math.max(b.w, b.h) * 0.12 + 1;
   var vb = (b.minX - pad) + ' ' + (-(b.maxY) - pad) + ' ' + (b.w + pad * 2) + ' ' + (b.h + pad * 2);
@@ -1188,8 +1207,7 @@ function renderMetricsEditor() {
     mxDrag = null;
     mxRedraw(svg);
   }
-  window.addEventListener('mousemove', onMove);
-  window.addEventListener('mouseup', onUp);
+  bindPaneWindow(onMove, onUp, function () { fit(); mxRedraw(svg); });
   fit(); mxRedraw(svg);
 }
 
@@ -1249,7 +1267,16 @@ function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
   $('openInAi').disabled = !g;
-  $('assignChip').innerHTML = g ? glyphLabelHtml(g) : '';   // empty when nothing selected
+  // the Assign chip shows the live Illustrator selection (the shape you'll
+  // drop); when nothing is selected it shows the target letter
+  var assignWrap = $('assignWrap');
+  if (selSourceContours && selSourceContours.length) {
+    $('assignChip').innerHTML = shapeThumbSVG(selSourceContours, 'chip-thumb');
+    if (assignWrap) assignWrap.classList.add('has-shape');
+  } else {
+    $('assignChip').innerHTML = g ? glyphLabelHtml(g) : '';
+    if (assignWrap) assignWrap.classList.remove('has-shape');
+  }
   $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
   $('gotoBtn').disabled = !g;
   $('gotoChip').innerHTML = g ? glyphLabelHtml(g) : '';
@@ -1489,58 +1516,6 @@ function buildCleanOtf(f, master) {
   return applyNames(built.buffer, f, master.type || master.name);
 }
 
-// ===== install straight into Illustrator (the Fontself trick): an OTF written
-// to <UserData>/Adobe/Fonts is picked up live, no admin needed.
-var installedPaths = {};
-function adobeFontsDir() { return cs.getSystemPath(SystemPath.USER_DATA) + '/Adobe/Fonts'; }
-function onInstallFont() {
-  commitSig();
-  var f = curFont(), m = f.masters[activeMaster];
-  if (!f.glyphs.some(isFilled)) { setStatus('Nothing to install yet — draw some glyphs first.', 'err'); return; }
-  try {
-    var dir = adobeFontsDir();
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
-    var prev = installedPaths[activeFont];
-    if (prev && fs.existsSync(prev)) { try { fs.unlinkSync(prev); } catch (e0) {} }
-    var fam = slugifyPS(f.meta.familyName || 'Untitled');
-    var path = dir + '/' + fam + '-' + slugifyPS(m.name) + '.otf';
-    fs.writeFileSync(path, Buffer.from(new Uint8Array(buildCleanOtf(f, m))));
-    installedPaths[activeFont] = path;
-    setStatus('Installed → usable in Illustrator\'s font list right now (' + path + ')', 'ok');
-  } catch (e) { setStatus('Install failed: ' + (e && e.message ? e.message : e), 'err'); }
-}
-function onUninstallFont() {
-  var prev = installedPaths[activeFont];
-  if (!prev) { setStatus('Nothing installed from this session.', 'err'); return; }
-  try {
-    if (fs.existsSync(prev)) fs.unlinkSync(prev);
-    delete installedPaths[activeFont];
-    setStatus('Uninstalled from Illustrator.', 'ok');
-  } catch (e) { setStatus('Uninstall failed: ' + e.message, 'err'); }
-}
-
-// ===== auto metrics — percentile of the drawn glyphs' extents (outlier-proof)
-function percentileOf(arr, q) {
-  if (!arr.length) return 0;
-  var a = arr.slice().sort(function (x, y) { return x - y; });
-  return a[Math.min(a.length - 1, Math.floor(q * a.length))];
-}
-function onAutoMetrics() {
-  var f = curFont();
-  var tops = [], bots = [];
-  f.glyphs.forEach(function (g) {
-    if (!isFilled(g)) return;
-    var b = glyphset.contoursBounds(g.layers[curMasterId()].contours);
-    if (b) { tops.push(b.maxY); bots.push(Math.abs(Math.min(0, b.minY))); }
-  });
-  if (!tops.length) { setStatus('Draw some glyphs first — metrics are measured from them.', 'err'); return; }
-  var asc = Math.round(Math.max(percentileOf(tops, 0.9), 0.5 * f.unitsPerEm));
-  var desc = -Math.round(Math.max(percentileOf(bots, 0.9), 0.2 * f.unitsPerEm));
-  f.metrics.ascender = asc; f.metrics.descender = desc;
-  refreshTester(); renderRight(); autosave();
-  setStatus('Metrics fitted to your glyphs: ascender ' + asc + ', descender ' + desc + '.', 'ok');
-}
-
 function renderWorkspace() {
   renderMasterSelect(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
   setTesterBg(true);   // testing. starts dark by default
@@ -1548,18 +1523,29 @@ function renderWorkspace() {
 }
 
 // ---- assign selection -> glyph ----
+// Place contours (font units, from a selection) into a glyph slot.
+function assignContoursTo(slot, contours) {
+  if (slot < 0 || !contours || !contours.length) return false;
+  if (!glyphset.assignContoursToGlyph(curFont(), contours, slot, curMasterId())) return false;
+  var g = curFont().glyphs[slot];
+  setStatus('Assigned ' + contours.length + ' contour(s) → "' + glyphLabel(g) + '".', 'ok');
+  renderGrid(); refreshTester(); renderRight(); autosave();
+  return true;
+}
 function onAssign() {
   if (selectedSlot < 0) return;
+  // use the live-captured selection if we have one, else read fresh
+  if (selSourceContours && selSourceContours.length) {
+    if (!assignContoursTo(selectedSlot, selSourceContours)) setStatus('Could not place selection.', 'err');
+    return;
+  }
   setStatus('Reading selection…');
   evalScript('fmReadSelection()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { setStatus('Bridge returned bad data.', 'err'); return; }
     if (!res || !res.ok) { setStatus((res && res.error) || 'Could not read selection.', 'err'); return; }
     var contours = ilbridge.contoursFromSelection(res.paths);
     if (!contours.length) { setStatus('Selection has no usable outlines.', 'err'); return; }
-    if (!glyphset.assignContoursToGlyph(curFont(), contours, selectedSlot, curMasterId())) { setStatus('Could not place selection.', 'err'); return; }
-    var g = curFont().glyphs[selectedSlot];
-    setStatus('Assigned ' + contours.length + ' contour(s) → "' + glyphLabel(g) + '".', 'ok');
-    renderGrid(); refreshTester(); renderRight(); autosave();
+    if (!assignContoursTo(selectedSlot, contours)) setStatus('Could not place selection.', 'err');
   });
 }
 
@@ -1594,7 +1580,11 @@ function glyphFlat(g) {
   var sig = glyphset.layerSignature(g, curMasterId());
   if (!sig) return null;
   var key = g.name + '|' + sig;
-  if (!flatCache[key]) flatCache[key] = flattenContours(g.layers[curMasterId()].contours);
+  if (!flatCache[key]) {
+    var l = g.layers[curMasterId()];
+    if (!l || !l.contours) return null;
+    flatCache[key] = flattenContours(l.contours);
+  }
   return flatCache[key];
 }
 function profileAt(segs, y) {
@@ -1638,8 +1628,9 @@ function opticalKern(f, gL, gR) {
 function fontAirTarget(f) {
   var ls = [], rs = [];
   f.glyphs.forEach(function (g) {
-    if (!isFilled(g)) return;
-    var b = glyphset.contoursBounds(g.layers[curMasterId()].contours);
+    var l = g.layers[curMasterId()];
+    if (!l || !l.contours || !l.contours.length) return;
+    var b = glyphset.contoursBounds(l.contours);
     if (!b) return;
     ls.push(Math.max(0, b.minX));
     rs.push(Math.max(0, g.advanceWidth - b.maxX));
@@ -1765,7 +1756,28 @@ function setTesterBg(darkBg) {
 
 // ---- live sync: poll the active glyph project, update that glyph live ----
 var POLL_MS = 700, polling = false, lastSig = {}, testerTimer = null;
-function startPolling() { if (polling) return; polling = true; setInterval(pollActive, POLL_MS); }
+function startPolling() { if (polling) return; polling = true; setInterval(pollActive, POLL_MS); setInterval(pollSelection, 1200); }
+
+// Live-read the Illustrator selection while on the glyphs page so the Assign
+// handle shows the shape you're about to drop and the drop is instant.
+function pollSelection() {
+  if (!fonts.length || $('view-work').classList.contains('hidden') || activeSection !== 'glyphs') return;
+  evalScript('fmReadSelection()').then(function (raw) {
+    var res; try { res = JSON.parse(raw); } catch (e) { res = null; }
+    var contours = (res && res.ok && res.paths) ? ilbridge.contoursFromSelection(res.paths) : null;
+    var had = !!(selSourceContours && selSourceContours.length);
+    selSourceContours = (contours && contours.length) ? contours : null;
+    if (!!selSourceContours !== had) updateAssign(); // refresh the handle preview
+  });
+}
+// A small SVG thumbnail of contours (font units, y-up) for the Assign handle.
+function shapeThumbSVG(contours, cls) {
+  var b = glyphset.contoursBounds(contours); if (!b) return '';
+  var pad = Math.max(b.w, b.h) * 0.12 + 1;
+  var vb = (b.minX - pad) + ' ' + (-(b.maxY) - pad) + ' ' + (b.w + pad * 2) + ' ' + (b.h + pad * 2);
+  return '<svg class="' + (cls || '') + '" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet">' +
+         '<path d="' + contoursToSVG(contours) + '" fill="#fff"/></svg>';
+}
 function scheduleTester() { if (testerTimer) clearTimeout(testerTimer); testerTimer = setTimeout(refreshTester, 1200); }
 
 function pollActive() {
@@ -1820,6 +1832,16 @@ function boot() {
   dragSrc.addEventListener('dragstart', function (ev) {
     ev.dataTransfer.setData('text/plain', 'assign'); ev.dataTransfer.effectAllowed = 'copy';
     document.body.classList.add('dragging-shape');
+    // drag image = a thumbnail of the captured selection, so it feels like
+    // carrying the actual shape onto the letter
+    if (selSourceContours && selSourceContours.length) {
+      var ghost = document.createElement('div');
+      ghost.className = 'drag-ghost';
+      ghost.innerHTML = shapeThumbSVG(selSourceContours, '');
+      document.body.appendChild(ghost);
+      try { ev.dataTransfer.setDragImage(ghost, 28, 28); } catch (e) {}
+      setTimeout(function () { if (ghost.parentNode) ghost.parentNode.removeChild(ghost); }, 0);
+    }
   });
   dragSrc.addEventListener('dragend', function () { document.body.classList.remove('dragging-shape'); });
   $('altBtn').addEventListener('click', onAlt);
@@ -1831,7 +1853,7 @@ function boot() {
     t.addEventListener('click', function () { setSection(t.getAttribute('data-sec')); });
   })(secTabs[st]);
   $('w-masterSel').addEventListener('change', function () {
-    activeMaster = +this.value; lastSig = {};
+    activeMaster = +this.value; lastSig = {}; flatCache = {}; kernCache = {};
     renderGrid(); renderModGrid(); refreshTester(); renderRight(); updateAssign();
   });
   $('autoAll').addEventListener('click', onAutoAll);

@@ -65,17 +65,6 @@ button {
 }
 button:hover { background: var(--ctrl-h); }
 button:disabled { opacity: 0.4; cursor: default; }
-/* primary in-panel action: flat, full width, a touch lighter */
-.primary { width: 100%; background: #484848; border-color: #5e5e5e; color: #ececec; }
-.primary:hover { background: #525252; }
-.primary b { color: #fff; }
-/* the two CTAs: blue + fully rounded */
-.export, .mini {
-  background: var(--accent); border: 1px solid transparent; color: #fff;
-  border-radius: 999px; padding: 6px 14px; font-weight: 600;
-}
-.export:hover, .mini:hover { background: var(--accent-h); }
-.mini { margin-left: auto; padding: 5px 12px; font-weight: 500; }
 
 .checks { display: flex; flex-direction: column; gap: 2px; }
 .check { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 3px; cursor: pointer; }
@@ -124,7 +113,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 
 /* glyph grid */
-.gridwrap { flex: 1 1 auto; overflow-y: auto; padding: 10px; }
+.gridwrap { flex: 1 1 auto; overflow-y: auto; padding: 10px; border-radius: 10px; }
 .grid { display: flex; flex-wrap: wrap; gap: 5px; }
 .cell {
   width: 42px; height: 50px; display: flex; align-items: center; justify-content: center;
@@ -137,16 +126,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .cell .thumb { width: 100%; height: 100%; padding: 5px; box-sizing: border-box; }
 .cell .lab { position: absolute; top: 2px; left: 3px; font-size: 8px; color: var(--txt3); line-height: 1; }
 .cell.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
-
-/* font tester */
-.tester { border-top: 1px solid var(--line); padding: 8px 10px; background: #2c2c2c; }
-.tester-paper { background: #fff; border-radius: 3px; padding: 6px 10px; overflow: hidden; }
-.tester-paper input { width: 100%; border: none; outline: none; background: transparent; color: #111; font-size: 44px; line-height: 1.2; padding: 2px 0; }
-.tester-ctl { display: flex; gap: 10px; align-items: center; margin-top: 6px; }
-.tester-ctl label { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--txt2); }
-.tester-ctl input[type=range] { width: 60px; }
-.tester-ctl select { font-size: 10px; background: var(--sunk); color: var(--txt); border: 1px solid var(--edge); border-radius: 3px; padding: 1px 3px; }
-.tester-ctl .dim { opacity: 0.45; }
 
 /* footer */
 .foot { border-top: 1px solid var(--line); padding: 8px 12px; background: var(--bar); display: flex; flex-direction: column; gap: 8px; }
@@ -333,6 +312,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 }
 .gd-tool:hover { border-color: var(--edge-h); background: var(--ctrl-h); }
 .gd-tool.active { background: var(--accent); border-color: var(--accent); }
+.gd-tool:focus-visible, .gd-sym:focus-visible, .gd-hist:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .gd-tool.active span { background: #fff; }
 .gd-tool.active:hover { background: var(--accent-h); }
 /* tool icons — the user's SVGs, painted via mask so they follow the UI color */
@@ -415,14 +395,6 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-logo { height: 44px; width: auto; cursor: pointer; margin-bottom: 8px; }
 .w-logo:hover { opacity: 0.85; }
 .w-masters { display: flex; gap: 10px; flex: 1 1 auto; min-width: 0; overflow: hidden; align-items: flex-end; }
-.w-mtab {
-  padding: 12px 30px 13px; font-size: 15px; cursor: pointer; white-space: nowrap;
-  background: #2b2b2b; color: #fff; border: 1px solid #4a4a4a; border-bottom: none;
-  border-radius: 16px 16px 0 0;
-}
-.w-mtab:hover { background: #3a3a3a; }
-.w-mtab.active { background: var(--accent); border-color: var(--accent); color: #fff; }
-.w-mtab.active:hover { background: var(--accent-h); }
 
 .w-body { flex: 1 1 auto; min-height: 0; display: flex; gap: 12px; padding: 0 14px 8px; }
 .w-left { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
@@ -438,7 +410,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 /* search — same outline-pill language as Import Your Project, gray text */
 .w-searchrow { display: flex; gap: 8px; align-items: stretch; }
 .w-import {
-  flex: 1.7 1 0; min-width: 0; padding: 9px 14px; cursor: pointer;
+  flex: 1.7 1 0; min-width: 0; padding: 9px 16px; cursor: pointer;
   background: transparent; color: #eaeaea; font-size: 13px; font-weight: 700; font-family: inherit;
   border: 2px solid #6a6a6a; border-radius: 999px;
 }
@@ -453,7 +425,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-search:focus { outline: none; color: var(--txt); border-color: var(--invert-fill); }
 
 .w-gridwrap { flex: 1 1 auto; min-height: 110px; overflow-y: auto; padding: 10px; background: #131313; border: 1px solid #000; border-radius: 10px; }
-.w-gridwrap .grid { gap: 6px; }
+.w-gridwrap .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(40px, 1fr)); gap: 6px; }
 .w-gridwrap .cell {
   width: 44px; height: 44px; border-radius: 10px; font-size: 19px; color: #cfcfcf;
   background: #303030; border: 1px solid #444;
@@ -626,7 +598,6 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .fm-row2 .rune-btn { width: auto; flex: 1 1 0; }
 
 /* ===== section tabs + modification/testing pages ===== */
-.w-mtab .tdot { color: var(--brand-red); }
 .w-msel { flex: 0 0 150px; align-self: center; margin-bottom: 8px; display: flex; }
 #w-masterSel { height: 34px; font-size: 12px; width: 100%; }
 .w-modauto { display: flex; gap: 8px; margin-top: 18px; }
@@ -694,3 +665,28 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 
 /* alternate index as a tiny superscript on the glyph cell (A⁰¹) */
 .gl-ss { font-size: 0.5em; vertical-align: super; color: var(--txt2); margin-left: 1px; letter-spacing: -0.5px; }
+
+
+/* ===== responsive — stack the two-pane layouts and let rows wrap on narrow
+   panels so nothing clips or crushes below ~700px ===== */
+@media (max-width: 720px) {
+  .rune-body { flex-direction: column; }
+  .rune-left, .rune-right { flex: 1 1 auto; min-height: 200px; }
+  .w-body { flex-direction: column; }
+  .w-left, .w-testpage, .w-savepage { flex: 1 1 auto; }
+  .w-right { flex: 0 0 300px; min-height: 0; }
+  .w-head { flex-wrap: wrap; gap: 10px; }
+  .w-tabsec { gap: 16px; overflow-x: auto; }
+  .w-msel { flex: 1 1 140px; }
+  .sv-fields { grid-template-columns: 1fr; }
+}
+@media (max-width: 460px) {
+  .sv-row2 span { flex: 0 0 96px; }
+  .w-tabsec { gap: 12px; }
+}
+
+/* live selection preview in the Assign handle + the drag ghost */
+.w-assignchip .chip-thumb { width: 100%; height: 100%; padding: 8px; box-sizing: border-box; }
+.w-assign.has-shape .w-assignchip { background: #0e0e0e; }
+.drag-ghost { position: fixed; top: -100px; left: -100px; width: 56px; height: 56px; background: #1473e6; border: 2px solid #fff; border-radius: 14px; padding: 6px; box-sizing: border-box; }
+.drag-ghost svg { width: 100%; height: 100%; }
