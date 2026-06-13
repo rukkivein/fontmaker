@@ -793,14 +793,15 @@ function setSection(sec) {
   $('sec-mod').classList.toggle('hidden', sec !== 'mod');
   $('sec-test').classList.toggle('hidden', sec !== 'test');
   $('sec-save').classList.toggle('hidden', sec !== 'save');
-  // the right pane (designer / metrics) only shows on glyphs & modification
-  $('w-rightPane').classList.toggle('hidden', sec === 'test' || sec === 'save');
+  // the right pane (designer / metrics) shows everywhere except the full-width
+  // save page; testing. keeps the metrics editor on the right
+  $('w-rightPane').classList.toggle('hidden', sec === 'save');
   var tabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-sec') === sec);
   if (sec === 'mod') renderModGrid();
   if (sec === 'test') refreshTester();
   if (sec === 'save') buildSigFields();
-  if (sec !== 'save' && sec !== 'test') renderRight();
+  if (sec !== 'save') renderRight();
 }
 // the right pane follows the section: construction designer or metrics editor
 function renderRight() {
@@ -919,7 +920,7 @@ function renderGrid() {
     } else {
       cell.textContent = label;
     }
-    cell.title = g.name + ' — right-click to open in Illustrator';
+    cell.title = g.name + ' — right-click to open · drop a shape to assign';
     cell.addEventListener('click', function () {
       selectedSlot = i;
       updateAssign(); renderGrid(); renderRight();
@@ -929,6 +930,14 @@ function renderGrid() {
       selectedSlot = i;
       updateAssign(); renderGrid(); renderRight();
       openGlyph(i); // right-click = open in AI
+    });
+    // drag-drop: drop the Assign-Shape handle on a letter to assign the current
+    // Illustrator selection straight to it
+    cell.addEventListener('dragover', function (ev) { ev.preventDefault(); cell.classList.add('drop'); ev.dataTransfer.dropEffect = 'copy'; });
+    cell.addEventListener('dragleave', function () { cell.classList.remove('drop'); });
+    cell.addEventListener('drop', function (ev) {
+      ev.preventDefault(); cell.classList.remove('drop');
+      selectedSlot = i; updateAssign(); renderGrid(); onAssign();
     });
     grid.appendChild(cell);
   });
@@ -1788,6 +1797,15 @@ function boot() {
   $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
   $('openInAi').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('assignBtn').addEventListener('click', onAssign);
+  // the Assign Shape control is a drag source — drop it on any glyph cell to
+  // assign the current Illustrator selection to that letter
+  var dragSrc = $('assignWrap') || $('assignBtn');
+  dragSrc.setAttribute('draggable', 'true');
+  dragSrc.addEventListener('dragstart', function (ev) {
+    ev.dataTransfer.setData('text/plain', 'assign'); ev.dataTransfer.effectAllowed = 'copy';
+    document.body.classList.add('dragging-shape');
+  });
+  dragSrc.addEventListener('dragend', function () { document.body.classList.remove('dragging-shape'); });
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
   $('ligInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLig(); });

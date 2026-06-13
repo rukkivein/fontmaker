@@ -685,3 +685,9 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
   font-size: 22px; font-weight: 700;
 }
 .sv-bigbtn:hover { background: var(--accent-h); }
+
+/* drag a shape onto a glyph cell to assign */
+.w-assign { cursor: grab; }
+.w-assign:active { cursor: grabbing; }
+.dragging-shape .w-gridwrap .cell { outline: 1px dashed #3a5d86; outline-offset: -2px; }
+.w-gridwrap .cell.drop { outline: 2px solid var(--accent); outline-offset: -1px; background: #1d3a5c; }
