@@ -248,13 +248,13 @@ function gdItemSvg(it, color, width, dash, idx, hit) {
   return '';
 }
 function gdSelected(gd, i) { return gd.selSet && gd.selSet.indexOf(i) >= 0; }
-// the white page is sized from the right PANE (constant across sections) minus
-// a fixed reserve, so it stays the SAME size on glyphs./modification./testing.
+// The white page is sized from the WINDOW (which never changes between
+// sections) with a fixed reserve that already accounts for the toolbar — so it
+// is byte-identical on glyphs. and modification., no matter the layout reflow.
 function paneCanvasSize() {
-  var pane = document.getElementById('w-rightPane');
-  var paneH = (pane ? pane.clientHeight : 640) - 80;   // fixed toolbar/padding reserve
-  var paneW = (pane ? pane.clientWidth : 320) - 20;
-  var h = Math.max(160, Math.min(paneH, paneW * GD_H / GD_W));
+  var H = window.innerHeight - 230;        // header + toolbar + footer + paddings
+  var W = window.innerWidth * 0.5 - 56;    // right half, minus pane paddings
+  var h = Math.max(180, Math.min(H, W * GD_H / GD_W));
   return { w: Math.round(h * GD_W / GD_H), h: Math.round(h) };
 }
 function gdView(gd) { if (!gd._view) gd._view = { x: 0, y: 0, s: 1 }; return gd._view; }
