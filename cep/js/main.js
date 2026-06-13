@@ -782,16 +782,18 @@ function setSection(sec) {
   $('sec-glyphs').classList.toggle('hidden', sec !== 'glyphs');
   $('sec-mod').classList.toggle('hidden', sec !== 'mod');
   $('sec-test').classList.toggle('hidden', sec !== 'test');
-  $('w-rightPane').classList.toggle('hidden', sec === 'test');
+  $('w-rightPane').classList.remove('hidden');   // the right pane stays on every section
   var tabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-sec') === sec);
   if (sec === 'mod') renderModGrid();
-  if (sec === 'test') { renderTestGrid(); refreshTester(); }
+  if (sec === 'test') refreshTester();
   renderRight();
 }
 // the right pane follows the section: construction designer or metrics editor
 function renderRight() {
-  if (activeSection === 'mod') renderMetricsEditor();
+  // glyphs. -> construction designer; modification. AND testing. -> the
+  // metrics & spacing editor (tune the gaps while you type)
+  if (activeSection === 'mod' || activeSection === 'test') renderMetricsEditor();
   else renderWorkDesigner();
 }
 
@@ -939,25 +941,6 @@ function renderModGrid() {
     grid.appendChild(cell);
   });
   if (!shown) grid.innerHTML = '<div class="w-modempty">Nothing placed yet — assign shapes on the glyphs. page first.</div>';
-}
-// testing. — same filled list on the right; a click TYPES the letter
-function renderTestGrid() {
-  var grid = $('testGrid'); if (!grid) return;
-  grid.innerHTML = '';
-  var f = curFont();
-  f.glyphs.forEach(function (g) {
-    if (!isFilled(g) || g.char == null) return;
-    var cell = document.createElement('div');
-    cell.className = 'cell filled';
-    cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + glyphLabel(g) + '</span>';
-    cell.title = 'Type "' + g.char + '" into the test line';
-    cell.addEventListener('click', function () {
-      var el = $('t-text');
-      el.textContent = testerText() + g.char;
-      renderTesterText();
-    });
-    grid.appendChild(cell);
-  });
 }
 
 // ===== AUTOMATION — class-aware fitting: A reaches the cap, a the x-height,

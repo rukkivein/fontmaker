@@ -650,7 +650,7 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .w-stab .tdot { color: var(--brand-red); }
 
 /* ===== testing. — full-screen paper that truly flips, glyphs on the right ===== */
-.w-testpage { flex-direction: row; gap: 12px; padding: 14px; border-radius: 10px; }
+.w-testpage { flex: 1 1 0; min-width: 0; flex-direction: column; gap: 12px; padding: 14px; border-radius: 10px; }
 .w-testpage.dark { background: #161616; }
 .w-testpage.light { background: #ffffff; }
 .w-testmain { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
@@ -661,11 +661,3 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .w-testpage.light .w-testctl label { color: #555; }
 .w-testpage.light .w-kern { background: #ececec; color: #222; border-color: #c9c9c9; }
 .w-testpage.light input[type=range] { background: #e4e4e4; border-color: #cfcfcf; }
-.w-testright { flex: 0 0 232px; overflow-y: auto; padding: 4px; border-radius: 8px; }
-.w-testpage.dark .w-testright { background: #1d1d1d; }
-.w-testpage.light .w-testright { background: #f1f1f1; }
-.w-testright .grid { gap: 6px; }
-.w-testright .cell { width: 44px; height: 44px; border-radius: 10px; background: #303030; border: 1px solid #444; }
-.w-testpage.light .w-testright .cell { background: #fff; border-color: #d9d9d9; }
-.w-testright::-webkit-scrollbar { width: 14px; }
-.w-testright::-webkit-scrollbar-thumb { background: #4b4b4b; border: 4px solid transparent; border-radius: 8px; background-clip: padding-box; }
