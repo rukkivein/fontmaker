@@ -788,17 +788,19 @@ function renderMasterSelect() {
   sel.value = activeMaster;
 }
 function setSection(sec) {
-  if (sec === 'save') { $('saveModal').classList.remove('hidden'); return; } // save. = export
   activeSection = sec;
   $('sec-glyphs').classList.toggle('hidden', sec !== 'glyphs');
   $('sec-mod').classList.toggle('hidden', sec !== 'mod');
   $('sec-test').classList.toggle('hidden', sec !== 'test');
-  $('w-rightPane').classList.remove('hidden');   // the right pane stays on every section
+  $('sec-save').classList.toggle('hidden', sec !== 'save');
+  // the right pane (designer / metrics) only shows on glyphs & modification
+  $('w-rightPane').classList.toggle('hidden', sec === 'test' || sec === 'save');
   var tabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-sec') === sec);
   if (sec === 'mod') renderModGrid();
   if (sec === 'test') refreshTester();
-  renderRight();
+  if (sec === 'save') buildSigFields();
+  if (sec !== 'save' && sec !== 'test') renderRight();
 }
 // the right pane follows the section: construction designer or metrics editor
 function renderRight() {
@@ -1281,28 +1283,28 @@ var SIG_FIELDS = [
   { key: 'sampleText', label: 'Sample Text' },
   { key: 'created', label: 'Created (date)' },
 ];
-function openSig() {
+// signature. fields live inline on the save page; values write into the
+// project as you type (every field optional, Fontself-style).
+function buildSigFields() {
   var f = curFont(), box = $('sigFields'); box.innerHTML = '';
-  if (!f.meta.created) f.meta.created = new Date().toISOString().slice(0, 10);
+  if (!f.meta.created) f.meta.created = '2026-06-13';
   SIG_FIELDS.forEach(function (fl) {
-    var row = document.createElement('label'); row.className = 'fm-row';
+    var row = document.createElement('label'); row.className = 'sv-row2';
     row.innerHTML = '<span>' + fl.label + '</span>';
     var inp = document.createElement('input');
     inp.type = 'text'; inp.value = f.meta[fl.key] || '';
+    inp.placeholder = 'optional';
     inp.setAttribute('data-k', fl.key);
+    inp.addEventListener('input', function () { f.meta[fl.key] = inp.value.trim(); autosave(); });
     row.appendChild(inp);
     box.appendChild(row);
   });
-  $('sigModal').classList.remove('hidden');
 }
-function saveSig() {
+function commitSig() {
+  var box = $('sigFields'); if (!box) return;
   var f = curFont();
-  $('sigFields').querySelectorAll('input[data-k]').forEach(function (inp) {
-    f.meta[inp.getAttribute('data-k')] = inp.value.trim();
-  });
-  $('sigModal').classList.add('hidden');
-  renderMastersBar(); autosave();
-  setStatus('Metadata saved into the project.', 'ok');
+  var ins = box.querySelectorAll('input[data-k]');
+  for (var i = 0; i < ins.length; i++) f.meta[ins[i].getAttribute('data-k')] = ins[i].value.trim();
 }
 
 // ---- save. — single-file project format or export folder ----
@@ -1322,18 +1324,19 @@ function autosave() {
   } catch (e) { /* best-effort temp save */ }
 }
 function onSaveProject() {
+  commitSig();
   var f = curFont();
   var dlg = '(function(){var fl=File.saveDialog("Save RuneType project","RuneType:*.runetype");if(!fl)return "";if(fl.name.indexOf(".")<0)fl=new File(fl.fsName+".runetype");return fl.fsName;})()';
   evalScript(dlg).then(function (path) {
     if (!path) return;
     try {
       fs.writeFileSync(path, serializeProject(f));
-      $('saveModal').classList.add('hidden');
-      setStatus('Project saved → ' + path, 'ok');
+        setStatus('Project saved → ' + path, 'ok');
     } catch (e) { setStatus('Save failed: ' + e.message, 'err'); }
   });
 }
 function onExportGo() {
+  commitSig();
   if (!$('exOtf').checked) { setStatus('Pick at least one format to export.', 'err'); return; }
   var f = curFont();
   evalScript('(function(){var d=Folder.selectDialog("Choose a folder to export into");return d?d.fsName:"";})()').then(function (dir) {
@@ -1351,8 +1354,7 @@ function onExportGo() {
           n++;
         } catch (e) { errs++; }
       });
-      $('saveModal').classList.add('hidden');
-      setStatus('Exported ' + n + ' file(s) → ' + folder + (errs ? ' (' + errs + ' master(s) skipped — no outlines)' : ''), n ? 'ok' : 'err');
+        setStatus('Exported ' + n + ' file(s) → ' + folder + (errs ? ' (' + errs + ' master(s) skipped — no outlines)' : ''), n ? 'ok' : 'err');
     } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
   });
 }
@@ -1468,6 +1470,7 @@ function buildCleanOtf(f, master) {
 var installedPaths = {};
 function adobeFontsDir() { return cs.getSystemPath(SystemPath.USER_DATA) + '/Adobe/Fonts'; }
 function onInstallFont() {
+  commitSig();
   var f = curFont(), m = f.masters[activeMaster];
   if (!f.glyphs.some(isFilled)) { setStatus('Nothing to install yet — draw some glyphs first.', 'err'); return; }
   try {
@@ -1479,7 +1482,6 @@ function onInstallFont() {
     var path = dir + '/' + fam + '-' + slugifyPS(m.name) + '.otf';
     fs.writeFileSync(path, Buffer.from(new Uint8Array(buildCleanOtf(f, m))));
     installedPaths[activeFont] = path;
-    $('saveModal').classList.add('hidden');
     setStatus('Installed → usable in Illustrator\'s font list right now (' + path + ')', 'ok');
   } catch (e) { setStatus('Install failed: ' + (e && e.message ? e.message : e), 'err'); }
 }
@@ -1783,10 +1785,7 @@ function boot() {
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
   $('ligInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLig(); });
-  $('sigBtn').addEventListener('click', openSig);
-  $('sigSave').addEventListener('click', saveSig);
-  $('sigCancel').addEventListener('click', function () { $('sigModal').classList.add('hidden'); });
-  $('saveCancel').addEventListener('click', function () { $('saveModal').classList.add('hidden'); });
+
   var secTabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var st = 0; st < secTabs.length; st++) (function (t) {
     t.addEventListener('click', function () { setSection(t.getAttribute('data-sec')); });

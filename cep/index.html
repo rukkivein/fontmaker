@@ -150,6 +150,30 @@
         </div>
       </div>
 
+      <!-- ===== save. — signature (metadata) + export, on its own page ===== -->
+      <div id="sec-save" class="w-savepage hidden">
+        <div class="hword sm">signature<span class="dot">.</span></div>
+        <div class="ul ul-sm ul-o1"></div>
+        <div id="sigFields" class="sv-fields"></div>
+
+        <div class="hword sm w-sec">export<span class="dot">.</span></div>
+        <div class="ul ul-sm ul-o2"></div>
+        <div class="sv-row">
+          <div class="fm-formats">
+            <label class="fm-chk"><input id="exOtf" type="checkbox" checked /> OTF</label>
+            <label class="fm-chk dim"><input id="exTtf" type="checkbox" disabled /> TTF <span class="muted">soon</span></label>
+            <label class="fm-chk dim"><input id="exVar" type="checkbox" disabled /> Variable <span class="muted">soon</span></label>
+          </div>
+          <div class="sv-secondary">
+            <button id="autoMetrics" class="rune-btn outline sm2" title="Fit ascender/descender to the drawn glyphs">Auto Metrics</button>
+            <button id="saveProject" class="rune-btn outline sm2">Save Project (.runetype)</button>
+            <button id="installBtn" class="rune-btn outline sm2">Install to Illustrator</button>
+            <button id="uninstallBtn" class="rune-btn outline sm2">Uninstall</button>
+          </div>
+        </div>
+        <div class="sv-export"><button id="exportGo" class="sv-bigbtn">Export to Folder</button></div>
+      </div>
+
       <!-- right pane: the construction-grid designer (glyphs.) or the
            metrics & spacing editor (modification.) -->
       <div id="w-rightPane" class="w-right"><div id="w-designer" class="w-designer"></div></div>
@@ -161,36 +185,6 @@
       <img class="credit-stamp" src="assets/stamp.png" alt="" />
     </footer>
 
-    <!-- signature. — font info & metadata -->
-    <div id="sigModal" class="fm-modal hidden"><div class="fm-box">
-      <div class="fm-title">signature<span class="dot">.</span></div>
-      <div id="sigFields" class="fm-fields"></div>
-      <div class="fm-actions">
-        <button id="autoMetrics" class="rune-btn outline sm2" title="Fit ascender/descender to the drawn glyphs (90th percentile)">Auto Metrics</button>
-        <button id="sigCancel" class="rune-btn outline sm2">Cancel</button>
-        <button id="sigSave" class="rune-btn blue sm2">Save</button>
-      </div>
-    </div></div>
-
-    <!-- save. — project file, install, export -->
-    <div id="saveModal" class="fm-modal hidden"><div class="fm-box">
-      <div class="fm-title">save<span class="dot">.</span></div>
-      <button id="sigBtn" class="rune-btn outline">Font Info (signature.)</button>
-      <button id="saveProject" class="rune-btn outline">Save Project (.runetype)</button>
-      <div class="fm-exh">Use in Illustrator</div>
-      <div class="fm-row2">
-        <button id="installBtn" class="rune-btn blue sm2">Install to Illustrator</button>
-        <button id="uninstallBtn" class="rune-btn outline sm2">Uninstall</button>
-      </div>
-      <div class="fm-exh">Export font files</div>
-      <div class="fm-formats">
-        <label class="fm-chk"><input id="exOtf" type="checkbox" checked /> OTF</label>
-        <label class="fm-chk dim"><input id="exTtf" type="checkbox" disabled /> TTF <span class="muted">soon</span></label>
-        <label class="fm-chk dim"><input id="exVar" type="checkbox" disabled /> Variable <span class="muted">soon</span></label>
-      </div>
-      <button id="exportGo" class="rune-btn blue">Export to folder&hellip;</button>
-      <div class="fm-actions"><button id="saveCancel" class="rune-btn outline sm2">Close</button></div>
-    </div></div>
   </div>
 
 </div>

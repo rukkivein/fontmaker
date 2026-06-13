@@ -667,3 +667,21 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .w-testpage.light .w-testctl label { color: #555; }
 .w-testpage.light .w-kern { background: #ececec; color: #222; border-color: #c9c9c9; }
 .w-testpage.light input[type=range] { background: #e4e4e4; border-color: #cfcfcf; }
+
+/* ===== save. — full page: signature (metadata) + export ===== */
+.w-savepage { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; padding: 18px 4px 4px; }
+.sv-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; padding: 10px 4px 16px; }
+.sv-row2 { display: flex; align-items: center; gap: 10px; }
+.sv-row2 span { flex: 0 0 124px; font-size: 11px; color: var(--txt2); text-align: right; }
+.sv-row2 input { flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 10px; font-size: 12px; }
+.sv-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 10px 4px; }
+.sv-row .fm-formats { gap: 18px; }
+.sv-secondary { display: flex; gap: 8px; flex-wrap: wrap; }
+.sv-secondary .rune-btn { width: auto; flex: 0 0 auto; }
+.sv-export { margin-top: auto; padding: 16px 0 8px; display: flex; justify-content: center; }
+.sv-bigbtn {
+  width: min(560px, 86%); padding: 18px 24px; cursor: pointer;
+  background: var(--accent); color: #fff; border: none; border-radius: 999px;
+  font-size: 22px; font-weight: 700;
+}
+.sv-bigbtn:hover { background: var(--accent-h); }
