@@ -1323,6 +1323,12 @@ function autosave() {
     if (fonts.length) fs.writeFileSync(dir + '/autosave.runetype', serializeProject(curFont()));
   } catch (e) { /* best-effort temp save */ }
 }
+// Open File — pick a font/project/artwork file and open it with the OS default
+// app (font files land in the system font viewer for manual install).
+function onOpenFile() {
+  var js = '(function(){var f=File.openDialog("Open a file","Fonts & Projects:*.otf;*.ttf;*.runetype;*.ai;*.svg");if(!f)return "";try{f.execute();}catch(e){try{app.open(f);}catch(e2){}}return f.fsName;})()';
+  evalScript(js).then(function (p2) { if (p2) setStatus('Opened ' + p2, 'ok'); });
+}
 function onSaveProject() {
   commitSig();
   var f = curFont();
@@ -1800,9 +1806,7 @@ function boot() {
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
-  $('installBtn').addEventListener('click', onInstallFont);
-  $('uninstallBtn').addEventListener('click', onUninstallFont);
-  $('autoMetrics').addEventListener('click', onAutoMetrics);
+  $('openFileBtn').addEventListener('click', onOpenFile);
   $('bg-b').addEventListener('click', function () { setTesterBg(true); });
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
