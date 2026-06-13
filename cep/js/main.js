@@ -1491,6 +1491,7 @@ function onAutoMetrics() {
 
 function renderWorkspace() {
   renderMasterSelect(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
+  setTesterBg(true);   // testing. starts dark by default
   setSection('glyphs');
   setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
