@@ -224,6 +224,10 @@ function gdPresetItems(key) {
 }
 function gdXs(fx) { return GD_PX + fx * GD_SX; }
 function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
+// every grid opens ~30% zoomed out (centred) so the whole glyph and its margins
+// are comfortably visible inside the frame, with room before anything clips
+var GD_ZOUT = 0.7;
+function defaultView() { return { x: (GD_W / 2) * (1 - GD_ZOUT), y: (GD_H / 2) * (1 - GD_ZOUT), s: GD_ZOUT }; }
 function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY }); }
 function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
 function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.gridMul = o.gridMul || 1; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; gd.selSet = []; }
@@ -276,7 +280,7 @@ function paneCanvasSize() {
   var h = Math.max(180, Math.min(H, W * GD_H / GD_W));
   return { w: Math.round(h * GD_W / GD_H), h: Math.round(h) };
 }
-function gdView(gd) { if (!gd._view) gd._view = { x: 0, y: 0, s: 1 }; return gd._view; }
+function gdView(gd) { if (!gd._view) gd._view = defaultView(); return gd._view; }
 function gdShapePath(contours, dx, dy) {
   // glyph contours (font units, y-up) -> designer-space path string
   var d = '';
@@ -325,8 +329,9 @@ function gdScaleContours(contours, ax, ay, sx, sy) {
 function gdRedraw(svg, gd) {
   var v = gdView(gd);
   var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
-  s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
+  // white card fills the frame; the content zooms/pans within it (no dark margin)
   s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
+  s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
   s += '<g clip-path="url(#gdclip)">';
   if (gd.gridOn) {
     // centre-aligned grid; with the ×2 coefficient every 2nd line (from the
@@ -492,7 +497,7 @@ function renderGridDesigner(box, gd, onChange) {
   }
   wrap.querySelector('[data-t=free]').addEventListener('click', function () {
     gd._tool = (gd._tool === 'free') ? null : 'free';
-    if (gd._tool !== 'free') { var v = gdView(gd); v.x = 0; v.y = 0; v.s = 1; } // leaving freeform resets the view
+    if (gd._tool !== 'free') { var v = gdView(gd), dv = defaultView(); v.x = dv.x; v.y = dv.y; v.s = dv.s; } // leaving freeform recenters (30% zoom-out)
     sync();
   });
   wrap.querySelector('[data-t=circle]').addEventListener('click', function () { addItem({ type: 'circle', cx: 500, cy: 300, r: 200 }); });
@@ -755,11 +760,104 @@ function fitProfile() {
   while (p.scrollHeight > p.clientHeight && size > 7) { size -= 0.5; p.style.setProperty('--pv', size + 'px'); }
 }
 
-// --- import an existing .ai project (just opens the file in Illustrator) ---
-function onImport() {
-  var js = '(function(){var f=File.openDialog("Open a project","Illustrator:*.ai;*.svg");if(!f)return "";app.open(f);return f.fsName;})()';
-  evalScript(js).then(function (p) { /* opened in Illustrator */ });
+// --- Open / Import: load a .runetype project OR an existing .otf/.ttf font INTO
+// the panel for editing. The panel READS the file itself (Node fs) — it never
+// hands .runetype to the OS/Illustrator (which only shows raw bytes). ---
+function pickPath(title, filter) {
+  var js = '(function(){var f=File.openDialog(' + JSON.stringify(title) + ',' + JSON.stringify(filter) + ');return f?f.fsName:"";})()';
+  return evalScript(js);
 }
+function baseNameNoExt(p) { var b = String(p || '').replace(/\\/g, '/').split('/').pop(); return b.replace(/\.[^.]+$/, '') || 'Untitled'; }
+function openFromPath(path) {
+  if (!path) return;
+  var low = path.toLowerCase();
+  try {
+    if (/\.(runetype|json)$/.test(low)) {
+      loadProject(JSON.parse(fs.readFileSync(path, 'utf8')), path);
+    } else if (/\.(otf|ttf)$/.test(low)) {
+      var ot = getOpentype();
+      if (!ot) { setStatus('Font engine unavailable.', 'err'); return; }
+      var buf = fs.readFileSync(path);
+      var ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+      loadProject(projectFromOpentype(ot.parse(ab), baseNameNoExt(path)), path);
+    } else {
+      setStatus('Open a .runetype project or an .otf/.ttf font — not .' + low.split('.').pop() + '.', 'err');
+    }
+  } catch (e) { setStatus('Could not open that file: ' + e.message, 'err'); }
+}
+function loadProject(proj, path) {
+  if (!proj || !proj.glyphs || !proj.glyphs.length || !proj.masters || !proj.masters.length) {
+    setStatus('That file is not a valid RuneType project.', 'err'); return;
+  }
+  proj.kerning = proj.kerning || {};
+  proj.meta = proj.meta || { familyName: baseNameNoExt(path), version: '1.000' };
+  fonts.push(proj); activeFont = fonts.length - 1;
+  selectedSlot = -1; openGlyphIndex = -1; searchQuery = ''; alphaFilters = [];
+  activeMaster = 0; lastSig = {}; flatCache = {}; kernCache = {};
+  show('work'); renderWorkspace();
+  setStatus('Opened "' + (proj.meta.familyName || 'project') + '" — ' + proj.glyphs.filter(isFilled).length + ' drawn glyph(s).', 'ok');
+}
+// Convert one opentype.js glyph's path (font units, y-UP) to our contour model.
+// Quadratics (TTF) are raised to cubics; the trailing point that duplicates the
+// contour start (on Z) is merged back so the closing curve keeps its handle.
+function contoursFromOTGlyph(g) {
+  var cmds = (g.path && g.path.commands) || [];
+  var contours = [], cur = null;
+  function P(x, y) { return { x: x, y: y, type: 'corner', handleIn: null, handleOut: null }; }
+  for (var i = 0; i < cmds.length; i++) {
+    var c = cmds[i];
+    if (c.type === 'M') { cur = { closed: false, points: [P(c.x, c.y)] }; contours.push(cur); }
+    else if (!cur) continue;
+    else if (c.type === 'L') { cur.points.push(P(c.x, c.y)); }
+    else if (c.type === 'C') {
+      var pv = cur.points[cur.points.length - 1]; pv.handleOut = { x: c.x1, y: c.y1 };
+      var np = P(c.x, c.y); np.handleIn = { x: c.x2, y: c.y2 }; cur.points.push(np);
+    } else if (c.type === 'Q') {
+      var pq = cur.points[cur.points.length - 1];
+      pq.handleOut = { x: pq.x + 2 / 3 * (c.x1 - pq.x), y: pq.y + 2 / 3 * (c.y1 - pq.y) };
+      var nq = P(c.x, c.y); nq.handleIn = { x: c.x + 2 / 3 * (c.x1 - c.x), y: c.y + 2 / 3 * (c.y1 - c.y) }; cur.points.push(nq);
+    } else if (c.type === 'Z' && cur) {
+      cur.closed = true;
+      var lp = cur.points[cur.points.length - 1], fp = cur.points[0];
+      if (cur.points.length > 1 && Math.abs(lp.x - fp.x) < 0.01 && Math.abs(lp.y - fp.y) < 0.01) { fp.handleIn = lp.handleIn; cur.points.pop(); }
+      cur = null;
+    }
+  }
+  contours.forEach(function (ct) { ct.points.forEach(function (p) { if (p.handleIn && p.handleOut) p.type = 'smooth'; }); });
+  return contours.filter(function (ct) { return ct.points.length >= 2; });
+}
+// Build an editable project from a parsed font. Outlines are scaled to the
+// panel's 1000-UPM world; glyphs map onto the standard Latin slots (extras append).
+function projectFromOpentype(font, fam) {
+  var upm = font.unitsPerEm || 1000, sc = 1000 / upm;
+  var proj = glyphset.createProject({ familyName: fam || 'Imported', masterName: 'Regular', masterType: 'Regular', alphabets: ['latinUpper', 'latinLower', 'numbers'] });
+  var mid = proj.masters[0].id, os2 = (font.tables && font.tables.os2) || {};
+  proj.unitsPerEm = 1000; proj.metrics = proj.metrics || {}; proj.metrics.unitsPerEm = 1000;
+  if (font.ascender != null) proj.metrics.ascender = Math.round(font.ascender * sc);
+  if (font.descender != null) proj.metrics.descender = Math.round(font.descender * sc);
+  if (os2.sCapHeight) proj.metrics.capHeight = Math.round(os2.sCapHeight * sc);
+  if (os2.sxHeight) proj.metrics.xHeight = Math.round(os2.sxHeight * sc);
+  proj.metrics.baseline = 0;
+  var byChar = {}; proj.glyphs.forEach(function (g) { if (g.char != null) byChar[g.char] = g; });
+  var nG = font.glyphs.length;
+  for (var i = 0; i < nG; i++) {
+    var og; try { og = font.glyphs.get(i); } catch (e) { continue; }
+    if (!og || og.unicode == null) continue;
+    var ch; try { ch = String.fromCodePoint(og.unicode); } catch (e) { continue; }
+    var contours = transformContours(contoursFromOTGlyph(og), sc, 0, 0);
+    if (!contours.length) continue;
+    var adv = Math.round((og.advanceWidth || upm * 0.5) * sc);
+    var slot = byChar[ch];
+    if (slot) { slot.layers[mid] = { contours: contours }; slot.advanceWidth = adv; }
+    else {
+      var ng = { name: og.name || ('uni' + og.unicode.toString(16).toUpperCase()), char: ch, unicode: og.unicode, advanceWidth: adv, alphabet: 'latinExtended', layers: {} };
+      ng.layers[mid] = { contours: contours }; proj.glyphs.push(ng);
+    }
+  }
+  proj.meta = proj.meta || {}; proj.meta.familyName = fam || ((font.names && font.names.fontFamily && font.names.fontFamily.en) || 'Imported');
+  return proj;
+}
+function onImport() { pickPath('Open a RuneType project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath); }
 
 // --- Start Creating: build the font from the draft, then enter the workspace ---
 function onStartCreating() {
@@ -953,7 +1051,7 @@ function renderGrid() {
     } else {
       cell.innerHTML = label;
     }
-    cell.title = g.name + ' — double-click to assign the selection · right-click to open · drop a shape';
+    cell.title = g.name + ' — double-click to assign the selection · right-click for options · drop a shape';
     cell.addEventListener('click', function () {
       selectedSlot = i;
       updateAssign(); renderGrid(); renderRight();
@@ -965,12 +1063,8 @@ function renderGrid() {
       selectedSlot = i; updateAssign(); renderGrid();
       onAssign();
     });
-    cell.addEventListener('contextmenu', function (ev) {
-      ev.preventDefault();
-      selectedSlot = i;
-      updateAssign(); renderGrid(); renderRight();
-      openGlyph(i); // right-click = open in AI
-    });
+    // right-click = options menu (delete shape / delete glyph / open in Illustrator)
+    cell.addEventListener('contextmenu', function (ev) { showGlyphMenu(ev, i); });
     // drag-drop: drop the Assign-Shape handle on a letter to assign the current
     // Illustrator selection straight to it
     cell.addEventListener('dragover', function (ev) { ev.preventDefault(); cell.classList.add('drop'); ev.dataTransfer.dropEffect = 'copy'; });
@@ -1000,6 +1094,7 @@ function renderModGrid() {
       selectedSlot = i;
       updateAssign(); renderModGrid(); renderRight();
     });
+    cell.addEventListener('contextmenu', function (ev) { showGlyphMenu(ev, i); });
     grid.appendChild(cell);
   });
   if (!shown) grid.innerHTML = '<div class="w-modempty">Nothing placed yet — assign shapes on the glyphs. page first.</div>';
@@ -1081,7 +1176,7 @@ function onAutoOne() {
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
 // ink-left line (LSB) or the red advance line.
-var mxSel = false, mxDrag = null, mxView = { x: 0, y: 0, s: 1 };
+var mxSel = false, mxDrag = null, mxView = defaultView(), mxHand = false;
 function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
 // The blue LSB line can sit off the storage origin (g.lsbLineX). Fold that offset
 // into the outline so the built font's pen origin lands on the blue line:
@@ -1187,11 +1282,20 @@ function renderMetricsEditor() {
   box.innerHTML = '';
   var wrap = document.createElement('div'); wrap.className = 'gd-wrap';
   wrap.innerHTML = '<div class="gd-mid"><div class="gd-stage">' +
+    '<button class="mx-hand" type="button" title="Pan &amp; zoom — drag to move, scroll to zoom. Turn off to recenter."><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7-4l-2.5-4a2 2 0 0 1 3.5-2L8 14"/></svg></button>' +
     '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
     '</div></div>';
   box.appendChild(wrap);
   var svg = wrap.querySelector('.gd-canvas');
-  mxView.x = 0; mxView.y = 0; mxView.s = 1;   // fresh framing whenever the glyph/section changes
+  mxHand = false;                  // fresh editing mode whenever the glyph/section changes
+  mxView = defaultView();          // ...and 30%-zoomed-out framing so all is visible
+  var handBtn = wrap.querySelector('.mx-hand');
+  function setHand(on) {
+    mxHand = on; handBtn.classList.toggle('on', on);
+    svg.style.cursor = on ? 'grab' : 'default';
+    if (!on) { mxView = defaultView(); mxRedraw(svg); }   // turning the hand off recenters
+  }
+  handBtn.addEventListener('click', function () { setHand(!mxHand); });
   function fit() {
     var sz = paneCanvasSize();
     svg.style.width = sz.w + 'px';
@@ -1204,8 +1308,9 @@ function renderMetricsEditor() {
     var px = (pp.x - v.x) / v.s, py = (pp.y - v.y) / v.s;
     return { fx: (px - GD_PX) / GD_SX, fy: 800 - (py - GD_PY) / GD_SY, sx: pp.x, sy: pp.y };
   }
-  // scroll to zoom toward the cursor
+  // scroll to zoom toward the cursor — only while the hand tool is active
   wrap.addEventListener('wheel', function (ev) {
+    if (!mxHand) return;
     ev.preventDefault();
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
     var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -1219,10 +1324,11 @@ function renderMetricsEditor() {
   svg.addEventListener('dblclick', function () { mxView.x = 0; mxView.y = 0; mxView.s = 1; mxRedraw(svg); });
   svg.addEventListener('mousedown', function (ev) {
     ev.preventDefault();
+    var pq = pointOf(ev);
+    if (mxHand) { mxDrag = { mode: 'pan', px: pq.sx, py: pq.sy, vx: mxView.x, vy: mxView.y }; return; }  // hand tool: drag pans
     var g = selGlyph(); if (!g) return;
     var l = g.layers[curMasterId()];
     var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
-    var pq = pointOf(ev);
     var hd = ev.target.closest ? ev.target.closest('[data-h]') : null;
     if (hd && cs2) {
       mxDrag = { mode: 'scale', h: hd.getAttribute('data-h'), b: gdShapeBounds(cs2, 0, 0), orig: JSON.parse(JSON.stringify(cs2)), live: cs2 };
@@ -1240,10 +1346,7 @@ function renderMetricsEditor() {
     }
     var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
     if (sh && cs2) { mxSel = true; mxDrag = { mode: 'shape', sx: pq.fx, sy: pq.fy, dx: 0, dy: 0 }; mxRedraw(svg); return; }
-    // empty space: deselect and PAN the canvas (drag content back into view)
-    mxSel = false;
-    mxDrag = { mode: 'pan', px: pq.sx, py: pq.sy, vx: mxView.x, vy: mxView.y };
-    mxRedraw(svg);
+    mxSel = false; mxRedraw(svg);   // empty space (hand off): just deselect — use the hand tool to pan
   });
   function onMove(ev) {
     if (!mxDrag) return;
@@ -1348,6 +1451,49 @@ function openGlyph(i) {
     if (r && r.ok) setStatus((r.reused ? 'Switched to' : 'Opened') + ' "' + glyphLabel(g) + '" · edits sync live', 'ok');
     else setStatus('Could not open glyph: ' + ((r && r.error) || '?'), 'err');
   });
+}
+
+// ---- right-click options on a glyph cell: delete shape / delete glyph / open ----
+function closeGlyphMenu() { var m = document.getElementById('glyphMenu'); if (m && m.parentNode) m.parentNode.removeChild(m); }
+function showGlyphMenu(ev, slot) {
+  ev.preventDefault(); ev.stopPropagation();
+  closeGlyphMenu();
+  var f = curFont(), g = f && f.glyphs[slot]; if (!g) return;
+  selectedSlot = slot; updateAssign(); renderGrid(); renderModGrid(); renderRight();
+  var m = document.createElement('div'); m.id = 'glyphMenu'; m.className = 'ctx-menu';
+  function item(label, enabled, danger, fn) {
+    var b = document.createElement('button');
+    b.className = 'ctx-item' + (enabled ? (danger ? ' danger' : '') : ' dim');
+    b.textContent = label;
+    if (enabled) b.addEventListener('click', function () { closeGlyphMenu(); fn(); });
+    m.appendChild(b);
+  }
+  item('Delete shape', isFilled(g), true, function () { ctxDeleteShape(slot); });
+  item('Delete glyph', true, true, function () { ctxDeleteGlyph(slot); });
+  item('Open in Illustrator', true, false, function () { openGlyph(slot); });
+  document.body.appendChild(m);
+  var mw = m.offsetWidth, mh = m.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  m.style.left = Math.max(4, Math.min(ev.clientX, vw - mw - 6)) + 'px';
+  m.style.top = Math.max(4, Math.min(ev.clientY, vh - mh - 6)) + 'px';
+}
+function ctxDeleteShape(slot) {
+  var f = curFont(), g = f.glyphs[slot]; if (!g) return;
+  var mid = curMasterId();
+  g.layers[mid] = { contours: [] }; g.lsbLineX = 0;
+  lastSig[slot] = glyphset.layerSignature(g, mid); flatCache = {}; kernCache = {};
+  syncOpenGlyph(g);
+  renderGrid(); renderModGrid(); updateAssign(); renderRight(); scheduleTester(); autosave();
+  setStatus('Cleared the shape of "' + glyphLabel(g) + '".', 'ok');
+}
+function ctxDeleteGlyph(slot) {
+  var f = curFont(), g = f.glyphs[slot]; if (!g) return;
+  var label = glyphLabel(g);
+  f.glyphs.splice(slot, 1);
+  if (selectedSlot === slot) selectedSlot = -1; else if (selectedSlot > slot) selectedSlot--;
+  if (openGlyphIndex === slot) openGlyphIndex = -1; else if (openGlyphIndex > slot) openGlyphIndex--;
+  lastSig = {}; flatCache = {}; kernCache = {};
+  renderGrid(); renderModGrid(); updateAssign(); renderRight(); scheduleTester(); autosave();
+  setStatus('Deleted glyph "' + label + '".', 'ok');
 }
 
 // Auto-compose accented glyphs (é = e + acute …) from base letters + drawn
@@ -1481,8 +1627,9 @@ function autosave() {
 // Open File — pick a font/project/artwork file and open it with the OS default
 // app (font files land in the system font viewer for manual install).
 function onOpenFile() {
-  var js = '(function(){var f=File.openDialog("Open a file","Fonts & Projects:*.otf;*.ttf;*.runetype;*.ai;*.svg");if(!f)return "";try{f.execute();}catch(e){try{app.open(f);}catch(e2){}}return f.fsName;})()';
-  evalScript(js).then(function (p2) { if (p2) setStatus('Opened ' + p2, 'ok'); });
+  // open a saved project or an existing font INTO the panel for editing (read by
+  // the panel, not handed to the OS) — same loader as page-1 Import
+  pickPath('Open a project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath);
 }
 function onSaveProject() {
   commitSig();
@@ -2023,6 +2170,12 @@ function boot() {
     renderRight();
     renderTesterText();
   });
+  // dismiss the glyph right-click menu on any outside click / Escape / scroll
+  document.addEventListener('mousedown', function (ev) {
+    var m = document.getElementById('glyphMenu');
+    if (m && !m.contains(ev.target)) closeGlyphMenu();
+  }, true);
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeGlyphMenu(); });
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
