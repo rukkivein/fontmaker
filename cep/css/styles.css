@@ -691,3 +691,6 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .w-assign:active { cursor: grabbing; }
 .dragging-shape .w-gridwrap .cell { outline: 1px dashed #3a5d86; outline-offset: -2px; }
 .w-gridwrap .cell.drop { outline: 2px solid var(--accent); outline-offset: -1px; background: #1d3a5c; }
+
+/* alternate index as a tiny superscript on the glyph cell (A⁰¹) */
+.gl-ss { font-size: 0.5em; vertical-align: super; color: var(--txt2); margin-left: 1px; letter-spacing: -0.5px; }

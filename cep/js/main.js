@@ -776,6 +776,17 @@ function setStatus(m, k) {
 }
 function selGlyph() { return selectedSlot >= 0 ? curFont().glyphs[selectedSlot] : null; }
 function glyphLabel(g) { return g.char == null ? g.name : (g.char === ' ' ? '␣' : g.char); }
+function escHtml(t) { return String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Cell label as HTML: alternates show the base with a tiny superscript index
+// (A⁰¹, not A.ss01); ligatures show the joined letters (ft, not f_t).
+function glyphLabelHtml(g) {
+  if (g.kind === 'alternate') {
+    var m = (g.name || '').match(/\.ss(\d+)$/);
+    return escHtml(g.baseName || g.ghost || '?') + (m ? '<sup class="gl-ss">' + m[1] + '</sup>' : '');
+  }
+  if (g.kind === 'ligature') return escHtml((g.components || []).join('') || g.ghost || '');
+  return escHtml(glyphLabel(g));
+}
 
 // ---- top bar: SECTION tabs (glyphs/mod/test/save) + master picker ----
 function renderMasterSelect() {
@@ -912,13 +923,13 @@ function renderGrid() {
     if (!glyphVisible(g)) return;
     var cell = document.createElement('div');
     cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
-    var label = glyphLabel(g);
+    var label = glyphLabelHtml(g);
     if (g.char == null) cell.className += ' named';
     if (isFilled(g)) {
       // preview thumbnail + the letter itself stays visible, dark, top-right
       cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + label + '</span>';
     } else {
-      cell.textContent = label;
+      cell.innerHTML = label;
     }
     cell.title = g.name + ' — right-click to open · drop a shape to assign';
     cell.addEventListener('click', function () {
@@ -954,7 +965,7 @@ function renderModGrid() {
     shown++;
     var cell = document.createElement('div');
     cell.className = 'cell filled' + (i === selectedSlot ? ' selected' : '');
-    cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + glyphLabel(g) + '</span>';
+    cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + glyphLabelHtml(g) + '</span>';
     cell.title = g.name;
     cell.addEventListener('click', function () {
       selectedSlot = i;
@@ -1238,10 +1249,10 @@ function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
   $('openInAi').disabled = !g;
-  $('assignChip').textContent = g ? glyphLabel(g) : '';   // empty when nothing selected
+  $('assignChip').innerHTML = g ? glyphLabelHtml(g) : '';   // empty when nothing selected
   $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
   $('gotoBtn').disabled = !g;
-  $('gotoChip').textContent = g ? glyphLabel(g) : '';
+  $('gotoChip').innerHTML = g ? glyphLabelHtml(g) : '';
   $('autoOne').disabled = !(g && isFilled(g));
 }
 
@@ -1257,8 +1268,7 @@ function onAlt() {
   var idx = glyphset.createAlternate(curFont(), base);
   if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
   selectedSlot = idx; renderGrid(); updateAssign(); renderRight();
-  openGlyph(idx);
-  setStatus('Created alternate "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
+  setStatus('Created alternate "' + curFont().glyphs[idx].name + '" — open it from the grid when ready.', 'ok');
   autosave();
 }
 function onLig() {
@@ -1270,8 +1280,7 @@ function onLig() {
   var idx = glyphset.createLigature(curFont(), str);
   if (idx < 0) { setStatus('Could not create ligature.', 'err'); return; }
   selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign(); renderRight();
-  openGlyph(idx);
-  setStatus('Created ligature "' + curFont().glyphs[idx].name + '" → its own project.', 'ok');
+  setStatus('Created ligature "' + curFont().glyphs[idx].name + '" — open it from the grid when ready.', 'ok');
   autosave();
 }
 
@@ -1671,19 +1680,26 @@ function refreshTester() {
   var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
   try {
-    var built = fontEngine.buildFont(f, 'otf', { familyName: 'RTLive', styleName: 'Regular', masterId: curMasterId() });
+    // build from the FILLED glyphs only, so letters you haven't drawn fall back
+    // to a standard system face instead of vanishing
+    var sub = {}; for (var k in f) sub[k] = f[k];
+    sub.glyphs = f.glyphs.filter(isFilled);
+    var built = fontEngine.buildFont(sub, 'otf', { familyName: 'RTLive', styleName: 'Regular', masterId: curMasterId() });
+    var fam;
     if (window.FontFace && document.fonts) {
-      var face = new FontFace('RTLive_' + (++faceSeq), built.buffer);
+      fam = 'RTLive_' + (++faceSeq);
+      var face = new FontFace(fam, built.buffer);
       document.fonts.add(face);
       if (!window.__rtFaces) window.__rtFaces = [];
       window.__rtFaces.push(face);
       while (window.__rtFaces.length > 2) document.fonts['delete'](window.__rtFaces.shift());
-      $('t-text').style.fontFamily = '"RTLive_' + faceSeq + '"';
     } else {
+      fam = 'RTLive_' + (++faceSeq);
       var b64 = Buffer.from(new Uint8Array(built.buffer)).toString('base64');
-      styleEl.textContent = '@font-face{font-family:"RTLive_' + (++faceSeq) + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
-      $('t-text').style.fontFamily = '"RTLive_' + faceSeq + '"';
+      styleEl.textContent = '@font-face{font-family:"' + fam + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
     }
+    // fallback chain: drawn glyphs use the font, the rest use a standard face
+    $('t-text').style.fontFamily = '"' + fam + '", "Adobe Clean", system-ui, sans-serif';
   } catch (e) { /* tester is best-effort */ }
   applyTesterCtl();
 }
