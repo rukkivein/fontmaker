@@ -228,6 +228,17 @@ function gdYs(fy) { return GD_PY + (800 - fy) * GD_SY; }
 // are comfortably visible inside the frame, with room before anything clips
 var GD_ZOUT = 0.7;
 function defaultView() { return { x: (GD_W / 2) * (1 - GD_ZOUT), y: (GD_H / 2) * (1 - GD_ZOUT), s: GD_ZOUT }; }
+// the font-unit rectangle currently visible through a view (+ a small margin), so
+// grid lines and rulers can be drawn to FILL the frame at any zoom/pan ("infinite")
+function viewFontBounds(v) {
+  function fxOf(bx) { return (bx - GD_PX) / GD_SX; }
+  function fyOf(by) { return 800 - (by - GD_PY) / GD_SY; }
+  var x0 = fxOf((0 - v.x) / v.s), x1 = fxOf((GD_W - v.x) / v.s);
+  var ya = fyOf((0 - v.y) / v.s), yb = fyOf((GD_H - v.y) / v.s);
+  var y0 = Math.min(ya, yb), y1 = Math.max(ya, yb);
+  var mX = (x1 - x0) * 0.12, mY = (y1 - y0) * 0.12;
+  return { x0: x0 - mX, x1: x1 + mX, y0: y0 - mY, y1: y1 + mY };
+}
 function gdSnap(gd) { return JSON.stringify({ items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY }); }
 function gdPush(gd) { gd.undo.push(gdSnap(gd)); if (gd.undo.length > 60) gd.undo.shift(); gd.redo.length = 0; }
 function gdRestore(gd, s) { var o = JSON.parse(s); gd.items = o.items; gd.gridOn = o.gridOn; gd.gridCell = o.gridCell; gd.gridMul = o.gridMul || 1; gd.symX = o.symX; gd.symY = o.symY; gd.sel = -1; gd.selGrid = false; gd.selSet = []; }
@@ -328,7 +339,9 @@ function gdScaleContours(contours, ax, ay, sx, sy) {
 }
 function gdRedraw(svg, gd) {
   var v = gdView(gd);
-  var s = '<defs><clipPath id="gdclip"><rect x="' + GD_PX + '" y="' + GD_PY + '" width="' + (GD_W - 2 * GD_PX) + '" height="' + (GD_H - 2 * GD_PY) + '"/></clipPath></defs>';
+  var vb = viewFontBounds(v);   // visible rect so the grid extends to fill the frame
+  // the clip is effectively unbounded now — the grid is meant to run off the page
+  var s = '<defs><clipPath id="gdclip"><rect x="-20000" y="-20000" width="40000" height="40000"/></clipPath></defs>';
   // white card fills the frame; the content zooms/pans within it (no dark margin)
   s += '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
   s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
@@ -343,19 +356,12 @@ function gdRedraw(svg, gd) {
            '" stroke="' + (major ? '#c0271d' : minor) + '" stroke-width="' + (major ? 1.4 : 0.7) + '"' + (major ? ' opacity="0.55"' : '') + '/>';
     };
     var k, q;
-    for (k = 0; 500 + k * c <= 1000 || 500 - k * c >= 0; k++) {
-      q = (mul === 2 && k % 2 === 0);
-      if (500 + k * c <= 1000) gl(500 + k * c, 800, 500 + k * c, -200, q);
-      if (k > 0 && 500 - k * c >= 0) gl(500 - k * c, 800, 500 - k * c, -200, q);
-    }
-    for (k = 0; 300 + k * c <= 800 || 300 - k * c >= -200; k++) {
-      q = (mul === 2 && k % 2 === 0);
-      if (300 + k * c <= 800) gl(0, 300 + k * c, 1000, 300 + k * c, q);
-      if (k > 0 && 300 - k * c >= -200) gl(0, 300 - k * c, 1000, 300 - k * c, q);
-    }
+    // lines run across the whole visible rect (vb) so the grid fills the frame
+    for (k = Math.floor((vb.x0 - 500) / c); k <= Math.ceil((vb.x1 - 500) / c); k++) { q = (mul === 2 && k % 2 === 0); gl(500 + k * c, vb.y1, 500 + k * c, vb.y0, q); }
+    for (k = Math.floor((vb.y0 - 300) / c); k <= Math.ceil((vb.y1 - 300) / c); k++) { q = (mul === 2 && k % 2 === 0); gl(vb.x0, 300 + k * c, vb.x1, 300 + k * c, q); }
   }
-  if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(800) + '" x2="' + gdXs(500) + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
-  if (gd.symX) s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
+  if (gd.symY) s += '<line x1="' + gdXs(500) + '" y1="' + gdYs(vb.y1) + '" x2="' + gdXs(500) + '" y2="' + gdYs(vb.y0) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
+  if (gd.symX) s += '<line x1="' + gdXs(vb.x0) + '" y1="' + gdYs(300) + '" x2="' + gdXs(vb.x1) + '" y2="' + gdYs(300) + '" stroke="#1473e6" stroke-width="0.9" stroke-dasharray="7 5" opacity="0.55"/>';
   // ghosts (mirrors) under the originals; thick visible strokes; fat invisible
   // hit layer on top. RED items (e.g. the letterbox side lines) stay red — and
   // their mirrors draw at full strength so both sides read as one pair.
@@ -1192,16 +1198,19 @@ function bakeGlyphOrigin(g) {
 }
 function bakeAllOrigins(f) { f.glyphs.forEach(bakeGlyphOrigin); }
 // the glyph's OWN construction grid as faint reference markup (em grid + items)
-function glyphGridSvg(gd) {
+function glyphGridSvg(gd, vb) {
   var s = '';
+  // grid + lines span the visible rect (vb) so they fill the frame at any zoom;
+  // fall back to the em square when no view bounds are supplied
+  var X0 = vb ? vb.x0 : 0, X1 = vb ? vb.x1 : 1000, Y0 = vb ? vb.y0 : -200, Y1 = vb ? vb.y1 : 800;
   if (gd.gridOn) {
     var c = gd.gridCell || 50, mul = gd.gridMul || 1, k, q;
     function gl(x1, y1, x2, y2, major) {
       s += '<line x1="' + gdXs(x1) + '" y1="' + gdYs(y1) + '" x2="' + gdXs(x2) + '" y2="' + gdYs(y2) +
            '" stroke="' + (major ? '#c0271d' : '#cfcfcf') + '" stroke-width="' + (major ? 1.2 : 0.7) + '"/>';
     }
-    for (k = 0; 500 + k * c <= 1000 || 500 - k * c >= 0; k++) { q = (mul === 2 && k % 2 === 0); if (500 + k * c <= 1000) gl(500 + k * c, 800, 500 + k * c, -200, q); if (k > 0 && 500 - k * c >= 0) gl(500 - k * c, 800, 500 - k * c, -200, q); }
-    for (k = 0; 300 + k * c <= 800 || 300 - k * c >= -200; k++) { q = (mul === 2 && k % 2 === 0); if (300 + k * c <= 800) gl(0, 300 + k * c, 1000, 300 + k * c, q); if (k > 0 && 300 - k * c >= -200) gl(0, 300 - k * c, 1000, 300 - k * c, q); }
+    for (k = Math.floor((X0 - 500) / c); k <= Math.ceil((X1 - 500) / c); k++) { q = (mul === 2 && k % 2 === 0); gl(500 + k * c, Y1, 500 + k * c, Y0, q); }
+    for (k = Math.floor((Y0 - 300) / c); k <= Math.ceil((Y1 - 300) / c); k++) { q = (mul === 2 && k % 2 === 0); gl(X0, 300 + k * c, X1, 300 + k * c, q); }
   }
   (gd.items || []).forEach(function (it) { s += gdItemSvg(it, it.red ? '#c0271d' : '#333333', 1.6, it.type === 'dline', null, false); });
   return s;
@@ -1213,10 +1222,11 @@ function mxRedraw(svg) {
   // everything below pans/zooms with the view, so lines/shapes dragged off the
   // canvas can always be brought back (scroll = zoom, drag empty = pan, dbl-click = reset)
   s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
+  var vb = viewFontBounds(v);   // visible rect so the grid + rulers fill the frame
   // the selected glyph's construction grid, shown faint (25%) behind the metrics
-  if (g) s += '<g opacity="0.25">' + glyphGridSvg(glyphGD(g)) + '</g>';
+  if (g) s += '<g opacity="0.25">' + glyphGridSvg(glyphGD(g), vb) + '</g>';
   function HL(y, col, wd, dash) {
-    s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(y) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(y) +
+    s += '<line x1="' + gdXs(vb.x0) + '" y1="' + gdYs(y) + '" x2="' + gdXs(vb.x1) + '" y2="' + gdYs(y) +
          '" stroke="' + col + '" stroke-width="' + wd + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + '/>';
   }
   // ghost metrics + optic (overshoot) allowances
@@ -1255,17 +1265,18 @@ function mxRedraw(svg) {
         s += '<text x="' + (gdXs(lsbX + adv) - 110) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">RSB ' + Math.round((lsbX + adv) - b.maxX) + '</text>';
       }
     }
+    var vyT = gdYs(vb.y1), vyB = gdYs(vb.y0);   // vertical lines span the visible height
     // storage origin (x=0) — a faint dashed reference the ink may cross
     var ox0 = gdXs(0);
-    s += '<line x1="' + ox0 + '" y1="' + gdYs(800) + '" x2="' + ox0 + '" y2="' + gdYs(-200) + '" stroke="#d7d7d7" stroke-width="1" stroke-dasharray="3 4"/>';
+    s += '<line x1="' + ox0 + '" y1="' + vyT + '" x2="' + ox0 + '" y2="' + vyB + '" stroke="#d7d7d7" stroke-width="1" stroke-dasharray="3 4"/>';
     // blue LSB line — independent + draggable
     var lx = gdXs(lsbX);
-    s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
-    s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
+    s += '<line x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#1473e6" stroke-width="2.2"/>';
+    s += '<line data-mx="lsb" x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
     // red advance line at the box right edge (lsbX + adv) — independent + draggable
     var rx = gdXs(lsbX + adv);
-    s += '<line x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#c0271d" stroke-width="2.2"/>';
-    s += '<line data-mx="adv" x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
+    s += '<line x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#c0271d" stroke-width="2.2"/>';
+    s += '<line data-mx="adv" x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
     s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
   }
   s += '</g>';
