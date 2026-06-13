@@ -108,18 +108,26 @@ function composeAccent(project, targetChar, masterId, opts) {
 
   const M = project.metrics || {};
   const capH = M.capHeight || 716, xH = M.xHeight || 519;
-  const baseB = glyphset.contoursBounds(layerOf(project, baseG, masterId).contours);
+  // Fold any blue-line (LSB) offset out of the base + marks so the composed glyph
+  // lives in the same origin-0 space export/preview assume — otherwise the base of
+  // "é" would be shifted relative to a standalone "e". advance is the box width,
+  // which is independent of lsbLineX, so it copies across unchanged.
+  const baseLx = baseG.lsbLineX || 0;
+  const out = cloneContours(layerOf(project, baseG, masterId).contours);
+  if (baseLx) translateContours(out, -baseLx, 0);
+  const baseB = glyphset.contoursBounds(out);
   if (!baseB) return { ok: false, reason: 'base-empty' };
   const baseIsUpper = dec.base >= 0x41 && dec.base <= 0x5A;
   const gap = Math.round((M.unitsPerEm || project.unitsPerEm || 1000) * 0.06);
 
-  const out = cloneContours(layerOf(project, baseG, masterId).contours);
   for (const markName of dec.marks) {
     const markG = findMarkGlyph(project, markName, masterId);
     if (!markG) return { ok: false, reason: 'mark-not-drawn:' + markName };
-    const markB = glyphset.contoursBounds(layerOf(project, markG, masterId).contours);
-    if (!markB) return { ok: false, reason: 'mark-empty:' + markName };
     const mk = cloneContours(layerOf(project, markG, masterId).contours);
+    const markLx = markG.lsbLineX || 0;
+    if (markLx) translateContours(mk, -markLx, 0);
+    const markB = glyphset.contoursBounds(mk);
+    if (!markB) return { ok: false, reason: 'mark-empty:' + markName };
     // horizontal: center the mark on the base
     const baseCx = baseB.minX + baseB.w / 2, markCx = markB.minX + markB.w / 2;
     let dx = baseCx - markCx;
@@ -138,6 +146,7 @@ function composeAccent(project, targetChar, masterId, opts) {
 
   target.layers[masterId] = { contours: out };
   target.advanceWidth = baseG.advanceWidth;
+  target.lsbLineX = 0;   // the composed outline is already baked to the origin
   target.composedFrom = baseChar;
   if (!target.kind) target.kind = 'composed';
   return { ok: true, base: baseChar, marks: dec.marks };

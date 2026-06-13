@@ -1041,6 +1041,7 @@ function autoFitGlyph(f, i) {
   var y0 = topAlign != null ? topAlign - b.maxY * sc : -b.minY * sc;
   l.contours = transformContours(l.contours, sc, x0, y0);
   g.advanceWidth = Math.round(w + 2 * side);
+  g.lsbLineX = 0;   // auto-fit re-bases the ink onto the origin
   lastSig[i] = glyphset.layerSignature(g, mid);
   return true;
 }
@@ -1061,6 +1062,7 @@ function onAutoAll() {
 function onOptimize() {
   var f = curFont();
   if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  bakeAllOrigins(f);   // normalise any blue-line offsets before re-spacing
   var r = optimizer.optimizeAll(f, curMasterId());
   f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
   flatCache = {}; kernCache = {};
@@ -1081,6 +1083,19 @@ function onAutoOne() {
 // ink-left line (LSB) or the red advance line.
 var mxSel = false, mxDrag = null;
 function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
+// The blue LSB line can sit off the storage origin (g.lsbLineX). Fold that offset
+// into the outline so the built font's pen origin lands on the blue line:
+// LSB = ink.minX - lsbLineX, advance = the box width (already stored). Used at
+// export and preview build, and in-place before batch spacing ops.
+function bakeGlyphOrigin(g) {
+  var lx = g.lsbLineX || 0; if (!lx) return;
+  Object.keys(g.layers).forEach(function (mid) {
+    var l = g.layers[mid];
+    if (l && l.contours && l.contours.length) l.contours = shiftContoursXY(l.contours, -lx, 0);
+  });
+  g.lsbLineX = 0;
+}
+function bakeAllOrigins(f) { f.glyphs.forEach(bakeGlyphOrigin); }
 // the glyph's OWN construction grid as faint reference markup (em grid + items)
 function glyphGridSvg(gd) {
   var s = '';
@@ -1113,38 +1128,43 @@ function mxRedraw(svg) {
   if (g) {
     var l = g.layers[curMasterId()];
     var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
-    var adv = (mxDrag && mxDrag.mode === 'adv') ? mxDrag.adv : (g.advanceWidth || 600);
+    // the blue LSB line and red advance line are INDEPENDENT of the ink. lsbX is
+    // the blue line's own x (the left-bearing origin); adv is the box width. The
+    // shape, the blue line and the red line each move on their own — the ink may
+    // freely cross the blue line. The lsbX offset is folded into the outline only
+    // at build/export time (bakeGlyphOrigin), so nothing here moves another thing.
+    var lsbX = (mxDrag && mxDrag.mode === 'lsb') ? mxDrag.lsbX : (g.lsbLineX || 0);
+    var adv = (mxDrag && (mxDrag.mode === 'adv' || mxDrag.mode === 'lsb')) ? mxDrag.adv : (g.advanceWidth || 600);
     if (cs2) {
       var shape = (mxDrag && mxDrag.mode === 'scale') ? mxDrag.live : cs2;
-      var sdx = (mxDrag && (mxDrag.mode === 'shape' || mxDrag.mode === 'lsb')) ? mxDrag.dx : 0;
+      var sdx = (mxDrag && mxDrag.mode === 'shape') ? mxDrag.dx : 0;   // only the shape drag moves the ink
       var sdy = (mxDrag && mxDrag.mode === 'shape') ? mxDrag.dy : 0;
       s += '<path d="' + gdShapePath(shape, sdx, sdy) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
       var b = gdShapeBounds(shape, sdx, sdy);
-      // faint origin reference at x=0 (the glyph box left); the ink may cross it
-      var ox0 = gdXs(0);
-      s += '<line x1="' + ox0 + '" y1="' + gdYs(800) + '" x2="' + ox0 + '" y2="' + gdYs(-200) + '" stroke="#cdcdcd" stroke-width="1" stroke-dasharray="3 4"/>';
-      if (b) {
-        // the BLUE line sits on the ink's left edge (the LSB) and is DRAGGABLE:
-        // dragging it slides the glyph horizontally (advance fixed, RSB follows)
-        var lx = gdXs(b.minX);
-        s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
-        s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
-        if (mxSel) {
-          var x1 = gdXs(b.minX), x2 = gdXs(b.maxX), yT = gdYs(b.maxY), yB = gdYs(b.minY);
-          var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
-          s += '<rect x="' + x1 + '" y="' + yT + '" width="' + (x2 - x1) + '" height="' + (yB - yT) + '" fill="none" stroke="#1473e6" stroke-width="1"/>';
-          var HD = [['nw', x1, yT, 'nwse-resize'], ['n', cxm, yT, 'ns-resize'], ['ne', x2, yT, 'nesw-resize'], ['e', x2, cym, 'ew-resize'],
-                    ['se', x2, yB, 'nwse-resize'], ['s', cxm, yB, 'ns-resize'], ['sw', x1, yB, 'nesw-resize'], ['w', x1, cym, 'ew-resize']];
-          for (var hi = 0; hi < HD.length; hi++) {
-            s += '<rect data-h="' + HD[hi][0] + '" x="' + (HD[hi][1] - 4) + '" y="' + (HD[hi][2] - 4) + '" width="8" height="8" fill="#fff" stroke="#1473e6" stroke-width="1.2" style="cursor:' + HD[hi][3] + '"/>';
-          }
+      if (b && mxSel) {
+        var x1 = gdXs(b.minX), x2 = gdXs(b.maxX), yT = gdYs(b.maxY), yB = gdYs(b.minY);
+        var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
+        s += '<rect x="' + x1 + '" y="' + yT + '" width="' + (x2 - x1) + '" height="' + (yB - yT) + '" fill="none" stroke="#1473e6" stroke-width="1"/>';
+        var HD = [['nw', x1, yT, 'nwse-resize'], ['n', cxm, yT, 'ns-resize'], ['ne', x2, yT, 'nesw-resize'], ['e', x2, cym, 'ew-resize'],
+                  ['se', x2, yB, 'nwse-resize'], ['s', cxm, yB, 'ns-resize'], ['sw', x1, yB, 'nesw-resize'], ['w', x1, cym, 'ew-resize']];
+        for (var hi = 0; hi < HD.length; hi++) {
+          s += '<rect data-h="' + HD[hi][0] + '" x="' + (HD[hi][1] - 4) + '" y="' + (HD[hi][2] - 4) + '" width="8" height="8" fill="#fff" stroke="#1473e6" stroke-width="1.2" style="cursor:' + HD[hi][3] + '"/>';
         }
-        s += '<text x="' + (gdXs(0) + 4) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#1473e6">LSB ' + Math.round(b.minX) + '</text>';
-        s += '<text x="' + (gdXs(adv) - 110) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">RSB ' + Math.round(adv - b.maxX) + '</text>';
+      }
+      if (b) {
+        s += '<text x="' + (gdXs(lsbX) + 4) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#1473e6">LSB ' + Math.round(b.minX - lsbX) + '</text>';
+        s += '<text x="' + (gdXs(lsbX + adv) - 110) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#8d8d8d">RSB ' + Math.round((lsbX + adv) - b.maxX) + '</text>';
       }
     }
-    // advance line (red) — the glyph's total width
-    var rx = gdXs(adv);
+    // storage origin (x=0) — a faint dashed reference the ink may cross
+    var ox0 = gdXs(0);
+    s += '<line x1="' + ox0 + '" y1="' + gdYs(800) + '" x2="' + ox0 + '" y2="' + gdYs(-200) + '" stroke="#d7d7d7" stroke-width="1" stroke-dasharray="3 4"/>';
+    // blue LSB line — independent + draggable
+    var lx = gdXs(lsbX);
+    s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
+    s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
+    // red advance line at the box right edge (lsbX + adv) — independent + draggable
+    var rx = gdXs(lsbX + adv);
     s += '<line x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#c0271d" stroke-width="2.2"/>';
     s += '<line data-mx="adv" x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
     s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
@@ -1188,7 +1208,15 @@ function renderMetricsEditor() {
       return;
     }
     var mk = ev.target.closest ? ev.target.closest('[data-mx]') : null;
-    if (mk) { mxDrag = { mode: mk.getAttribute('data-mx'), sx: pq.fx, dx: 0, adv: g.advanceWidth || 600, adv0: g.advanceWidth || 600 }; return; }
+    if (mk) {
+      var mkMode = mk.getAttribute('data-mx');
+      var lsb0 = g.lsbLineX || 0, adv0 = g.advanceWidth || 600;
+      // lsb drag moves only the blue line and holds the red line fixed (redX0);
+      // adv drag moves only the red line and holds the blue line fixed (lsbX)
+      if (mkMode === 'lsb') mxDrag = { mode: 'lsb', sx: pq.fx, lsb0: lsb0, lsbX: lsb0, adv0: adv0, adv: adv0, redX0: lsb0 + adv0 };
+      else mxDrag = { mode: 'adv', sx: pq.fx, adv0: adv0, adv: adv0, lsbX: lsb0 };
+      return;
+    }
     var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
     if (sh && cs2) { mxSel = true; mxDrag = { mode: 'shape', sx: pq.fx, sy: pq.fy, dx: 0, dy: 0 }; mxRedraw(svg); return; }
     mxSel = false; mxRedraw(svg);
@@ -1196,9 +1224,13 @@ function renderMetricsEditor() {
   function onMove(ev) {
     if (!mxDrag) return;
     var pq = pointOf(ev);
-    if (mxDrag.mode === 'shape' || mxDrag.mode === 'lsb') {
+    if (mxDrag.mode === 'shape') {
       mxDrag.dx = Math.round(pq.fx - mxDrag.sx);
-      if (mxDrag.mode === 'shape') mxDrag.dy = Math.round(pq.fy - mxDrag.sy);
+      mxDrag.dy = Math.round(pq.fy - mxDrag.sy);
+      mxRedraw(svg);
+    } else if (mxDrag.mode === 'lsb') {
+      mxDrag.lsbX = Math.round(mxDrag.lsb0 + (pq.fx - mxDrag.sx));
+      mxDrag.adv = Math.max(20, mxDrag.redX0 - mxDrag.lsbX); // hold the red line fixed
       mxRedraw(svg);
     } else if (mxDrag.mode === 'adv') {
       mxDrag.adv = Math.max(20, Math.round(mxDrag.adv0 + (pq.fx - mxDrag.sx)));
@@ -1225,7 +1257,7 @@ function renderMetricsEditor() {
       var l = g.layers[curMasterId()];
       var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;
       if (mxDrag.mode === 'shape' && cs2 && (mxDrag.dx || mxDrag.dy)) mxCommit(g, shiftContoursXY(cs2, mxDrag.dx, mxDrag.dy));
-      else if (mxDrag.mode === 'lsb' && cs2 && mxDrag.dx) mxCommit(g, shiftContoursXY(cs2, mxDrag.dx, 0)); // spacing shift inside the same advance
+      else if (mxDrag.mode === 'lsb') { g.lsbLineX = mxDrag.lsbX; mxCommit(g, cs2 || [], mxDrag.adv); } // move only the blue line
       else if (mxDrag.mode === 'adv') mxCommit(g, cs2 || [], mxDrag.adv);
       else if (mxDrag.mode === 'scale' && mxDrag.live) mxCommit(g, mxDrag.live);
     }
@@ -1322,9 +1354,12 @@ function updateAssign() {
   $('gotoBtn').disabled = !g;
   // the Go-to chip shows the glyph's drawn SHAPE (like glyphs.), falling back to
   // its letter only when the slot is still empty
-  var gchip = $('gotoChip');
-  if (g && isFilled(g)) gchip.innerHTML = glyphThumb(g) || glyphLabelHtml(g);
+  var gchip = $('gotoChip'), gwrap = gchip.parentNode;
+  var gShape = g && isFilled(g) ? glyphThumb(g) : null;
+  if (gShape) gchip.innerHTML = gShape;
   else gchip.innerHTML = g ? glyphLabelHtml(g) : '';
+  // match the glyphs. chip: a near-black backing behind a drawn shape thumbnail
+  if (gwrap && gwrap.classList) gwrap.classList.toggle('has-shape', !!gShape);
   $('autoOne').disabled = !(g && isFilled(g));
 }
 
@@ -1526,6 +1561,7 @@ function cleanedProject(f) {
       var l = g.layers[mid];
       if (l && l.contours && l.contours.length > 1) l.contours = uniteContours(l.contours);
     });
+    bakeGlyphOrigin(g);   // fold the blue-line (LSB) offset into the outline
   });
   return copy;
 }
@@ -1589,6 +1625,7 @@ function assignContoursTo(slot, contours) {
   if (slot < 0 || !contours || !contours.length) return false;
   if (!glyphset.assignContoursToGlyph(curFont(), contours, slot, curMasterId())) return false;
   var g = curFont().glyphs[slot];
+  g.lsbLineX = 0;   // a fresh shape starts with the blue line on the origin
   setStatus('Assigned ' + contours.length + ' contour(s) → "' + glyphLabel(g) + '".', 'ok');
   renderGrid(); refreshTester(); renderRight(); autosave();
   return true;
@@ -1713,6 +1750,7 @@ function onAutoKern() {
   var filled = [];
   f.glyphs.forEach(function (g) { if (isFilled(g) && g.char) filled.push(g); });
   if (filled.length < 2) { setStatus('Need at least two placed glyphs to kern.', 'err'); return; }
+  bakeAllOrigins(f);   // normalise blue-line offsets so pairs measure true bearings
   f.kerning = f.kerning || {};
   var n = 0;
   for (var i = 0; i < filled.length; i++) {
@@ -1735,7 +1773,16 @@ function refreshTester() {
     // build from the FILLED glyphs only, so letters you haven't drawn fall back
     // to a standard system face instead of vanishing
     var sub = {}; for (var k in f) sub[k] = f[k];
-    sub.glyphs = f.glyphs.filter(isFilled);
+    var tMid = curMasterId();
+    sub.glyphs = f.glyphs.filter(isFilled).map(function (g) {
+      var lx = g.lsbLineX || 0; if (!lx) return g;          // fold the LSB offset in (non-mutating)
+      var ng = {}; for (var kk in g) ng[kk] = g[kk];
+      var nl = {}; for (var mm in g.layers) nl[mm] = g.layers[mm];
+      var gl = g.layers[tMid];
+      if (gl && gl.contours && gl.contours.length) nl[tMid] = { contours: shiftContoursXY(gl.contours, -lx, 0) };
+      ng.layers = nl; ng.lsbLineX = 0;
+      return ng;
+    });
     var built = fontEngine.buildFont(sub, 'otf', { familyName: 'RTLive', styleName: 'Regular', masterId: curMasterId() });
     var fam;
     if (window.FontFace && document.fonts) {
