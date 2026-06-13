@@ -762,7 +762,13 @@ var FM_SCALE_PANEL = 0.25; // must match jsx FM_SCALE
 function curFont() { return fonts[activeFont]; }
 function curMasterId() { return curFont().masters[activeMaster].id; }
 function isFilled(g) { var l = g.layers[curMasterId()]; return !!(l && l.contours && l.contours.length); }
-function setStatus(m, k) { var el = $('status'); if (el) { el.textContent = m; el.className = 'status' + (k ? ' ' + k : ''); } }
+var _toastTimer = null;
+function setStatus(m, k) {
+  var el = $('status'); if (!el) return;
+  el.textContent = m; el.className = 'w-toast show' + (k ? ' ' + k : '');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  _toastTimer = setTimeout(function () { el.classList.remove('show'); }, 2600);
+}
 function selGlyph() { return selectedSlot >= 0 ? curFont().glyphs[selectedSlot] : null; }
 function glyphLabel(g) { return g.char == null ? g.name : (g.char === ' ' ? '␣' : g.char); }
 
@@ -1493,7 +1499,6 @@ function renderWorkspace() {
   renderMasterSelect(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
   setTesterBg(true);   // testing. starts dark by default
   setSection('glyphs');
-  setStatus('Editing ' + curFont().meta.familyName + ' · ' + curFont().glyphs.length + ' slots');
 }
 
 // ---- assign selection -> glyph ----

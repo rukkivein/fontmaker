@@ -198,9 +198,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ul-sm { width: 84%; -webkit-mask-image: url('../assets/line-flipped.svg'); mask-image: url('../assets/line-flipped.svg');
   -webkit-mask-size: auto 100%; mask-size: auto 100%; }
 /* shifted crops so each stroke feels hand-placed, not aligned */
-.ul-o1 { -webkit-mask-position: -34px center; mask-position: -34px center; width: 88%; }
-.ul-o2 { -webkit-mask-position: -150px center; mask-position: -150px center; width: 79%; }
-.ul-o3 { -webkit-mask-position: -82px center; mask-position: -82px center; width: 92%; }
+.ul-o1, .ul-o2, .ul-o3 { width: 100%; -webkit-mask-position: left center; mask-position: left center; margin: 4px 0 8px; }
 .rune-body { flex: 1 1 auto; display: flex; gap: 12px; padding: 8px 14px 12px; min-height: 0; flex-wrap: nowrap; }
 .rune-left { flex: 1 1 200px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .rune-right { flex: 1 1 240px; min-width: 0; min-height: 0; border: 1px solid #3a3a3a; border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
@@ -454,7 +452,7 @@ button:disabled { opacity: 0.4; cursor: default; }
 .w-search::placeholder { color: var(--txt2); }
 .w-search:focus { outline: none; color: var(--txt); border-color: var(--invert-fill); }
 
-.w-gridwrap { flex: 1 1 auto; min-height: 110px; overflow-y: auto; padding-right: 4px; }
+.w-gridwrap { flex: 1 1 auto; min-height: 110px; overflow-y: auto; padding: 10px; background: #131313; border: 1px solid #000; border-radius: 10px; }
 .w-gridwrap .grid { gap: 6px; }
 .w-gridwrap .cell {
   width: 44px; height: 44px; border-radius: 10px; font-size: 19px; color: #cfcfcf;
@@ -635,7 +633,15 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 .w-modauto .rune-btn { width: auto; flex: 0 0 auto; }
 .w-modempty { color: var(--txt3); font-size: 12px; padding: 18px 6px; }
 .w-testpage { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 10px; padding-top: 18px; }
-.w-status { padding: 2px 14px 4px; }
+.w-toast {
+  position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);
+  background: #2e2e2e; border: 1px solid #4a4a4a; border-radius: 8px;
+  padding: 7px 14px; font-size: 11px; color: var(--txt); max-width: 80%;
+  opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 300;
+}
+.w-toast.show { opacity: 1; }
+.w-toast.err { color: #f0857d; border-color: #7a3a36; }
+.w-toast.ok { color: #7fc08a; border-color: #3a6a44; }
 
 
 /* ===== section tabs as Delight wordmarks (the settings./profile. voice) ===== */
