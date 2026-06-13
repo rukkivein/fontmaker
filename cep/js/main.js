@@ -1496,6 +1496,42 @@ function ctxDeleteShape(slot) {
   renderGrid(); renderModGrid(); updateAssign(); renderRight(); scheduleTester(); autosave();
   setStatus('Cleared the shape of "' + glyphLabel(g) + '".', 'ok');
 }
+// ---- testing.: right-click a letter to swap in one of ITS alternates (only that
+// occurrence — not every S, just the S you clicked) ----
+function closeTesterAltMenu() { var m = document.getElementById('testerAltMenu'); if (m && m.parentNode) m.parentNode.removeChild(m); }
+function showTesterAltMenu(ev, ti) {
+  ev.preventDefault(); ev.stopPropagation();
+  closeGlyphMenu(); closeTesterAltMenu();
+  var f = curFont(); if (!f) return;
+  var ch = testerText()[ti]; if (ch == null) return;
+  var base = null; for (var i = 0; i < f.glyphs.length; i++) { if (f.glyphs[i].char === ch) { base = f.glyphs[i]; break; } }
+  if (!base) return;
+  var alts = altsOfBase(f, base), cur = (testerAlts[ti] != null) ? testerAlts[ti] : -1;
+  var m = document.createElement('div'); m.id = 'testerAltMenu'; m.className = 'alt-flyout';
+  var hd = document.createElement('div'); hd.className = 'alt-hd'; hd.textContent = 'Alternates · "' + glyphLabel(base) + '"'; m.appendChild(hd);
+  if (!alts.length) {
+    var none = document.createElement('div'); none.className = 'alt-none'; none.textContent = 'No alternates yet — add them with +Alternate on the glyphs. page.';
+    m.appendChild(none);
+  } else {
+    var row = document.createElement('div'); row.className = 'alt-row';
+    function chip(tag, g, active, fn) {
+      var b = document.createElement('button'); b.className = 'alt-chip' + (active ? ' on' : '');
+      b.innerHTML = ((g && isFilled(g)) ? glyphThumb(g) : '<span class="alt-letter">' + glyphLabelHtml(base) + '</span>') + '<span class="alt-tag">' + tag + '</span>';
+      b.addEventListener('click', function () { fn(); closeTesterAltMenu(); });
+      row.appendChild(b);
+    }
+    chip('default', base, cur < 0, function () { delete testerAlts[ti]; renderTesterText(); });
+    alts.forEach(function (idx) {
+      var g = f.glyphs[idx], mm = g.name.match(/\.ss(\d+)$/), tag = mm ? ('ss' + mm[1]) : 'alt';
+      chip(tag, g, cur === idx, function () { testerAlts[ti] = idx; renderTesterText(); });
+    });
+    m.appendChild(row);
+  }
+  document.body.appendChild(m);
+  var mw = m.offsetWidth, mh = m.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  m.style.left = Math.max(4, Math.min(ev.clientX, vw - mw - 6)) + 'px';
+  m.style.top = Math.max(4, Math.min(ev.clientY - mh - 6 < 4 ? ev.clientY + 14 : ev.clientY - mh - 6, vh - mh - 6)) + 'px';
+}
 function ctxDeleteGlyph(slot) {
   var f = curFont(), g = f.glyphs[slot]; if (!g) return;
   var label = glyphLabel(g);
@@ -1998,7 +2034,31 @@ function applyTesterCtl() {
 }
 // Rebuild the line as spans: each gap = track + the pair's kern (Optical live /
 // Metric from the table), scaled to the current size. Caret is preserved.
-function testerText() { return $('t-text').textContent; }
+// per-occurrence alternate picks in the tester: text-position index -> glyph index
+var testerAlts = {};
+function altsOfBase(f, base) {
+  var out = [];
+  for (var i = 0; i < f.glyphs.length; i++) { var g = f.glyphs[i]; if (g.kind === 'alternate' && g.baseName === base.name) out.push(i); }
+  return out;
+}
+// The text is reconstructed from the DOM: real text nodes contribute their text;
+// an alternate rendered as an inline SVG carries its character in data-altch (it
+// has no text of its own), so the model never loses a character to an override.
+function testerText() {
+  var el = $('t-text'); if (!el) return '';
+  var out = '';
+  (function walk(node) {
+    for (var i = 0; i < node.childNodes.length; i++) {
+      var n = node.childNodes[i];
+      if (n.nodeType === 3) out += n.nodeValue.replace(/ /g, ' ');
+      else if (n.nodeType === 1) {
+        if (n.hasAttribute && n.hasAttribute('data-altch')) out += n.getAttribute('data-altch');
+        else walk(n);
+      }
+    }
+  })(el);
+  return out;
+}
 function caretOffset(el) {
   var sel = window.getSelection();
   if (!sel.rangeCount) return -1;
@@ -2027,24 +2087,40 @@ function renderTesterText() {
   var mode = $('t-kern').value;
   var fsPx = parseFloat($('t-size').value);
   var trackPx = $('t-track').value / 10;
+  var mid = f ? curMasterId() : null, M = f ? f.metrics : null, upm = f ? (f.unitsPerEm || 1000) : 1000;
   var off = caretOffset(el);
   var html = '';
   for (var i = 0; i < text.length; i++) {
-    var ch = text[i], kernPx = 0, gi = -1, gL = null;
+    var ch = text[i], kernPx = 0, baseIdx = -1, gL = null;
     if (f) {
-      for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; if (isFilled(gL)) gi = gx; break; } }
+      for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; if (isFilled(gL)) baseIdx = gx; break; } }
     }
+    // a chosen alternate for THIS occurrence (and only this one) overrides the glyph
+    var ov = (testerAlts[i] != null && f && f.glyphs[testerAlts[i]] && gL && f.glyphs[testerAlts[i]].baseName === gL.name && isFilled(f.glyphs[testerAlts[i]])) ? testerAlts[i] : -1;
+    var renderG = ov >= 0 ? f.glyphs[ov] : gL;     // glyph actually shown (drives kerning too)
+    var giData = ov >= 0 ? ov : baseIdx;
     if (f && i < text.length - 1) {
       var gR = null;
       for (var rx = 0; rx < f.glyphs.length; rx++) { if (f.glyphs[rx].char === text[i + 1]) { gR = f.glyphs[rx]; break; } }
-      var k = pairKern(f, gL, gR, mode);
-      kernPx = k / f.unitsPerEm * fsPx;
+      kernPx = pairKern(f, renderG, gR, mode) / upm * fsPx;
     }
-    // a drawn letter is clickable: it selects that glyph into the metrics editor
-    // (right pane) so its spacing/kerning can be tuned and seen live in the word
-    var attr = gi >= 0 ? (' data-gi="' + gi + '" class="tletter' + (gi === selectedSlot ? ' tsel' : '') + '"') : '';
-    html += '<span' + attr + ' style="margin-right:' + (trackPx + kernPx).toFixed(2) + 'px">' +
-            (ch === ' ' ? '&nbsp;' : ch.replace(/&/g, '&amp;').replace(/</g, '&lt;')) + '</span>';
+    var marg = (trackPx + kernPx).toFixed(2);
+    var cls = 'tletter' + (giData >= 0 && giData === selectedSlot ? ' tsel' : '');
+    var idAttr = ' data-ti="' + i + '"' + (giData >= 0 ? ' data-gi="' + giData + '"' : '');
+    if (ov >= 0 && renderG.layers[mid] && renderG.layers[mid].contours && renderG.layers[mid].contours.length) {
+      // render the alternate as an inline glyph so ONLY this occurrence changes;
+      // data-altch keeps the character in the model (testerText) despite no text
+      var ac = renderG.layers[mid].contours, aw = renderG.advanceWidth || (gL && gL.advanceWidth) || Math.round(upm * 0.5);
+      var asc = M.ascender, desc = M.descender;
+      var W = aw / upm * fsPx, H = (asc - desc) / upm * fsPx, vAlign = desc / upm * fsPx;
+      var chEsc = ch === ' ' ? ' ' : ch;
+      html += '<span' + idAttr + ' data-altch="' + chEsc.replace(/"/g, '&quot;') + '" class="' + cls + ' talt" ' +
+              'style="display:inline-block;line-height:0;width:' + W.toFixed(2) + 'px;height:' + H.toFixed(2) + 'px;vertical-align:' + vAlign.toFixed(2) + 'px;margin-right:' + marg + 'px;">' +
+              '<svg width="' + W.toFixed(2) + '" height="' + H.toFixed(2) + '" viewBox="0 ' + (-asc) + ' ' + aw + ' ' + (asc - desc) + '" preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible"><path d="' + contoursToSVG(ac) + '" fill="currentColor"/></svg></span>';
+    } else {
+      html += '<span' + idAttr + ' class="' + cls + '" style="margin-right:' + marg + 'px">' +
+              (ch === ' ' ? '&nbsp;' : ch.replace(/&/g, '&amp;').replace(/</g, '&lt;')) + '</span>';
+    }
   }
   el.innerHTML = html || '';
   setCaret(el, off);
@@ -2171,7 +2247,7 @@ function boot() {
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
   $('t-kern').addEventListener('change', applyTesterCtl);
-  $('t-text').addEventListener('input', function () { renderTesterText(); });
+  $('t-text').addEventListener('input', function () { testerAlts = {}; renderTesterText(); });  // edits clear per-position overrides
   // click a drawn letter in the tester → select it in the metrics editor so its
   // spacing/kerning can be tuned (the word updates live as you drag the lines)
   $('t-text').addEventListener('click', function (ev) {
@@ -2181,12 +2257,18 @@ function boot() {
     renderRight();
     renderTesterText();
   });
-  // dismiss the glyph right-click menu on any outside click / Escape / scroll
+  // right-click a letter → its own alternates (just that occurrence)
+  $('t-text').addEventListener('contextmenu', function (ev) {
+    var sp = ev.target && ev.target.closest ? ev.target.closest('[data-ti]') : null;
+    if (!sp) return;
+    showTesterAltMenu(ev, +sp.getAttribute('data-ti'));
+  });
+  // dismiss the popup menus on any outside click / Escape
   document.addEventListener('mousedown', function (ev) {
-    var m = document.getElementById('glyphMenu');
-    if (m && !m.contains(ev.target)) closeGlyphMenu();
+    var gm = document.getElementById('glyphMenu'); if (gm && !gm.contains(ev.target)) closeGlyphMenu();
+    var am = document.getElementById('testerAltMenu'); if (am && !am.contains(ev.target)) closeTesterAltMenu();
   }, true);
-  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') closeGlyphMenu(); });
+  document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeGlyphMenu(); closeTesterAltMenu(); } });
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

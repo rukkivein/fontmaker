@@ -398,6 +398,25 @@ button:disabled { opacity: 0.4; cursor: default; }
 .ctx-item.dim { color: #6a6a6a; cursor: default; }
 .ctx-item.dim:hover { background: transparent; color: #6a6a6a; }
 .ctx-item.danger:hover { background: #b3261e; color: #fff; }
+/* testing. alternates flyout */
+.alt-flyout {
+  position: fixed; z-index: 400; max-width: 320px; padding: 8px;
+  background: #262626; border: 1px solid #4a4a4a; border-radius: 10px;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.55);
+}
+.alt-hd { font-size: 11px; color: var(--txt2); padding: 2px 4px 8px; }
+.alt-none { font-size: 11px; color: #8d8d8d; padding: 2px 4px 4px; max-width: 240px; }
+.alt-row { display: flex; gap: 6px; flex-wrap: wrap; max-width: 300px; }
+.alt-chip {
+  width: 54px; height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  background: #1a1a1a; border: 2px solid #4a4a4a; border-radius: 9px; cursor: pointer; padding: 4px; box-sizing: border-box;
+}
+.alt-chip:hover { border-color: #6a6a6a; background: #222; }
+.alt-chip.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(20,115,230,0.3); }
+.alt-chip .thumb { width: 100%; height: 34px; }
+.alt-chip .alt-letter { font-size: 26px; font-weight: 700; color: #eaeaee; line-height: 34px; }
+.alt-chip .alt-tag { font-size: 9px; color: var(--txt3); }
+.alt-chip.on .alt-tag { color: var(--accent); }
 .gd-canvas [data-i] { cursor: move; }
 /* rulers live a few px INSIDE the white page, in accent blue */
 .gd-vbar { position: absolute; right: 8px; top: 10px; bottom: 10px; width: 4px; border-radius: 2px; background: var(--accent); opacity: 0.85; cursor: ew-resize; }
