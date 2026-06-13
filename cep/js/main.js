@@ -950,10 +950,17 @@ function renderGrid() {
     } else {
       cell.innerHTML = label;
     }
-    cell.title = g.name + ' — right-click to open · drop a shape to assign';
+    cell.title = g.name + ' — double-click to assign the selection · right-click to open · drop a shape';
     cell.addEventListener('click', function () {
       selectedSlot = i;
       updateAssign(); renderGrid(); renderRight();
+    });
+    // double-click a cell = assign the CURRENT Illustrator selection straight to
+    // it (the fastest, button-free path the user wanted)
+    cell.addEventListener('dblclick', function (ev) {
+      ev.preventDefault();
+      selectedSlot = i; updateAssign(); renderGrid();
+      onAssign();
     });
     cell.addEventListener('contextmenu', function (ev) {
       ev.preventDefault();
