@@ -81,11 +81,11 @@
     <!-- top: logo + SECTION tabs + master picker -->
     <header class="w-head">
       <img id="w-home" class="w-logo" src="assets/logomini.png" alt="RuneType" title="New font" />
-      <div id="w-tabsec" class="w-masters">
-        <button class="w-mtab" data-sec="glyphs">glyphs<span class="tdot">.</span></button>
-        <button class="w-mtab" data-sec="mod">modification<span class="tdot">.</span></button>
-        <button class="w-mtab" data-sec="test">testing<span class="tdot">.</span></button>
-        <button class="w-mtab" data-sec="save">save<span class="tdot">.</span></button>
+      <div id="w-tabsec" class="w-tabsec">
+        <button class="w-stab" data-sec="glyphs">glyphs<span class="tdot">.</span></button>
+        <button class="w-stab" data-sec="mod">modification<span class="tdot">.</span></button>
+        <button class="w-stab" data-sec="test">testing<span class="tdot">.</span></button>
+        <button class="w-stab" data-sec="save">save<span class="tdot">.</span></button>
       </div>
       <span class="gd-preset-caret w-msel"><select id="w-masterSel" class="gd-presets" title="Active master"></select></span>
     </header>
@@ -129,10 +129,10 @@
         </div>
       </div>
 
-      <!-- ===== testing. — its own page ===== -->
-      <div id="sec-test" class="w-testpage hidden">
-        <div class="w-tester">
-          <div id="t-paper" class="w-paper dark">
+      <!-- ===== testing. — the whole screen is the paper; placed glyphs on the right ===== -->
+      <div id="sec-test" class="w-testpage dark hidden">
+        <div class="w-testmain">
+          <div id="t-paper" class="w-paper">
             <div class="w-paper-top">
               <span class="w-bgdots">
                 <i id="bg-w" class="bgdot light" title="White background"></i>
@@ -143,11 +143,12 @@
             <div id="t-text" class="w-ttext" contenteditable="true" spellcheck="false">Lazy fox jumps over the brown dog.</div>
           </div>
           <div class="w-testctl">
-            <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="54" value="24" /></label>
+            <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="140" value="24" /></label>
             <label>Track<input id="t-track" class="gd-slider wctl" type="range" min="-40" max="120" value="0" /></label>
             <label class="dim">Variable<input id="t-var" class="gd-slider wctl" type="range" min="0" max="100" value="50" disabled /></label>
           </div>
         </div>
+        <div class="w-testright"><div id="testGrid" class="grid"></div></div>
       </div>
 
       <!-- right pane: the construction-grid designer (glyphs.) or the
