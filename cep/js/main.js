@@ -1014,9 +1014,26 @@ function onAutoOne() {
 // ink-left line (LSB) or the red advance line.
 var mxSel = false, mxDrag = null;
 function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
+// the glyph's OWN construction grid as faint reference markup (em grid + items)
+function glyphGridSvg(gd) {
+  var s = '';
+  if (gd.gridOn) {
+    var c = gd.gridCell || 50, mul = gd.gridMul || 1, k, q;
+    function gl(x1, y1, x2, y2, major) {
+      s += '<line x1="' + gdXs(x1) + '" y1="' + gdYs(y1) + '" x2="' + gdXs(x2) + '" y2="' + gdYs(y2) +
+           '" stroke="' + (major ? '#c0271d' : '#cfcfcf') + '" stroke-width="' + (major ? 1.2 : 0.7) + '"/>';
+    }
+    for (k = 0; 500 + k * c <= 1000 || 500 - k * c >= 0; k++) { q = (mul === 2 && k % 2 === 0); if (500 + k * c <= 1000) gl(500 + k * c, 800, 500 + k * c, -200, q); if (k > 0 && 500 - k * c >= 0) gl(500 - k * c, 800, 500 - k * c, -200, q); }
+    for (k = 0; 300 + k * c <= 800 || 300 - k * c >= -200; k++) { q = (mul === 2 && k % 2 === 0); if (300 + k * c <= 800) gl(0, 300 + k * c, 1000, 300 + k * c, q); if (k > 0 && 300 - k * c >= -200) gl(0, 300 - k * c, 1000, 300 - k * c, q); }
+  }
+  (gd.items || []).forEach(function (it) { s += gdItemSvg(it, it.red ? '#c0271d' : '#333333', 1.6, it.type === 'dline', null, false); });
+  return s;
+}
 function mxRedraw(svg) {
   var f = curFont(), g = selGlyph(), M = f.metrics;
   var s = '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
+  // the selected glyph's construction grid, shown faint (25%) behind the metrics
+  if (g) s += '<g opacity="0.25">' + glyphGridSvg(glyphGD(g)) + '</g>';
   function HL(y, col, wd, dash) {
     s += '<line x1="' + gdXs(0) + '" y1="' + gdYs(y) + '" x2="' + gdXs(1000) + '" y2="' + gdYs(y) +
          '" stroke="' + col + '" stroke-width="' + wd + '"' + (dash ? ' stroke-dasharray="6 5"' : '') + '/>';

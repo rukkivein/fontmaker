@@ -264,8 +264,7 @@ function fmAppendArtboard(arg) {
     for (var i = 0; i < doc.layers.length; i++) if (doc.layers[i].name === 'Reference (locked)') { refLayer = doc.layers[i]; break; }
     if (refLayer) {
       refLayer.locked = false;
-      fmDrawGrids(refLayer, grids, M, left, right, bottom);
-      fmGhost(refLayer, cfg.ghost || '', left, right, bottom, M, cfg.unitsPerEm || 1000);
+      fmDrawGrids(refLayer, grids, M, left, right, bottom); // grid is the only ghost
       refLayer.locked = true;
     }
     return '{"ok":true,"index":' + idx + '}';
@@ -283,6 +282,7 @@ function fmDrawContours(layer, contours, left, bottom, M) {
     if (!pts || pts.length < 2) continue;
     var p = layer.pathItems.add();
     p.filled = true; p.stroked = false; p.closed = !!ct.closed;
+    p.fillColor = fmColor(0); // the real shape is always solid black
     for (var i = 0; i < pts.length; i++) {
       var s = pts[i];
       var pp = p.pathPoints.add();
@@ -336,8 +336,9 @@ function fmOpenGlyph(arg) {
       if (L !== refLayer && L !== artLayer) { try { L.locked = false; L.remove(); } catch (eX) {} }
     }
 
+    // The user's construction grid is the ghost reference (drawn faint by
+    // fmDrawGrids) — no Arial ghost letter. The real shape stays solid black.
     fmDrawGrids(refLayer, grids, M, left, right, bottom);
-    fmGhost(refLayer, cfg.ghost || cfg.char || '', left, right, bottom, M, cfg.unitsPerEm || 1000);
     refLayer.locked = true;
 
     if (cfg.contours && cfg.contours.length) fmDrawContours(artLayer, cfg.contours, left, bottom, M);
