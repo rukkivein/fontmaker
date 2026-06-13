@@ -4,6 +4,7 @@
 // Illustrator UXP plugin. Hosts call buildFont() and write the ArrayBuffer
 // using whatever file API they have.
 const opentype = require('opentype.js');
+const ttfWriter = require('./ttfWriter.js');
 
 function contourToCommands(path, contour) {
   const pts = contour.points;
@@ -107,6 +108,14 @@ function addGsub(font, project) {
 function buildFont(project, format, metadata) {
   const upm = project.unitsPerEm || 1000;
   const masterId = pickMaster(project, metadata);
+
+  // glyf-flavored TrueType goes through the dedicated writer (opentype.js only
+  // emits CFF). Note: the TTF path carries no GSUB (ligatures/alternates are
+  // CFF-only here).
+  if (format === 'ttf') {
+    let count = 0; for (const g of project.glyphs) count++;
+    return { buffer: ttfWriter.buildGlyfFont(project, metadata, masterId), glyphCount: count };
+  }
 
   const glyphs = [new opentype.Glyph({ name: '.notdef', unicode: 0, advanceWidth: Math.round(upm * 0.5), path: new opentype.Path() })];
   let count = 0;

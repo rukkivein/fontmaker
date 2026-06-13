@@ -107,6 +107,7 @@
           <input id="altChip" class="w-chip w-chip-in" type="text" maxlength="2" />
           <button id="ligBtn" class="rune-btn outline sm2">+ Ligature</button>
           <input id="ligInput" class="w-chip w-chip-in" type="text" placeholder="fi" maxlength="4" />
+          <button id="accentBtn" class="rune-btn outline sm2" title="Auto-compose accented glyphs (é, č, ñ…) from base letters + drawn marks">+ Accents</button>
         </div>
         <div id="assignWrap" class="w-assign">
           <span id="assignChip" class="w-assignchip"></span>
@@ -119,7 +120,8 @@
         <div class="w-modauto">
           <button id="autoAll" class="rune-btn blue sm2">Auto Fit All</button>
           <button id="autoOne" class="rune-btn outline sm2" disabled>Auto Fit Selected</button>
-          <button id="autoKern" class="rune-btn outline sm2" title="Measure every filled pair optically and bake it into the font's kerning table">Auto Kern</button>
+          <button id="autoKern" class="rune-btn outline sm2" title="Bake optical pair kerning into the font's kern table">Auto Kern</button>
+          <button id="optimizeBtn" class="rune-btn blue sm2" title="Smart pass: class-aware spacing for the whole font + optical kerning">Optimize</button>
         </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>

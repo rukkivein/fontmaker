@@ -12,6 +12,9 @@ var ilbridge = require(ROOT + '/js/ilbridge.js');
 var glyphset = require(ROOT + '/js/glyphset.js');
 var charsets = require(ROOT + '/js/charsets.js');
 var dna = require(ROOT + '/js/dna.js');
+var optimizer = require(ROOT + '/js/optimizer.js');
+var accentCompose = require(ROOT + '/js/accentCompose.js');
+var varCompat = require(ROOT + '/js/varCompat.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
 var opentypeLib = null, paperLib = null; // lazy: heavy libs load on first use
@@ -1053,6 +1056,17 @@ function onAutoAll() {
   renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
   setStatus('Auto-fitted ' + n + ' glyph(s): heights per class, spacing per width.', 'ok');
 }
+// The embedded optimizer ("mini AI"): class-aware sidebearings/advance for the
+// whole font + optical pair kerning, in one pass. Re-spaces consistently.
+function onOptimize() {
+  var f = curFont();
+  if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  var r = optimizer.optimizeAll(f, curMasterId());
+  f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
+  flatCache = {}; kernCache = {};
+  renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
+  setStatus('Optimized: re-spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' optical kern pair(s).', 'ok');
+}
 function onAutoOne() {
   if (selectedSlot < 0) return;
   var f = curFont();
@@ -1270,6 +1284,22 @@ function openGlyph(i) {
   });
 }
 
+// Auto-compose accented glyphs (é = e + acute …) from base letters + drawn
+// marks. Innovation: a multilingual font stops needing every accent drawn by
+// hand once the base + the few marks exist.
+function onComposeAccents() {
+  var f = curFont(), mid = curMasterId();
+  var r = accentCompose.composeAll(f, mid);
+  r.composed.forEach(function (ch) { var g = f.glyphs.find(function (x) { return x.char === ch; }); if (g) syncOpenGlyph(g); });
+  renderGrid(); renderModGrid(); scheduleTester(); autosave();
+  if (!r.composed.length) {
+    var missing = {}; r.skipped.forEach(function (s) { missing[s.reason.split(':')[0]] = 1; });
+    setStatus('Composed 0 — draw the base letters and the mark glyphs (acute, grave, caron…) first.', 'err');
+  } else {
+    setStatus('Composed ' + r.composed.length + ' accented glyph(s)' + (r.skipped.length ? ' (' + r.skipped.length + ' skipped — base or mark not drawn)' : '') + '.', 'ok');
+  }
+}
+
 function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
@@ -1395,7 +1425,8 @@ function onSaveProject() {
 }
 function onExportGo() {
   commitSig();
-  if (!$('exOtf').checked) { setStatus('Pick at least one format to export.', 'err'); return; }
+  var wantOtf = $('exOtf').checked, wantTtf = $('exTtf').checked, wantVar = $('exVar').checked;
+  if (!wantOtf && !wantTtf && !wantVar) { setStatus('Pick at least one format to export.', 'err'); return; }
   var f = curFont();
   evalScript('(function(){var d=Folder.selectDialog("Choose a folder to export into");return d?d.fsName:"";})()').then(function (dir) {
     if (!dir) return;
@@ -1403,16 +1434,21 @@ function onExportGo() {
       var fam = (f.meta.familyName || 'Font');
       var folder = dir + '/' + fam.replace(/[^\w\- ]+/g, '').trim();
       if (!fs.existsSync(folder)) fs.mkdirSync(folder);   // exports land in a folder
-      var n = 0, errs = 0;
+      var n = 0, errs = 0, notes = [];
+      // Variable: align compatible masters then export each as a named style
+      // (a working family). A single-file .ttf with fvar/gvar is the follow-up.
+      if (wantVar && f.masters.length > 1) {
+        varCompat.matchPoints(f);
+        var rep = varCompat.report(f);
+        notes.push('variable: ' + rep.compatible.length + ' glyph(s) interpolation-ready across ' + rep.masters + ' masters' + (rep.ready ? '' : ', ' + rep.incompatible.length + ' need reconciling'));
+        try { fs.writeFileSync(folder + '/' + fam.replace(/\s+/g, '') + '-variable-report.txt', JSON.stringify(rep, null, 2)); } catch (e) {}
+      }
       f.masters.forEach(function (m) {
-        try {
-          // overlaps united + full name table, like a foundry export
-          fs.writeFileSync(folder + '/' + fam.replace(/\s+/g, '') + '-' + m.name.replace(/\s+/g, '') + '.otf',
-            Buffer.from(new Uint8Array(buildCleanOtf(f, m))));
-          n++;
-        } catch (e) { errs++; }
+        var base = folder + '/' + fam.replace(/\s+/g, '') + '-' + m.name.replace(/\s+/g, '');
+        if (wantOtf || wantVar) { try { fs.writeFileSync(base + '.otf', Buffer.from(new Uint8Array(buildCleanOtf(f, m)))); n++; } catch (e) { errs++; } }
+        if (wantTtf) { try { fs.writeFileSync(base + '.ttf', Buffer.from(new Uint8Array(buildCleanTtf(f, m)))); n++; } catch (e) { errs++; } }
       });
-        setStatus('Exported ' + n + ' file(s) → ' + folder + (errs ? ' (' + errs + ' master(s) skipped — no outlines)' : ''), n ? 'ok' : 'err');
+      setStatus('Exported ' + n + ' file(s) → ' + folder + (notes.length ? ' · ' + notes.join(' · ') : '') + (errs ? ' (' + errs + ' skipped)' : ''), n ? 'ok' : 'err');
     } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
   });
 }
@@ -1514,13 +1550,23 @@ function applyNames(buffer, f, styleName) {
   } catch (e) { return buffer; }
 }
 // Build one master's OTF: cleaned outlines + the full name table.
-function buildCleanOtf(f, master) {
-  var cleaned = cleanedProject(f);
-  var built = fontEngine.buildFont(cleaned, 'otf', {
+function buildMeta(f, master) {
+  return {
     familyName: f.meta.familyName || 'Untitled', styleName: master.type || master.name,
     designer: f.meta.designer || '', version: f.meta.version, masterId: master.id,
-  });
+    manufacturer: f.meta.manufacturer || '', copyright: f.meta.copyright || '', license: f.meta.license || '',
+  };
+}
+function buildCleanOtf(f, master) {
+  var cleaned = cleanedProject(f);
+  var built = fontEngine.buildFont(cleaned, 'otf', buildMeta(f, master));
   return applyNames(built.buffer, f, master.type || master.name);
+}
+// TTF: the dedicated glyf writer already stamps the name table, so no applyNames
+// (re-parsing+toArrayBuffer would convert it back to CFF).
+function buildCleanTtf(f, master) {
+  var cleaned = cleanedProject(f);
+  return fontEngine.buildFont(cleaned, 'ttf', buildMeta(f, master)).buffer;
 }
 
 function renderWorkspace() {
@@ -1866,6 +1912,8 @@ function boot() {
   $('autoAll').addEventListener('click', onAutoAll);
   $('autoOne').addEventListener('click', onAutoOne);
   $('autoKern').addEventListener('click', onAutoKern);
+  $('optimizeBtn').addEventListener('click', onOptimize);
+  $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);

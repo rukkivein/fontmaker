@@ -31,6 +31,10 @@ function sync() {
   out.charsets = write('cep/js/charsets.js', read('shared/charsets.js'));
   out.dna = write('cep/js/dna.js', read('shared/dna.js'));
   out.fontEngine = write('cep/js/lib/fontEngine.js', transformFontEngine(read('core/fontEngine.js')));
+  out.ttfWriter = write('cep/js/lib/ttfWriter.js', read('core/ttfWriter.js'));
+  out.accentCompose = write('cep/js/accentCompose.js', read('shared/accentCompose.js'));
+  out.optimizer = write('cep/js/optimizer.js', read('shared/optimizer.js'));
+  out.varCompat = write('cep/js/varCompat.js', read('shared/varCompat.js'));
   out.opentype = write('cep/js/lib/opentype.js', read('node_modules/opentype.js/dist/opentype.js'));
   return out;
 }
