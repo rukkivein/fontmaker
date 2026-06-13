@@ -1120,11 +1120,15 @@ function mxRedraw(svg) {
       var sdy = (mxDrag && mxDrag.mode === 'shape') ? mxDrag.dy : 0;
       s += '<path d="' + gdShapePath(shape, sdx, sdy) + '" fill="#1d1d1d" fill-rule="nonzero" data-shape="1" style="cursor:move"/>';
       var b = gdShapeBounds(shape, sdx, sdy);
-      // the glyph box's LEFT boundary (x=0) — fixed; the ink may cross it for
-      // optical protrusion (negative LSB)
-      var lx = gdXs(0);
-      s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
+      // faint origin reference at x=0 (the glyph box left); the ink may cross it
+      var ox0 = gdXs(0);
+      s += '<line x1="' + ox0 + '" y1="' + gdYs(800) + '" x2="' + ox0 + '" y2="' + gdYs(-200) + '" stroke="#cdcdcd" stroke-width="1" stroke-dasharray="3 4"/>';
       if (b) {
+        // the BLUE line sits on the ink's left edge (the LSB) and is DRAGGABLE:
+        // dragging it slides the glyph horizontally (advance fixed, RSB follows)
+        var lx = gdXs(b.minX);
+        s += '<line x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#1473e6" stroke-width="2.2"/>';
+        s += '<line data-mx="lsb" x1="' + lx + '" y1="' + gdYs(800) + '" x2="' + lx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
         if (mxSel) {
           var x1 = gdXs(b.minX), x2 = gdXs(b.maxX), yT = gdYs(b.maxY), yB = gdYs(b.minY);
           var cxm = (x1 + x2) / 2, cym = (yT + yB) / 2;
@@ -1316,7 +1320,11 @@ function updateAssign() {
   }
   $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
   $('gotoBtn').disabled = !g;
-  $('gotoChip').innerHTML = g ? glyphLabelHtml(g) : '';
+  // the Go-to chip shows the glyph's drawn SHAPE (like glyphs.), falling back to
+  // its letter only when the slot is still empty
+  var gchip = $('gotoChip');
+  if (g && isFilled(g)) gchip.innerHTML = glyphThumb(g) || glyphLabelHtml(g);
+  else gchip.innerHTML = g ? glyphLabelHtml(g) : '';
   $('autoOne').disabled = !(g && isFilled(g));
 }
 
@@ -1801,8 +1809,8 @@ function renderTesterText() {
   setCaret(el, off);
 }
 function setTesterBg(darkBg) {
-  $('sec-test').classList.toggle('dark', darkBg);
-  $('sec-test').classList.toggle('light', !darkBg);
+  var p = $('t-paper');
+  if (p) { p.classList.toggle('dark', darkBg); p.classList.toggle('light', !darkBg); }
   $('bg-b').classList.toggle('on', darkBg);
   $('bg-w').classList.toggle('on', !darkBg);
 }

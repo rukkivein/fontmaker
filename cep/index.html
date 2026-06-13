@@ -131,23 +131,22 @@
         </div>
       </div>
 
-      <!-- ===== testing. — the whole screen is the paper; placed glyphs on the right ===== -->
-      <div id="sec-test" class="w-testpage dark hidden">
-        <div class="w-testmain">
-          <div id="t-paper" class="w-paper">
-            <div class="w-paper-top">
-              <span class="w-bgdots">
-                <i id="bg-w" class="bgdot light" title="White background"></i>
-                <i id="bg-b" class="bgdot darkdot on" title="Black background"></i>
-              </span>
-              <select id="t-kern" class="w-kern"><option value="optical">Optical</option><option value="metric">Metric</option></select>
-            </div>
+      <!-- ===== testing. — same layout as modification.: controls on top, the
+           writing paper where the glyph grid would be; metrics editor on the right ===== -->
+      <div id="sec-test" class="w-left hidden">
+        <div class="w-modauto w-testctl">
+          <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="140" value="40" /></label>
+          <label>Track<input id="t-track" class="gd-slider wctl" type="range" min="-40" max="120" value="0" /></label>
+          <label>Optical<select id="t-kern" class="w-kern"><option value="optical">Optical</option><option value="metric">Metric</option></select></label>
+          <span class="w-bgdots">
+            <i id="bg-w" class="bgdot light" title="White background"></i>
+            <i id="bg-b" class="bgdot darkdot on" title="Black background"></i>
+          </span>
+        </div>
+        <div class="ul ul-sm ul-o3"></div>
+        <div class="w-testwrap">
+          <div id="t-paper" class="w-paper dark">
             <div id="t-text" class="w-ttext" contenteditable="true" spellcheck="false">Lazy fox jumps over the brown dog.</div>
-          </div>
-          <div class="w-testctl">
-            <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="140" value="24" /></label>
-            <label>Track<input id="t-track" class="gd-slider wctl" type="range" min="-40" max="120" value="0" /></label>
-            <label class="dim">Variable<input id="t-var" class="gd-slider wctl" type="range" min="0" max="100" value="50" disabled /></label>
           </div>
         </div>
       </div>
