@@ -14,6 +14,27 @@ var charsets = require(ROOT + '/js/charsets.js');
 var dna = require(ROOT + '/js/dna.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
+var opentypeLib = null, paperLib = null; // lazy: heavy libs load on first use
+function getOpentype() {
+  if (!opentypeLib) { try { opentypeLib = require(ROOT + '/js/lib/opentype.js'); } catch (e) {} }
+  return opentypeLib;
+}
+function getPaper() {
+  if (!paperLib) {
+    try {
+      // paper's UMD must take the BROWSER branch (its node branch wants jsdom),
+      // so evaluate it with module/exports hidden and window as self.
+      var src = fs.readFileSync(ROOT + '/js/lib/paper-core.min.js', 'utf8');
+      var nl = String.fromCharCode(10); // real newline: the file may end in a // comment
+      var load = new Function('module', 'exports', 'define', 'self', 'window',
+        src + nl + 'return (typeof paper !== "undefined" ? paper : self.paper);');
+      var paper = load(undefined, undefined, undefined, window, window);
+      paperLib = new paper.PaperScope();
+      paperLib.setup(new paperLib.Size(1000, 1000));
+    } catch (e) { paperLib = null; }
+  }
+  return paperLib;
+}
 
 var fonts = [];          // open fonts (each is a single-master project)
 var activeFont = -1;
@@ -1054,12 +1075,9 @@ function onExportGo() {
       var n = 0, errs = 0;
       f.masters.forEach(function (m) {
         try {
-          var built = fontEngine.buildFont(f, 'otf', {
-            familyName: fam, styleName: m.type || m.name,
-            designer: f.meta.designer || '', version: f.meta.version, masterId: m.id,
-          });
+          // overlaps united + full name table, like a foundry export
           fs.writeFileSync(folder + '/' + fam.replace(/\s+/g, '') + '-' + m.name.replace(/\s+/g, '') + '.otf',
-            Buffer.from(new Uint8Array(built.buffer)));
+            Buffer.from(new Uint8Array(buildCleanOtf(f, m))));
           n++;
         } catch (e) { errs++; }
       });
@@ -1067,6 +1085,164 @@ function onExportGo() {
       setStatus('Exported ' + n + ' file(s) → ' + folder + (errs ? ' (' + errs + ' master(s) skipped — no outlines)' : ''), n ? 'ok' : 'err');
     } catch (e) { setStatus('Export failed: ' + (e && e.message ? e.message : e), 'err'); }
   });
+}
+
+// ===== outline cleanup — unite overlapping contours before any font build
+// (the same paper.js trick Fontself uses, so stacked shapes never punch holes)
+function contoursToPaper(P, contours) {
+  var kids = [];
+  contours.forEach(function (c) {
+    if (!c.closed || c.points.length < 3) return;
+    var segs = c.points.map(function (pt) {
+      var hIn = pt.handleIn ? new P.Point(pt.handleIn.x - pt.x, pt.handleIn.y - pt.y) : null;
+      var hOut = pt.handleOut ? new P.Point(pt.handleOut.x - pt.x, pt.handleOut.y - pt.y) : null;
+      return new P.Segment(new P.Point(pt.x, pt.y), hIn, hOut);
+    });
+    kids.push(new P.Path({ segments: segs, closed: true, insert: false }));
+  });
+  return kids;
+}
+function paperToContours(item) {
+  var paths = item.children && item.children.length ? item.children : [item];
+  var out = [];
+  paths.forEach(function (pp) {
+    if (!pp.segments || pp.segments.length < 2) return;
+    out.push({
+      closed: true,
+      points: pp.segments.map(function (sg) {
+        return {
+          x: Math.round(sg.point.x * 100) / 100, y: Math.round(sg.point.y * 100) / 100, type: 'corner',
+          handleIn: sg.handleIn.isZero() ? null : { x: sg.point.x + sg.handleIn.x, y: sg.point.y + sg.handleIn.y },
+          handleOut: sg.handleOut.isZero() ? null : { x: sg.point.x + sg.handleOut.x, y: sg.point.y + sg.handleOut.y },
+        };
+      }),
+    });
+  });
+  return out;
+}
+function uniteContours(contours) {
+  var P = getPaper();
+  if (!P || !contours || contours.length < 2) return contours;
+  try {
+    var kids = contoursToPaper(P, contours);
+    if (kids.length < 2) return contours;
+    var acc = kids[0];
+    for (var i = 1; i < kids.length; i++) {
+      var nx = kids[i];
+      if (acc.intersects(nx) || acc.contains(nx.position) || nx.contains(acc.position)) {
+        var before = acc;
+        try { acc = acc.unite(nx, { insert: false }); } catch (e) { acc = before; }
+        if (!acc) acc = before;
+      } else {
+        var grp = new P.CompoundPath({ insert: false });
+        grp.addChildren(acc.children && acc.children.length ? acc.removeChildren() : [acc]);
+        grp.addChild(nx);
+        acc = grp;
+      }
+    }
+    var res = paperToContours(acc);
+    return res.length ? res : contours;
+  } catch (e) { return contours; }
+}
+// A deep copy of the project with every filled layer's overlaps united.
+function cleanedProject(f) {
+  var copy = JSON.parse(serializeProject(f));
+  copy.glyphs.forEach(function (g) {
+    Object.keys(g.layers).forEach(function (mid) {
+      var l = g.layers[mid];
+      if (l && l.contours && l.contours.length > 1) l.contours = uniteContours(l.contours);
+    });
+  });
+  return copy;
+}
+
+// ===== full OpenType name table (Fontself-style), applied by re-parsing the
+// built OTF — core/fontEngine stays untouched.
+function slugifyPS(t) { return (t || 'Font').replace(/[^A-Za-z0-9]+/g, ''); }
+function applyNames(buffer, f, styleName) {
+  var ot = getOpentype();
+  if (!ot) return buffer;
+  try {
+    var font = ot.parse(buffer);
+    var m = f.meta, fam = m.familyName || 'Untitled';
+    var style = styleName || m.styleName || 'Regular';
+    var full = style.toLowerCase() === 'regular' ? fam : fam + ' ' + style;
+    var ps = slugifyPS(fam + '-' + style);
+    var ver = (m.version || '1.000');
+    function set(k, v) { if (v) font.names[k] = { en: String(v) }; }
+    set('fontFamily', fam); set('fontSubfamily', style);
+    set('preferredFamily', fam); set('preferredSubfamily', style);
+    set('fullName', full); set('postScriptName', ps);
+    set('uniqueID', ver + ';' + ps);
+    set('version', 'Version ' + ver + ';RuneType Glyphmaker 1.0');
+    set('designer', m.designer); set('designerURL', m.designerURL);
+    set('manufacturer', m.manufacturer); set('manufacturerURL', m.vendorURL);
+    set('license', m.license); set('licenseURL', m.licenseURL);
+    set('description', m.description); set('trademark', m.trademark);
+    set('copyright', m.copyright); set('sampleText', m.sampleText);
+    return font.toArrayBuffer();
+  } catch (e) { return buffer; }
+}
+// Build one master's OTF: cleaned outlines + the full name table.
+function buildCleanOtf(f, master) {
+  var cleaned = cleanedProject(f);
+  var built = fontEngine.buildFont(cleaned, 'otf', {
+    familyName: f.meta.familyName || 'Untitled', styleName: master.type || master.name,
+    designer: f.meta.designer || '', version: f.meta.version, masterId: master.id,
+  });
+  return applyNames(built.buffer, f, master.type || master.name);
+}
+
+// ===== install straight into Illustrator (the Fontself trick): an OTF written
+// to <UserData>/Adobe/Fonts is picked up live, no admin needed.
+var installedPaths = {};
+function adobeFontsDir() { return cs.getSystemPath(SystemPath.USER_DATA) + '/Adobe/Fonts'; }
+function onInstallFont() {
+  var f = curFont(), m = f.masters[activeMaster];
+  if (!f.glyphs.some(isFilled)) { setStatus('Nothing to install yet — draw some glyphs first.', 'err'); return; }
+  try {
+    var dir = adobeFontsDir();
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+    var prev = installedPaths[activeFont];
+    if (prev && fs.existsSync(prev)) { try { fs.unlinkSync(prev); } catch (e0) {} }
+    var fam = slugifyPS(f.meta.familyName || 'Untitled');
+    var path = dir + '/' + fam + '-' + slugifyPS(m.name) + '.otf';
+    fs.writeFileSync(path, Buffer.from(new Uint8Array(buildCleanOtf(f, m))));
+    installedPaths[activeFont] = path;
+    $('saveModal').classList.add('hidden');
+    setStatus('Installed → usable in Illustrator\'s font list right now (' + path + ')', 'ok');
+  } catch (e) { setStatus('Install failed: ' + (e && e.message ? e.message : e), 'err'); }
+}
+function onUninstallFont() {
+  var prev = installedPaths[activeFont];
+  if (!prev) { setStatus('Nothing installed from this session.', 'err'); return; }
+  try {
+    if (fs.existsSync(prev)) fs.unlinkSync(prev);
+    delete installedPaths[activeFont];
+    setStatus('Uninstalled from Illustrator.', 'ok');
+  } catch (e) { setStatus('Uninstall failed: ' + e.message, 'err'); }
+}
+
+// ===== auto metrics — percentile of the drawn glyphs' extents (outlier-proof)
+function percentileOf(arr, q) {
+  if (!arr.length) return 0;
+  var a = arr.slice().sort(function (x, y) { return x - y; });
+  return a[Math.min(a.length - 1, Math.floor(q * a.length))];
+}
+function onAutoMetrics() {
+  var f = curFont();
+  var tops = [], bots = [];
+  f.glyphs.forEach(function (g) {
+    if (!isFilled(g)) return;
+    var b = glyphset.contoursBounds(g.layers[curMasterId()].contours);
+    if (b) { tops.push(b.maxY); bots.push(Math.abs(Math.min(0, b.minY))); }
+  });
+  if (!tops.length) { setStatus('Draw some glyphs first — metrics are measured from them.', 'err'); return; }
+  var asc = Math.round(Math.max(percentileOf(tops, 0.9), 0.5 * f.unitsPerEm));
+  var desc = -Math.round(Math.max(percentileOf(bots, 0.9), 0.2 * f.unitsPerEm));
+  f.metrics.ascender = asc; f.metrics.descender = desc;
+  refreshTester(); renderWorkDesigner(); autosave();
+  setStatus('Metrics fitted to your glyphs: ascender ' + asc + ', descender ' + desc + '.', 'ok');
 }
 
 function renderWorkspace() {
@@ -1097,11 +1273,19 @@ function refreshTester() {
   var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
   try {
-    var fam = 'FMTest_' + (++faceSeq);
-    var built = fontEngine.buildFont(f, 'otf', { familyName: fam, styleName: 'Regular', masterId: curMasterId() });
-    var b64 = Buffer.from(new Uint8Array(built.buffer)).toString('base64');
-    styleEl.textContent = '@font-face{font-family:"' + fam + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
-    $('t-text').style.fontFamily = '"' + fam + '"';
+    var built = fontEngine.buildFont(f, 'otf', { familyName: 'RTLive', styleName: 'Regular', masterId: curMasterId() });
+    if (window.FontFace && document.fonts) {
+      var face = new FontFace('RTLive_' + (++faceSeq), built.buffer);
+      document.fonts.add(face);
+      if (!window.__rtFaces) window.__rtFaces = [];
+      window.__rtFaces.push(face);
+      while (window.__rtFaces.length > 2) document.fonts['delete'](window.__rtFaces.shift());
+      $('t-text').style.fontFamily = '"RTLive_' + faceSeq + '"';
+    } else {
+      var b64 = Buffer.from(new Uint8Array(built.buffer)).toString('base64');
+      styleEl.textContent = '@font-face{font-family:"RTLive_' + (++faceSeq) + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
+      $('t-text').style.fontFamily = '"RTLive_' + faceSeq + '"';
+    }
   } catch (e) { /* tester is best-effort */ }
   applyTesterCtl();
 }
@@ -1177,6 +1361,9 @@ function boot() {
   $('saveCancel').addEventListener('click', function () { $('saveModal').classList.add('hidden'); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
+  $('installBtn').addEventListener('click', onInstallFont);
+  $('uninstallBtn').addEventListener('click', onUninstallFont);
+  $('autoMetrics').addEventListener('click', onAutoMetrics);
   $('bg-b').addEventListener('click', function () { setTesterBg(true); });
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
