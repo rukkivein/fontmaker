@@ -273,23 +273,92 @@ function fmAppendArtboard(arg) {
 
 // Draw font-unit contours back into Illustrator (inverse of fmReadActive's map):
 // docX = left + fx*scale, docY = baseline + fy*scale (Y-up, no flip).
+// signed area of a contour's anchor polygon (>0 = counter-clockwise, y-up)
+function fmAnchorArea(pts) {
+  var a = 0;
+  for (var i = 0; i < pts.length; i++) { var p = pts[i], q = pts[(i + 1) % pts.length]; a += p.x * q.y - q.x * p.y; }
+  return a / 2;
+}
+// is (x,y) inside the anchor polygon (ray cast)?
+function fmPtInPoly(x, y, pts) {
+  var inside = false;
+  for (var i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    var xi = pts[i].x, yi = pts[i].y, xj = pts[j].x, yj = pts[j].y;
+    if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi)) inside = !inside;
+  }
+  return inside;
+}
+// reverse a contour's direction (order + swap in/out handles)
+function fmReverseContour(ct) {
+  var pts = ct.points, out = [];
+  for (var i = pts.length - 1; i >= 0; i--) {
+    var s = pts[i];
+    out.push({ x: s.x, y: s.y, type: s.type,
+      handleIn: s.handleOut ? { x: s.handleOut.x, y: s.handleOut.y } : null,
+      handleOut: s.handleIn ? { x: s.handleIn.x, y: s.handleIn.y } : null });
+  }
+  ct.points = out;
+}
+// Make windings alternate by nesting depth: outer contours one way, the counters
+// nested inside them the other way — so the compound path's non-zero fill turns
+// inner contours (O, D, B, A, e, o…) into holes instead of solid fills.
+function fmFixWindings(contours) {
+  var n = contours.length; if (n < 2) return;
+  for (var k = 0; k < n; k++) {
+    var pk = contours[k].points; if (!pk || pk.length < 3) continue;
+    var p0 = pk[0], depth = 0;
+    for (var j = 0; j < n; j++) {
+      if (j === k) continue;
+      var pj = contours[j].points;
+      if (pj && pj.length >= 3 && fmPtInPoly(p0.x, p0.y, pj)) depth++;
+    }
+    var wantCCW = (depth % 2 === 0), isCCW = fmAnchorArea(pk) > 0;
+    if (wantCCW !== isCCW) fmReverseContour(contours[k]);
+  }
+}
+function fmFillPath(p, pts, mx, my) {
+  for (var i = 0; i < pts.length; i++) {
+    var s = pts[i];
+    var pp = p.pathPoints.add();
+    pp.anchor = [mx(s.x), my(s.y)];
+    pp.leftDirection = s.handleIn ? [mx(s.handleIn.x), my(s.handleIn.y)] : pp.anchor;
+    pp.rightDirection = s.handleOut ? [mx(s.handleOut.x), my(s.handleOut.y)] : pp.anchor;
+    pp.pointType = (s.type === 'smooth') ? PointType.SMOOTH : PointType.CORNER;
+  }
+}
 function fmDrawContours(layer, contours, left, bottom, M) {
   var baseY = bottom + (0 - M.descender) * FM_SCALE;
   function mx(x) { return left + x * FM_SCALE; }
   function my(y) { return baseY + y * FM_SCALE; }
-  for (var c = 0; c < contours.length; c++) {
-    var ct = contours[c], pts = ct.points;
-    if (!pts || pts.length < 2) continue;
+  var real = [];
+  for (var c = 0; c < contours.length; c++) { if (contours[c].points && contours[c].points.length >= 2) real.push(contours[c]); }
+  if (!real.length) return;
+  // single contour: a plain filled path (no holes possible)
+  if (real.length === 1) {
     var p = layer.pathItems.add();
-    p.filled = true; p.stroked = false; p.closed = !!ct.closed;
-    p.fillColor = fmColor(0); // the real shape is always solid black
-    for (var i = 0; i < pts.length; i++) {
-      var s = pts[i];
-      var pp = p.pathPoints.add();
-      pp.anchor = [mx(s.x), my(s.y)];
-      pp.leftDirection = s.handleIn ? [mx(s.handleIn.x), my(s.handleIn.y)] : pp.anchor;
-      pp.rightDirection = s.handleOut ? [mx(s.handleOut.x), my(s.handleOut.y)] : pp.anchor;
-      pp.pointType = (s.type === 'smooth') ? PointType.SMOOTH : PointType.CORNER;
+    p.filled = true; p.stroked = false; p.closed = !!real[0].closed; p.fillColor = fmColor(0);
+    fmFillPath(p, real[0].points, mx, my);
+    return;
+  }
+  // multiple contours: alternate windings by nesting depth, then draw ONE compound
+  // path so inner contours read as holes (O = ring, D = hollow) — not solid fills
+  fmFixWindings(real);
+  var comp = null;
+  try {
+    comp = layer.compoundPathItems.add();
+    for (var k = 0; k < real.length; k++) {
+      var sp = comp.pathItems.add();
+      sp.filled = true; sp.stroked = false; sp.closed = !!real[k].closed; sp.fillColor = fmColor(0);
+      fmFillPath(sp, real[k].points, mx, my);
+    }
+  } catch (e) { comp = null; }
+  // fallback (older AI / API hiccup): separate filled paths, never error out
+  if (!comp || comp.pathItems.length !== real.length) {
+    try { if (comp) comp.remove(); } catch (e2) {}
+    for (var k2 = 0; k2 < real.length; k2++) {
+      var pf = layer.pathItems.add();
+      pf.filled = true; pf.stroked = false; pf.closed = !!real[k2].closed; pf.fillColor = fmColor(0);
+      fmFillPath(pf, real[k2].points, mx, my);
     }
   }
 }
