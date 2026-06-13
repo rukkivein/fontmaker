@@ -517,6 +517,8 @@ button:disabled { opacity: 0.4; cursor: default; }
   width: 100%; flex: 1 1 auto; min-height: 0; overflow-y: auto; white-space: normal;
   outline: none; color: inherit; font-size: 40px; line-height: 1.5; padding: 2px 0;
 }
+.w-ttext .tletter { cursor: pointer; }
+.w-ttext .tsel { background: rgba(20,115,230,0.30); border-radius: 4px; box-shadow: 0 0 0 1px rgba(20,115,230,0.55); }
 /* the writing area's scrollbar follows the paper: dark on black, light on white */
 .w-paper.dark .w-ttext::-webkit-scrollbar { width: 14px; }
 .w-paper.dark .w-ttext::-webkit-scrollbar-track { background: transparent; }

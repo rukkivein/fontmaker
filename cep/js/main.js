@@ -1081,7 +1081,7 @@ function onAutoOne() {
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
 // ink-left line (LSB) or the red advance line.
-var mxSel = false, mxDrag = null;
+var mxSel = false, mxDrag = null, mxView = { x: 0, y: 0, s: 1 };
 function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
 // The blue LSB line can sit off the storage origin (g.lsbLineX). Fold that offset
 // into the outline so the built font's pen origin lands on the blue line:
@@ -1113,7 +1113,11 @@ function glyphGridSvg(gd) {
 }
 function mxRedraw(svg) {
   var f = curFont(), g = selGlyph(), M = f.metrics;
+  var v = mxView;
   var s = '<rect x="0" y="0" width="' + GD_W + '" height="' + GD_H + '" rx="4" fill="#ffffff"/>';
+  // everything below pans/zooms with the view, so lines/shapes dragged off the
+  // canvas can always be brought back (scroll = zoom, drag empty = pan, dbl-click = reset)
+  s += '<g transform="translate(' + v.x + ' ' + v.y + ') scale(' + v.s + ')">';
   // the selected glyph's construction grid, shown faint (25%) behind the metrics
   if (g) s += '<g opacity="0.25">' + glyphGridSvg(glyphGD(g)) + '</g>';
   function HL(y, col, wd, dash) {
@@ -1169,6 +1173,7 @@ function mxRedraw(svg) {
     s += '<line data-mx="adv" x1="' + rx + '" y1="' + gdYs(800) + '" x2="' + rx + '" y2="' + gdYs(-200) + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
     s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
   }
+  s += '</g>';
   svg.innerHTML = s;
 }
 function mxCommit(g, contours, adv) {
@@ -1186,6 +1191,7 @@ function renderMetricsEditor() {
     '</div></div>';
   box.appendChild(wrap);
   var svg = wrap.querySelector('.gd-canvas');
+  mxView.x = 0; mxView.y = 0; mxView.s = 1;   // fresh framing whenever the glyph/section changes
   function fit() {
     var sz = paneCanvasSize();
     svg.style.width = sz.w + 'px';
@@ -1194,8 +1200,23 @@ function renderMetricsEditor() {
   function pointOf(ev) {
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
     var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
-    return { fx: (pp.x - GD_PX) / GD_SX, fy: 800 - (pp.y - GD_PY) / GD_SY };
+    var v = mxView;
+    var px = (pp.x - v.x) / v.s, py = (pp.y - v.y) / v.s;
+    return { fx: (px - GD_PX) / GD_SX, fy: 800 - (py - GD_PY) / GD_SY, sx: pp.x, sy: pp.y };
   }
+  // scroll to zoom toward the cursor
+  wrap.addEventListener('wheel', function (ev) {
+    ev.preventDefault();
+    var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
+    var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
+    var ns = Math.max(0.4, Math.min(6, mxView.s * (ev.deltaY > 0 ? 0.9 : 1.1)));
+    mxView.x = pp.x - (pp.x - mxView.x) * (ns / mxView.s);
+    mxView.y = pp.y - (pp.y - mxView.y) * (ns / mxView.s);
+    mxView.s = ns;
+    mxRedraw(svg);
+  }, { passive: false });
+  // double-click empty space to recenter/reset the view
+  svg.addEventListener('dblclick', function () { mxView.x = 0; mxView.y = 0; mxView.s = 1; mxRedraw(svg); });
   svg.addEventListener('mousedown', function (ev) {
     ev.preventDefault();
     var g = selGlyph(); if (!g) return;
@@ -1219,11 +1240,20 @@ function renderMetricsEditor() {
     }
     var sh = ev.target.closest ? ev.target.closest('[data-shape]') : null;
     if (sh && cs2) { mxSel = true; mxDrag = { mode: 'shape', sx: pq.fx, sy: pq.fy, dx: 0, dy: 0 }; mxRedraw(svg); return; }
-    mxSel = false; mxRedraw(svg);
+    // empty space: deselect and PAN the canvas (drag content back into view)
+    mxSel = false;
+    mxDrag = { mode: 'pan', px: pq.sx, py: pq.sy, vx: mxView.x, vy: mxView.y };
+    mxRedraw(svg);
   });
   function onMove(ev) {
     if (!mxDrag) return;
     var pq = pointOf(ev);
+    if (mxDrag.mode === 'pan') {
+      mxView.x = mxDrag.vx + (pq.sx - mxDrag.px);
+      mxView.y = mxDrag.vy + (pq.sy - mxDrag.py);
+      mxRedraw(svg);
+      return;
+    }
     if (mxDrag.mode === 'shape') {
       mxDrag.dx = Math.round(pq.fx - mxDrag.sx);
       mxDrag.dy = Math.round(pq.fy - mxDrag.sy);
@@ -1842,14 +1872,20 @@ function renderTesterText() {
   var off = caretOffset(el);
   var html = '';
   for (var i = 0; i < text.length; i++) {
-    var ch = text[i], kernPx = 0;
+    var ch = text[i], kernPx = 0, gi = -1, gL = null;
+    if (f) {
+      for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; if (isFilled(gL)) gi = gx; break; } }
+    }
     if (f && i < text.length - 1) {
-      var gL = null, gR = null;
-      f.glyphs.forEach(function (g) { if (g.char === ch) gL = g; if (g.char === text[i + 1]) gR = g; });
+      var gR = null;
+      for (var rx = 0; rx < f.glyphs.length; rx++) { if (f.glyphs[rx].char === text[i + 1]) { gR = f.glyphs[rx]; break; } }
       var k = pairKern(f, gL, gR, mode);
       kernPx = k / f.unitsPerEm * fsPx;
     }
-    html += '<span style="margin-right:' + (trackPx + kernPx).toFixed(2) + 'px">' +
+    // a drawn letter is clickable: it selects that glyph into the metrics editor
+    // (right pane) so its spacing/kerning can be tuned and seen live in the word
+    var attr = gi >= 0 ? (' data-gi="' + gi + '" class="tletter' + (gi === selectedSlot ? ' tsel' : '') + '"') : '';
+    html += '<span' + attr + ' style="margin-right:' + (trackPx + kernPx).toFixed(2) + 'px">' +
             (ch === ' ' ? '&nbsp;' : ch.replace(/&/g, '&amp;').replace(/</g, '&lt;')) + '</span>';
   }
   el.innerHTML = html || '';
@@ -1978,6 +2014,15 @@ function boot() {
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
   $('t-kern').addEventListener('change', applyTesterCtl);
   $('t-text').addEventListener('input', function () { renderTesterText(); });
+  // click a drawn letter in the tester → select it in the metrics editor so its
+  // spacing/kerning can be tuned (the word updates live as you drag the lines)
+  $('t-text').addEventListener('click', function (ev) {
+    var sp = ev.target && ev.target.closest ? ev.target.closest('[data-gi]') : null;
+    if (!sp) return;
+    selectedSlot = +sp.getAttribute('data-gi');
+    renderRight();
+    renderTesterText();
+  });
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
