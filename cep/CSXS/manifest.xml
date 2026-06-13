@@ -37,9 +37,9 @@
           <Type>Panel</Type>
           <Menu>RuneType™ Glyphmaker</Menu>
           <Geometry>
-            <Size><Height>760</Height><Width>660</Width></Size>
+            <Size><Height>820</Height><Width>1040</Width></Size>
             <MinSize><Height>440</Height><Width>400</Width></MinSize>
-            <MaxSize><Height>2400</Height><Width>1100</Width></MaxSize>
+            <MaxSize><Height>2400</Height><Width>1600</Width></MaxSize>
           </Geometry>
         </UI>
       </DispatchInfo>

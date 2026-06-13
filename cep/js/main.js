@@ -248,6 +248,15 @@ function gdItemSvg(it, color, width, dash, idx, hit) {
   return '';
 }
 function gdSelected(gd, i) { return gd.selSet && gd.selSet.indexOf(i) >= 0; }
+// the white page is sized from the right PANE (constant across sections) minus
+// a fixed reserve, so it stays the SAME size on glyphs./modification./testing.
+function paneCanvasSize() {
+  var pane = document.getElementById('w-rightPane');
+  var paneH = (pane ? pane.clientHeight : 640) - 80;   // fixed toolbar/padding reserve
+  var paneW = (pane ? pane.clientWidth : 320) - 20;
+  var h = Math.max(160, Math.min(paneH, paneW * GD_H / GD_W));
+  return { w: Math.round(h * GD_W / GD_H), h: Math.round(h) };
+}
 function gdView(gd) { if (!gd._view) gd._view = { x: 0, y: 0, s: 1 }; return gd._view; }
 function gdShapePath(contours, dx, dy) {
   // glyph contours (font units, y-up) -> designer-space path string
@@ -439,13 +448,9 @@ function renderGridDesigner(box, gd, onChange) {
   // size the A4 to FIT both the available height AND width (reserving room for
   // the right ruler + gaps) — responsive, never scrolls, rulers always visible
   function fit() {
-    var mid = wrap.querySelector('.gd-mid');
-    var availH = Math.max(120, mid.clientHeight - 2);
-    var availW = Math.max(120, mid.clientWidth - 2);
-    var h = Math.min(availH, availW * GD_H / GD_W);
-    var w = h * GD_W / GD_H;
-    svg.style.width = Math.round(w) + 'px';
-    svg.style.height = Math.round(h) + 'px';
+    var sz = paneCanvasSize();
+    svg.style.width = sz.w + 'px';
+    svg.style.height = sz.h + 'px';
   }
   window.addEventListener('resize', function () { fit(); });
   function sync() {
@@ -1096,11 +1101,9 @@ function renderMetricsEditor() {
   box.appendChild(wrap);
   var svg = wrap.querySelector('.gd-canvas');
   function fit() {
-    var mid = wrap.querySelector('.gd-mid');
-    var availH = Math.max(120, mid.clientHeight - 2), availW = Math.max(120, mid.clientWidth - 2);
-    var h = Math.min(availH, availW * GD_H / GD_W);
-    svg.style.width = Math.round(h * GD_W / GD_H) + 'px';
-    svg.style.height = Math.round(h) + 'px';
+    var sz = paneCanvasSize();
+    svg.style.width = sz.w + 'px';
+    svg.style.height = sz.h + 'px';
   }
   function pointOf(ev) {
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
