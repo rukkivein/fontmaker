@@ -1233,7 +1233,7 @@ function onAutoOne() {
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
 // ink-left line (LSB) or the red advance line.
-var mxSel = false, mxDrag = null, mxView = defaultView(), mxHand = false;
+var mxSel = false, mxDrag = null, mxView = defaultView(), mxHandMode = 'off'; // 'off' | 'pan' | 'lock'
 function shiftContoursXY(contours, dx, dy) { return transformContours(contours, 1, dx, dy); }
 // The blue LSB line can sit off the storage origin (g.lsbLineX). Fold that offset
 // into the outline so the built font's pen origin lands on the blue line:
@@ -1344,20 +1344,27 @@ function renderMetricsEditor() {
   box.innerHTML = '';
   var wrap = document.createElement('div'); wrap.className = 'gd-wrap';
   wrap.innerHTML = '<div class="gd-mid"><div class="gd-stage">' +
-    '<button class="mx-hand" type="button" title="Pan &amp; zoom — drag to move, scroll to zoom. Turn off to recenter."><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7-4l-2.5-4a2 2 0 0 1 3.5-2L8 14"/></svg></button>' +
+    '<button class="mx-hand" type="button" title="Freeform: click → pan/zoom (blue) · click → lock the view in place (red) · click → recenter"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0M14 10V4a2 2 0 0 0-4 0v2M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2a8 8 0 0 1-7-4l-2.5-4a2 2 0 0 1 3.5-2L8 14"/></svg></button>' +
     '<svg class="gd-canvas" viewBox="0 0 ' + GD_W + ' ' + GD_H + '" preserveAspectRatio="xMidYMid meet"></svg>' +
     '</div></div>';
   box.appendChild(wrap);
   var svg = wrap.querySelector('.gd-canvas');
-  mxHand = false;                  // fresh editing mode whenever the glyph/section changes
+  mxHandMode = 'off';              // fresh editing mode whenever the glyph/section changes
   mxView = defaultView();          // ...and 30%-zoomed-out framing so all is visible
   var handBtn = wrap.querySelector('.mx-hand');
-  function setHand(on) {
-    mxHand = on; handBtn.classList.toggle('on', on);
-    svg.style.cursor = on ? 'grab' : 'default';
-    if (!on) { mxView = defaultView(); mxRedraw(svg); }   // turning the hand off recenters
+  // 3-state freeform tool: off (edit, default view) → BLUE pan/zoom (freeform) →
+  // RED locked (view frozen where you left it, editing re-enabled) → off (recenter)
+  function setHandMode(mode) {
+    mxHandMode = mode;
+    handBtn.classList.toggle('pan', mode === 'pan');
+    handBtn.classList.toggle('lock', mode === 'lock');
+    svg.style.cursor = mode === 'pan' ? 'grab' : 'default';
+    if (mode === 'off') mxView = defaultView();   // returning to off recenters
+    mxRedraw(svg);
   }
-  handBtn.addEventListener('click', function () { setHand(!mxHand); });
+  handBtn.addEventListener('click', function () {
+    setHandMode(mxHandMode === 'off' ? 'pan' : (mxHandMode === 'pan' ? 'lock' : 'off'));
+  });
   function fit() {
     var sz = paneCanvasSize();
     svg.style.width = sz.w + 'px';
@@ -1370,9 +1377,9 @@ function renderMetricsEditor() {
     var px = (pp.x - v.x) / v.s, py = (pp.y - v.y) / v.s;
     return { fx: (px - GD_PX) / GD_SX, fy: 800 - (py - GD_PY) / GD_SY, sx: pp.x, sy: pp.y };
   }
-  // scroll to zoom toward the cursor — only while the hand tool is active
+  // scroll to zoom toward the cursor — only in freeform (blue) mode
   wrap.addEventListener('wheel', function (ev) {
-    if (!mxHand) return;
+    if (mxHandMode !== 'pan') return;
     ev.preventDefault();
     var pt = svg.createSVGPoint(); pt.x = ev.clientX; pt.y = ev.clientY;
     var pp = pt.matrixTransform(svg.getScreenCTM().inverse());
@@ -1383,11 +1390,11 @@ function renderMetricsEditor() {
     mxRedraw(svg);
   }, { passive: false });
   // double-click empty space to recenter/reset the view
-  svg.addEventListener('dblclick', function () { mxView.x = 0; mxView.y = 0; mxView.s = 1; mxRedraw(svg); });
+  svg.addEventListener('dblclick', function () { mxView = defaultView(); mxRedraw(svg); });
   svg.addEventListener('mousedown', function (ev) {
     ev.preventDefault();
     var pq = pointOf(ev);
-    if (mxHand) { mxDrag = { mode: 'pan', px: pq.sx, py: pq.sy, vx: mxView.x, vy: mxView.y }; return; }  // hand tool: drag pans
+    if (mxHandMode === 'pan') { mxDrag = { mode: 'pan', px: pq.sx, py: pq.sy, vx: mxView.x, vy: mxView.y }; return; }  // freeform: drag pans
     var g = selGlyph(); if (!g) return;
     var l = g.layers[curMasterId()];
     var cs2 = (l && l.contours && l.contours.length) ? l.contours : null;

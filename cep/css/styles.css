@@ -390,7 +390,8 @@ button:disabled { opacity: 0.4; cursor: default; }
   background: #2b2b2b; color: #cfcfcf; border: 1px solid #4a4a4a; border-radius: 8px; cursor: pointer; padding: 0;
 }
 .mx-hand:hover { background: #3a3a3a; color: #fff; }
-.mx-hand.on { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(20,115,230,0.3); }
+.mx-hand.pan { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 0 2px rgba(20,115,230,0.3); }
+.mx-hand.lock { background: #c0271d; color: #fff; border-color: #c0271d; box-shadow: 0 0 0 2px rgba(192,39,29,0.3); }
 .gd-canvas { display: block; cursor: default; }
 /* right-click menu on glyph cells */
 .ctx-menu {
