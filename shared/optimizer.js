@@ -154,4 +154,78 @@ function optimizeAll(project, mid) {
   return { spaced: sp.count, kernPairs: kn.pairs, ref: sp.ref };
 }
 
-module.exports = { buildRef, classify, sbTargets, optimizeSpacing, optimizeKerning, optimizeAll, bezBounds };
+// === EXPERIMENTAL "Optimize Test" — the optical pass we've been designing:
+// align each letter to its class box (cap / x-height / baseline), UNIFORMLY scale
+// it so round/pointed extremes OVERSHOOT (amount driven by how sparse the ink is
+// AT that extreme — flat edges sit on the line, no growth), then give optical
+// left/right sidebearings + pair kerning. Mutates contours + advance in place.
+function scaleAbout(contours, s, px, py) {
+  function m(o) { return o ? { x: px + (o.x - px) * s, y: py + (o.y - py) * s } : null; }
+  return contours.map(function (c) { return { closed: c.closed, points: c.points.map(function (p) {
+    return { x: px + (p.x - px) * s, y: py + (p.y - py) * s, type: p.type, handleIn: m(p.handleIn), handleOut: m(p.handleOut) };
+  }) }; });
+}
+function moveXY(contours, dx, dy) {
+  function m(o) { return o ? { x: o.x + dx, y: o.y + dy } : null; }
+  return contours.map(function (c) { return { closed: c.closed, points: c.points.map(function (p) {
+    return { x: p.x + dx, y: p.y + dy, type: p.type, handleIn: m(p.handleIn), handleOut: m(p.handleOut) };
+  }) }; });
+}
+// widest ink span between two heights (max over a few scanlines)
+function spanBetween(segs, yLo, yHi) {
+  var w = 0;
+  for (var i = 0; i <= 4; i++) { var y = yLo + (yHi - yLo) * (i / 4); var L = profileAt(segs, y, 'L'), R = profileAt(segs, y, 'R'); if (L != null && R != null && (R - L) > w) w = R - L; }
+  return w;
+}
+// 0 = flat/full edge (no overshoot) … 1 = sharp point or round tip (max overshoot).
+// Measures how much narrower the ink is in a THIN slice at the extreme vs a band
+// just inside it — a flat top stays the same width (→0), a point shrinks to ~0 (→1).
+function tipSparsity(segs, b, side, capH) {
+  var t = 0.035 * capH, r = 0.13 * capH, thin, ref;
+  if (side === 'top') { thin = spanBetween(segs, b.yMax - t, b.yMax); ref = spanBetween(segs, b.yMax - r, b.yMax - t); }
+  else { thin = spanBetween(segs, b.yMin, b.yMin + t); ref = spanBetween(segs, b.yMin + t, b.yMin + r); }
+  if (ref <= 0) return 0;
+  return Math.max(0, Math.min(1, 1 - thin / ref));
+}
+function optimizeTest(project, mid) {
+  var ref = buildRef(project, mid), upm = ref.upm, cap = ref.capHeight, xh = ref.xHeight;
+  var desc = (project.metrics && project.metrics.descender) || -Math.round(0.2 * upm);
+  var OV = Math.max(6, Math.round(0.024 * cap)); // optical overshoot ceiling ≈ 2.4% of cap
+  var spaced = 0;
+  project.glyphs.forEach(function (g) {
+    if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+    if (!drawn(g, mid)) return;
+    var contours = layerOf(g, mid).contours;
+    var b = bezBounds(contours);
+    if (!isFinite(b.xMin) || b.h <= 2 || b.w <= 0) return;
+    var u = g.unicode || 0;
+    var isLetter = (u >= 0x41 && u <= 0x5A) || (u >= 0x61 && u <= 0x7A) || (u >= 0x30 && u <= 0x39);
+    var c = classify(g, b, ref);
+    if (isLetter) {
+      var isLower = (u >= 0x61 && u <= 0x7A);
+      var refTop = (isLower && c.cls !== 'ASCENDER') ? xh : cap;     // class box top
+      var refBot = (c.cls === 'DESCENDER') ? desc : 0;              // baseline (or descender line)
+      var segs = flatten(contours);
+      var ovTop = Math.round(OV * tipSparsity(segs, b, 'top', cap));
+      var ovBot = Math.round(OV * tipSparsity(segs, b, 'bottom', cap));
+      var top = refTop + ovTop, bot = refBot - ovBot;
+      var s = (top - bot) / b.h;                                    // UNIFORM scale to the class box (+overshoot)
+      var sc = scaleAbout(contours, s, 0, 0), b2 = bezBounds(sc);
+      var c2 = classify(g, b2, ref), t = sbTargets(c2, b2, ref);   // optical L/R air
+      sc = moveXY(sc, Math.round(t.lsb - b2.xMin), Math.round(bot - b2.yMin)); // align baseline + LSB
+      layerOf(g, mid).contours = sc;
+      g.advanceWidth = Math.round(t.lsb + b2.w + t.rsb);
+    } else {
+      // punctuation/symbols: keep size, just give optical sidebearings
+      var tt = sbTargets(c, b, ref);
+      translateX(contours, Math.round(tt.lsb - b.xMin));
+      g.advanceWidth = Math.round(tt.lsb + b.w + tt.rsb);
+    }
+    spaced++;
+  });
+  var kn = optimizeKerning(project, mid);
+  project.kerning = kn.table;
+  return { spaced: spaced, kernPairs: kn.pairs, ref: ref };
+}
+
+module.exports = { buildRef, classify, sbTargets, optimizeSpacing, optimizeKerning, optimizeAll, optimizeTest, bezBounds };

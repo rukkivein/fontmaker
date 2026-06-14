@@ -1,0 +1,146 @@
+{
+ "mainbg": {
+  "src": "mainbg",
+  "file": "mainbg.png",
+  "left": 1583,
+  "top": 693,
+  "w": 707,
+  "h": 1022
+ },
+ "layelogor_1": {
+  "src": "Layelogor 1",
+  "file": "layelogor_1.png",
+  "left": 1543,
+  "top": 364,
+  "w": 753,
+  "h": 628
+ },
+ "brst_logo": {
+  "src": "brst logo",
+  "file": "brst_logo.png",
+  "left": 1855,
+  "top": 1430,
+  "w": 180,
+  "h": 53
+ },
+ "bar": {
+  "src": "bar",
+  "file": "bar.png",
+  "left": 1729,
+  "top": 1320,
+  "w": 400,
+  "h": 64
+ },
+ "folder": {
+  "src": "folder",
+  "file": "folder.png",
+  "left": 2051,
+  "top": 1330,
+  "w": 55,
+  "h": 35
+ },
+ "c_appdata_exam": {
+  "src": "C:/%APPDATA%/exam...",
+  "file": "c_appdata_exam.png",
+  "left": 1758,
+  "top": 1342,
+  "w": 261,
+  "h": 21
+ },
+ "install_hover": {
+  "src": "\u0130NSTALL HOVER",
+  "file": "install_hover.png",
+  "left": 1884,
+  "top": 880,
+  "w": 262,
+  "h": 96
+ },
+ "install-bg": {
+  "src": "install-bg",
+  "file": "install-bg.png",
+  "left": 1889,
+  "top": 858,
+  "w": 231,
+  "h": 117
+ },
+ "install": {
+  "src": "install.",
+  "file": "install.png",
+  "left": 1920,
+  "top": 898,
+  "w": 183,
+  "h": 44
+ },
+ "shop": {
+  "src": "shop.",
+  "file": "shop.png",
+  "left": 1996,
+  "top": 1003,
+  "w": 110,
+  "h": 39
+ },
+ "settings": {
+  "src": "settings.",
+  "file": "settings.png",
+  "left": 1922,
+  "top": 1075,
+  "w": 182,
+  "h": 40
+ },
+ "about": {
+  "src": "about.",
+  "file": "about.png",
+  "left": 1973,
+  "top": 1142,
+  "w": 131,
+  "h": 32
+ },
+ "uninstall": {
+  "src": "uninstall.",
+  "file": "uninstall.png",
+  "left": 1922,
+  "top": 1214,
+  "w": 182,
+  "h": 32
+ },
+ "x": {
+  "src": "x",
+  "file": "x.png",
+  "left": 2254,
+  "top": 451,
+  "w": 84,
+  "h": 96
+ },
+ "exit": {
+  "src": "exit",
+  "file": "exit.png",
+  "left": 2273,
+  "top": 469,
+  "w": 207,
+  "h": 58
+ },
+ "done": {
+  "src": "done",
+  "file": "done.png",
+  "left": 1808,
+  "top": 1280,
+  "w": 243,
+  "h": 150
+ },
+ "loading": {
+  "src": "loading",
+  "file": "loading.png",
+  "left": 1757,
+  "top": 1342,
+  "w": 323,
+  "h": 20
+ },
+ "loading_indicator": {
+  "src": "loading indicator",
+  "file": "loading_indicator.png",
+  "left": 1753,
+  "top": 1341,
+  "w": 337,
+  "h": 22
+ }
+}

@@ -3,6 +3,7 @@
 // extension bundle so the installed extension is self-contained.
 //   shared/ilbridge.js  -> cep/js/ilbridge.js   (verbatim)
 //   shared/glyphset.js  -> cep/js/glyphset.js   (verbatim)
+//   shared/features.js  -> cep/js/features.js   (verbatim — edition gating)
 //   core/fontEngine.js  -> cep/js/lib/fontEngine.js  (opentype require → relative)
 //   opentype.js dist    -> cep/js/lib/opentype.js
 // Run via `npm run cep:sync`. test/cepsync.test.js re-applies this and fails if
@@ -30,6 +31,9 @@ function sync() {
   out.glyphset = write('cep/js/glyphset.js', read('shared/glyphset.js'));
   out.charsets = write('cep/js/charsets.js', read('shared/charsets.js'));
   out.dna = write('cep/js/dna.js', read('shared/dna.js'));
+  out.features = write('cep/js/features.js', read('shared/features.js'));
+  out.placeholder = write('cep/js/placeholder.js', read('shared/placeholder.js'));
+  out.bosharf = write('cep/js/bosharf.json', read('shared/bosharf.json'));
   out.fontEngine = write('cep/js/lib/fontEngine.js', transformFontEngine(read('core/fontEngine.js')));
   out.ttfWriter = write('cep/js/lib/ttfWriter.js', read('core/ttfWriter.js'));
   out.accentCompose = write('cep/js/accentCompose.js', read('shared/accentCompose.js'));

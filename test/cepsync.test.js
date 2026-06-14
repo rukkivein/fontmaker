@@ -19,6 +19,12 @@ ok(read('cep/js/charsets.js') === read('shared/charsets.js'),
    'cep/js/charsets.js matches shared/charsets.js');
 ok(read('cep/js/dna.js') === read('shared/dna.js'),
    'cep/js/dna.js matches shared/dna.js');
+ok(read('cep/js/features.js') === read('shared/features.js'),
+   'cep/js/features.js matches shared/features.js (edition gating)');
+ok(read('cep/js/placeholder.js') === read('shared/placeholder.js'),
+   'cep/js/placeholder.js matches shared/placeholder.js');
+ok(read('cep/js/bosharf.json') === read('shared/bosharf.json'),
+   'cep/js/bosharf.json matches shared/bosharf.json (empty-glyph art)');
 ok(read('cep/js/lib/fontEngine.js') === transformFontEngine(read('core/fontEngine.js')),
    'cep/js/lib/fontEngine.js is in sync with core/fontEngine.js');
 ok(read('cep/js/lib/fontEngine.js').indexOf("require('./opentype.js')") !== -1,

@@ -15,6 +15,8 @@ var dna = require(ROOT + '/js/dna.js');
 var optimizer = require(ROOT + '/js/optimizer.js');
 var accentCompose = require(ROOT + '/js/accentCompose.js');
 var varCompat = require(ROOT + '/js/varCompat.js');
+var FEAT = require(ROOT + '/js/features.js').FEATURES;  // edition gating (alpha/pro)
+var placeholder = require(ROOT + '/js/placeholder.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
 var fs = require('fs');
 var opentypeLib = null, paperLib = null; // lazy: heavy libs load on first use
@@ -62,7 +64,10 @@ function newDraft() {
   // the user designs on (circles / dashed lines / square grid / baselines).
   return {
     masters: [{ name: 'Regular' }],
-    lang: { latinUpper: true, latinLower: true, numbers: true },
+    // alpha restricts the offered sets (FEAT.charsets); pro pre-selects the basics
+    lang: FEAT.charsets
+      ? FEAT.charsets.reduce(function (o, k) { o[k] = true; return o; }, {})
+      : { latinUpper: true, latinLower: true, numbers: true },
     gridDesign: (function () {
       var pv = gdPresetItems('copyvector');
       return { items: pv.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; }),
@@ -97,6 +102,7 @@ function buildCountries() {
 // The + is disabled until a non-empty, non-duplicate master name is typed
 // (so you can't add a second "Regular" or an empty master).
 function updateMasterAdd() {
+  if (!FEAT.masters) { $('m-add').disabled = true; return; }   // single-master edition
   var name = $('m-name').value.trim();
   var dup = draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); });
   $('m-add').disabled = !name || dup;
@@ -117,6 +123,7 @@ function renderMasters() {
   });
 }
 function onAddMaster() {
+  if (!FEAT.masters) return;   // single-master edition
   var name = $('m-name').value.trim();
   if (!name) return;
   if (draft.masters.some(function (m) { return m.name.toLowerCase() === name.toLowerCase(); })) return;
@@ -140,17 +147,20 @@ function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
   box.classList.toggle('gd-mode', draft.toggle === 'preset'); // designer fills the panel, no scroll
   if (draft.toggle === 'preset') return renderGridDesigner(box, draft.gridDesign, function () { updatePillLabels(); renderProfile(); });
-  // Language Support — multi-select character sets.
+  // Language Support — multi-select character sets. The edition may LOCK some
+  // sets: they stay visible but greyed/non-toggleable (an upsell, not hidden).
   charsets.ALPHABETS.forEach(function (it) {
+    var locked = !!FEAT.charsets && FEAT.charsets.indexOf(it.key) < 0;
     var on = !!draft.lang[it.key];
     var essential = charsets.ESSENTIAL.indexOf(it.key) >= 0;
-    var row = document.createElement('div'); row.className = 'rune-item' + (on ? ' on' : '') + (essential ? ' essential' : '');
-    var rec = essential ? ' <span class="ri-rec">Recommended</span>' : '';
+    var row = document.createElement('div');
+    row.className = 'rune-item' + (on ? ' on' : '') + (essential ? ' essential' : '') + (locked ? ' locked' : '');
+    var rec = locked ? ' <span class="ri-rec ri-pro">Pro</span>' : (essential ? ' <span class="ri-rec">Recommended</span>' : '');
     var txt = document.createElement('div'); txt.className = 'ri-txt';
     txt.innerHTML = '<div class="ri-t">' + it.label + rec + '</div><div class="ri-d chars">' + charsets.sampleChars(it.key, 10) + '</div>';
-    var btn = document.createElement('div'); btn.className = 'ri-btn ' + (on ? 'is-x' : 'is-plus');
+    var btn = document.createElement('div'); btn.className = 'ri-btn ' + (locked ? 'is-lock' : (on ? 'is-x' : 'is-plus'));
     row.appendChild(txt); row.appendChild(btn);
-    row.addEventListener('click', function () { draft.lang[it.key] = !draft.lang[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    if (!locked) row.addEventListener('click', function () { draft.lang[it.key] = !draft.lang[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
     box.appendChild(row);
   });
 }
@@ -472,6 +482,8 @@ function renderGridDesigner(box, gd, onChange) {
     '</div>';
   box.appendChild(wrap);
   if (gd.preset) wrap.querySelector('.gd-presets').value = gd.preset;
+  // edition gate: disable (don't hide) the one-click mathematical grid presets
+  if (!FEAT.gridPresets) { var pcs = wrap.querySelector('.gd-presets'); if (pcs) { pcs.disabled = true; pcs.title = 'Grid presets are a Pro feature'; } }
 
   var svg = wrap.querySelector('.gd-canvas');
   var slider = wrap.querySelector('.gd-slider');
@@ -781,6 +793,7 @@ function openFromPath(path) {
     if (/\.(runetype|json)$/.test(low)) {
       loadProject(JSON.parse(fs.readFileSync(path, 'utf8')), path);
     } else if (/\.(otf|ttf)$/.test(low)) {
+      if (!FEAT.fontImport) { setStatus('Importing an existing .otf/.ttf to edit is a Pro feature. Open a .runetype project instead.', 'err'); return; }
       var ot = getOpentype();
       if (!ot) { setStatus('Font engine unavailable.', 'err'); return; }
       var buf = fs.readFileSync(path);
@@ -863,7 +876,11 @@ function projectFromOpentype(font, fam) {
   proj.meta = proj.meta || {}; proj.meta.familyName = fam || ((font.names && font.names.fontFamily && font.names.fontFamily.en) || 'Imported');
   return proj;
 }
-function onImport() { pickPath('Open a RuneType project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath); }
+function onImport() {
+  // alpha: only .runetype reopen — opening an existing font to edit is Pro
+  if (FEAT.fontImport) pickPath('Open a RuneType project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath);
+  else pickPath('Open a RuneType project to edit', 'RuneType Projects:*.runetype').then(openFromPath);
+}
 
 // --- Start Creating: build the font from the draft, then enter the workspace ---
 function onStartCreating() {
@@ -1055,6 +1072,8 @@ function renderGrid() {
       // preview thumbnail + the letter itself stays visible, dark, top-right
       cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + label + '</span>';
     } else {
+      // empty slots keep showing their character; the bosharf placeholder only
+      // appears in the EXPORTED font (free edition), never here in the grid.
       cell.innerHTML = label;
     }
     cell.title = g.name + ' — double-click to assign the selection · right-click for options · drop a shape';
@@ -1161,6 +1180,7 @@ function onAutoAll() {
 // The embedded optimizer ("mini AI"): class-aware sidebearings/advance for the
 // whole font + optical pair kerning, in one pass. Re-spaces consistently.
 function onOptimize() {
+  if (!FEAT.optimize) return;
   var f = curFont();
   if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
   bakeAllOrigins(f);   // normalise any blue-line offsets before re-spacing
@@ -1169,6 +1189,20 @@ function onOptimize() {
   flatCache = {}; kernCache = {};
   renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
   setStatus('Optimized: re-spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' optical kern pair(s).', 'ok');
+}
+// EXPERIMENTAL: the optical pass we designed — align to the class box, uniformly
+// size each letter with density-driven overshoot, and add L/R kerning. Mutates
+// outlines, so it's a separate "test" button (Save the project first to keep originals).
+function onOptimizeTest() {
+  if (!FEAT.optimize) return;
+  var f = curFont();
+  if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  bakeAllOrigins(f);
+  var r = optimizer.optimizeTest(f, curMasterId());
+  f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
+  flatCache = {}; kernCache = {};
+  renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
+  setStatus('Optimize Test: optically sized + spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' kern pair(s).', 'ok');
 }
 function onAutoOne() {
   if (selectedSlot < 0) return;
@@ -1500,6 +1534,7 @@ function ctxDeleteShape(slot) {
 // occurrence — not every S, just the S you clicked) ----
 function closeTesterAltMenu() { var m = document.getElementById('testerAltMenu'); if (m && m.parentNode) m.parentNode.removeChild(m); }
 function showTesterAltMenu(ev, ti) {
+  if (!FEAT.alternates) return;
   ev.preventDefault(); ev.stopPropagation();
   closeGlyphMenu(); closeTesterAltMenu();
   var f = curFont(); if (!f) return;
@@ -1547,6 +1582,7 @@ function ctxDeleteGlyph(slot) {
 // marks. Innovation: a multilingual font stops needing every accent drawn by
 // hand once the base + the few marks exist.
 function onComposeAccents() {
+  if (!FEAT.accents) return;
   var f = curFont(), mid = curMasterId();
   var r = accentCompose.composeAll(f, mid);
   r.composed.forEach(function (ch) { var g = f.glyphs.find(function (x) { return x.char === ch; }); if (g) syncOpenGlyph(g); });
@@ -1563,14 +1599,19 @@ function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
   $('openInAi').disabled = !g;
-  // the Assign chip shows the live Illustrator selection (the shape you'll
-  // drop); when nothing is selected it shows the target letter
+  // the Assign chip shows the TARGET letter (consistent with the glyph cells) —
+  // not the captured Illustrator shape, which would otherwise surface stray
+  // artwork (e.g. the RuneType logo) in the handle. The live selection still
+  // drives the drag image + the assign action, just not this preview.
   var assignWrap = $('assignWrap');
-  if (selSourceContours && selSourceContours.length) {
+  if (g) {
+    $('assignChip').innerHTML = glyphLabelHtml(g);
+    if (assignWrap) assignWrap.classList.remove('has-shape');
+  } else if (selSourceContours && selSourceContours.length) {
     $('assignChip').innerHTML = shapeThumbSVG(selSourceContours, 'chip-thumb');
     if (assignWrap) assignWrap.classList.add('has-shape');
   } else {
-    $('assignChip').innerHTML = g ? glyphLabelHtml(g) : '';
+    $('assignChip').innerHTML = '';
     if (assignWrap) assignWrap.classList.remove('has-shape');
   }
   $('altChip').placeholder = g ? glyphLabel(g) : '';      // writable; hints the selection
@@ -1588,6 +1629,7 @@ function updateAssign() {
 
 // ---- modification: alternates & ligatures ----
 function onAlt() {
+  if (!FEAT.alternates) return;
   var f = curFont(), base = -1;
   var ch = $('altChip').value.trim();
   if (ch) {
@@ -1602,6 +1644,7 @@ function onAlt() {
   autosave();
 }
 function onLig() {
+  if (!FEAT.alternates) return;
   var str = $('ligInput').value.trim();
   if (str.length !== 2) {
     setStatus('Ligatures join exactly 2 letters — "' + str + '" has ' + str.length + '.', 'err');
@@ -1675,8 +1718,10 @@ function autosave() {
 // app (font files land in the system font viewer for manual install).
 function onOpenFile() {
   // open a saved project or an existing font INTO the panel for editing (read by
-  // the panel, not handed to the OS) — same loader as page-1 Import
-  pickPath('Open a project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath);
+  // the panel, not handed to the OS) — same loader as page-1 Import.
+  // alpha: .runetype only — importing an existing font to edit is Pro.
+  if (FEAT.fontImport) pickPath('Open a project or font to edit', 'Projects & Fonts:*.runetype;*.otf;*.ttf').then(openFromPath);
+  else pickPath('Open a RuneType project to edit', 'RuneType Projects:*.runetype').then(openFromPath);
 }
 function onSaveProject() {
   commitSig();
@@ -1692,7 +1737,9 @@ function onSaveProject() {
 }
 function onExportGo() {
   commitSig();
-  var wantOtf = $('exOtf').checked, wantTtf = $('exTtf').checked, wantVar = $('exVar').checked;
+  var wantOtf = FEAT.exportOtf && $('exOtf').checked;
+  var wantTtf = FEAT.exportTtf && $('exTtf').checked;
+  var wantVar = FEAT.exportVariable && $('exVar').checked;
   if (!wantOtf && !wantTtf && !wantVar) { setStatus('Pick at least one format to export.', 'err'); return; }
   var f = curFont();
   evalScript('(function(){var d=Folder.selectDialog("Choose a folder to export into");return d?d.fsName:"";})()').then(function (dir) {
@@ -1825,8 +1872,24 @@ function buildMeta(f, master) {
     manufacturer: f.meta.manufacturer || '', copyright: f.meta.copyright || '', license: f.meta.license || '',
   };
 }
+// Empty-glyph placeholder art (the "boş harf" mark) loaded once. Lazily required
+// so pro (emptyGlyphArt = null) never touches the file.
+var _phArt = undefined;
+function placeholderArt() {
+  if (_phArt === undefined) {
+    _phArt = null;
+    if (FEAT.emptyGlyphArt) { try { _phArt = require(ROOT + '/js/' + FEAT.emptyGlyphArt + '.json'); } catch (e) { _phArt = null; } }
+  }
+  return _phArt;
+}
+// Fill undrawn slots with the placeholder so the exported font is complete.
+function fillPlaceholders(cleaned, masterId) {
+  var art = placeholderArt();
+  if (art) placeholder.fillEmptyGlyphs(cleaned, masterId, art);
+}
 function buildCleanOtf(f, master) {
   var cleaned = cleanedProject(f);
+  fillPlaceholders(cleaned, master.id);
   var built = fontEngine.buildFont(cleaned, 'otf', buildMeta(f, master));
   return applyNames(built.buffer, f, master.type || master.name);
 }
@@ -1834,6 +1897,7 @@ function buildCleanOtf(f, master) {
 // (re-parsing+toArrayBuffer would convert it back to CFF).
 function buildCleanTtf(f, master) {
   var cleaned = cleanedProject(f);
+  fillPlaceholders(cleaned, master.id);
   return fontEngine.buildFont(cleaned, 'ttf', buildMeta(f, master)).buffer;
 }
 
@@ -1970,6 +2034,7 @@ function pairKern(f, gL, gR, mode) {
 // Auto Kern: bake the optical pass into the project's kern table (Metric mode
 // then shows the same quality without recomputing).
 function onAutoKern() {
+  if (!FEAT.optimize) return;
   var f = curFont();
   var filled = [];
   f.glyphs.forEach(function (g) { if (isFilled(g) && g.char) filled.push(g); });
@@ -2184,6 +2249,37 @@ function pollActive() {
   });
 }
 
+// ---- edition gate: premium controls stay VISIBLE but DISABLED (an upsell),
+// never hidden. One flag (features.js) drives the whole surface, so flipping
+// EDITION to 'pro' unlocks everything with no other change. ----
+function lockCtl(id, on, tip) {
+  var e = $(id); if (!e) return;
+  e.disabled = !on;
+  if (!on) { e.classList.add('pro-locked'); if (tip) e.title = tip; }
+  else { e.classList.remove('pro-locked'); }
+}
+function lockFmt(id, on) {   // export-format checkbox + its "soon" tag
+  var cb = $(id); if (!cb) return;
+  cb.disabled = !on; if (!on) cb.checked = false;
+  var lab = cb.parentNode;
+  if (lab && lab.classList) lab.classList.toggle('dim', !on);
+  var soon = lab && lab.querySelector ? lab.querySelector('.muted') : null;
+  if (soon) soon.style.display = on ? 'none' : '';
+}
+function applyEdition() {
+  var PRO = 'Pro feature — upgrade to unlock';
+  lockCtl('m-add', FEAT.masters, PRO); lockCtl('m-name', FEAT.masters, PRO); lockCtl('m-ddbtn', FEAT.masters, PRO);
+  lockCtl('w-masterSel', FEAT.masters, PRO);
+  lockCtl('countryBtn', !FEAT.charsets, PRO);           // country auto-select (locked sets greyed in the list)
+  lockCtl('tg-grid', FEAT.gridPresets, 'Grid presets are a Pro feature');
+  lockCtl('altBtn', FEAT.alternates, PRO); lockCtl('altChip', FEAT.alternates, PRO);
+  lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
+  lockCtl('accentBtn', FEAT.accents, PRO);
+  lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
+  lockCtl('optimizeTestBtn', FEAT.optimize, PRO);
+  lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
+}
+
 // ---- boot ----
 function boot() {
   buildPage1(); show('new');
@@ -2238,6 +2334,7 @@ function boot() {
   $('autoOne').addEventListener('click', onAutoOne);
   $('autoKern').addEventListener('click', onAutoKern);
   $('optimizeBtn').addEventListener('click', onOptimize);
+  $('optimizeTestBtn').addEventListener('click', onOptimizeTest);
   $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
@@ -2269,6 +2366,7 @@ function boot() {
     var am = document.getElementById('testerAltMenu'); if (am && !am.contains(ev.target)) closeTesterAltMenu();
   }, true);
   document.addEventListener('keydown', function (ev) { if (ev.key === 'Escape') { closeGlyphMenu(); closeTesterAltMenu(); } });
+  applyEdition();
   startPolling();
 }
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
