@@ -1057,12 +1057,28 @@ function glyphVisible(g) {
   if (alphaFilters.length && alphaFilters.indexOf(g.alphabet) < 0) return false;
   return glyphset.glyphMatches(g, searchQuery);
 }
+// Display order for the grids: keep the array order (indices map to artboards),
+// but show each glyph's alternates right AFTER it (A, A.ss01, A.ss02, B…) instead
+// of all appended at the very end. Returns array indices (real, unchanged).
+function glyphDisplayOrder(f) {
+  var altsByBase = {};
+  f.glyphs.forEach(function (g, i) { if (g.kind === 'alternate' && g.baseName) (altsByBase[g.baseName] = altsByBase[g.baseName] || []).push(i); });
+  var order = [], seen = {};
+  f.glyphs.forEach(function (g, i) {
+    if (g.kind === 'alternate' && g.baseName) return;        // placed right after its base
+    order.push(i); seen[i] = 1;
+    (altsByBase[g.name] || []).forEach(function (ai) { order.push(ai); seen[ai] = 1; });
+  });
+  f.glyphs.forEach(function (g, i) { if (!seen[i]) order.push(i); }); // orphan alternates → append
+  return order;
+}
 
 function renderGrid() {
   var grid = $('grid'); if (!grid) return;
   grid.innerHTML = '';
   var f = curFont();
-  f.glyphs.forEach(function (g, i) {
+  glyphDisplayOrder(f).forEach(function (i) {
+    var g = f.glyphs[i];
     if (!glyphVisible(g)) return;
     var cell = document.createElement('div');
     cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
@@ -1108,7 +1124,8 @@ function renderModGrid() {
   grid.innerHTML = '';
   var f = curFont();
   var shown = 0;
-  f.glyphs.forEach(function (g, i) {
+  glyphDisplayOrder(f).forEach(function (i) {
+    var g = f.glyphs[i];
     if (!isFilled(g)) return;
     shown++;
     var cell = document.createElement('div');
