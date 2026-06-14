@@ -1833,7 +1833,11 @@ function uniteContours(contours) {
     var acc = kids[0];
     for (var i = 1; i < kids.length; i++) {
       var nx = kids[i];
-      if (acc.intersects(nx) || acc.contains(nx.position) || nx.contains(acc.position)) {
+      // ONLY merge contours whose outlines actually CROSS (overlapping strokes).
+      // A contour fully inside another (no boundary crossing) is a COUNTER/hole —
+      // keep it separate so the engine's winding normalisation can punch it out
+      // (uniting it here was what filled O/0/8/D counters on export).
+      if (acc.intersects(nx)) {
         var before = acc;
         try { acc = acc.unite(nx, { insert: false }); } catch (e) { acc = before; }
         if (!acc) acc = before;
