@@ -187,10 +187,25 @@ function tipSparsity(segs, b, side, capH) {
   if (ref <= 0) return 0;
   return Math.max(0, Math.min(1, 1 - thin / ref));
 }
+// the vertical class box is decided by the CHARACTER (deterministic), not by the
+// glyph's current geometry — so the pass is idempotent (no drift on repeat clicks).
+var FIT_ASCENDERS = 'bdfhklt', FIT_DESCENDERS = 'gjpqy';
+function classBoxTop(ch, u, cap, xh) {
+  if (!(u >= 0x61 && u <= 0x7A)) return cap;        // uppercase + figures
+  return FIT_ASCENDERS.indexOf(ch) >= 0 ? cap : xh; // ascenders reach cap, the rest x-height
+}
+function classBoxBottom(ch, u, desc) {
+  return (u >= 0x61 && u <= 0x7A && FIT_DESCENDERS.indexOf(ch) >= 0) ? desc : 0; // descenders dip, else baseline
+}
 function optimizeTest(project, mid) {
-  var ref = buildRef(project, mid), upm = ref.upm, cap = ref.capHeight, xh = ref.xHeight;
-  var desc = (project.metrics && project.metrics.descender) || -Math.round(0.2 * upm);
-  var OV = Math.max(6, Math.round(0.024 * cap)); // optical overshoot ceiling ≈ 2.4% of cap
+  // The STANDARD invisible box comes from the FIXED font metrics (not re-derived
+  // from the glyphs), so clicking again is a no-op instead of compounding.
+  var M = project.metrics || {}, upm = M.unitsPerEm || project.unitsPerEm || 1000;
+  var cap = M.capHeight || Math.round(0.716 * upm);
+  var xh = M.xHeight || Math.round(0.5 * upm);
+  var desc = M.descender || -Math.round(0.2 * upm);
+  var OV = Math.max(6, Math.round(0.024 * cap)); // overshoot allowance = the box's vertical padding
+  var MARGIN = Math.round(0.085 * cap);          // standard side air → glyph CENTRED in its box (lsb == rsb)
   var spaced = 0;
   project.glyphs.forEach(function (g) {
     if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
@@ -198,34 +213,29 @@ function optimizeTest(project, mid) {
     var contours = layerOf(g, mid).contours;
     var b = bezBounds(contours);
     if (!isFinite(b.xMin) || b.h <= 2 || b.w <= 0) return;
-    var u = g.unicode || 0;
+    var u = g.unicode || 0, ch = g.char || '';
     var isLetter = (u >= 0x41 && u <= 0x5A) || (u >= 0x61 && u <= 0x7A) || (u >= 0x30 && u <= 0x39);
-    var c = classify(g, b, ref);
     if (isLetter) {
-      var isLower = (u >= 0x61 && u <= 0x7A);
-      var refTop = (isLower && c.cls !== 'ASCENDER') ? xh : cap;     // class box top
-      var refBot = (c.cls === 'DESCENDER') ? desc : 0;              // baseline (or descender line)
+      var refTop = classBoxTop(ch, u, cap, xh), refBot = classBoxBottom(ch, u, desc);
       var segs = flatten(contours);
-      var ovTop = Math.round(OV * tipSparsity(segs, b, 'top', cap));
-      var ovBot = Math.round(OV * tipSparsity(segs, b, 'bottom', cap));
-      var top = refTop + ovTop, bot = refBot - ovBot;
-      var s = (top - bot) / b.h;                                    // UNIFORM scale to the class box (+overshoot)
+      // density-driven overshoot (scale-invariant → idempotent): flat edge 0, point/round up to OV
+      var top = refTop + Math.round(OV * tipSparsity(segs, b, 'top', cap));
+      var bot = refBot - Math.round(OV * tipSparsity(segs, b, 'bottom', cap));
+      var s = (top - bot) / b.h;                                   // UNIFORM scale into the fixed box
       var sc = scaleAbout(contours, s, 0, 0), b2 = bezBounds(sc);
-      var c2 = classify(g, b2, ref), t = sbTargets(c2, b2, ref);   // optical L/R air
-      sc = moveXY(sc, Math.round(t.lsb - b2.xMin), Math.round(bot - b2.yMin)); // align baseline + LSB
+      sc = moveXY(sc, Math.round(MARGIN - b2.xMin), Math.round(bot - b2.yMin)); // centre in box + seat on baseline
       layerOf(g, mid).contours = sc;
-      g.advanceWidth = Math.round(t.lsb + b2.w + t.rsb);
+      g.advanceWidth = Math.round(b2.w + 2 * MARGIN);
     } else {
-      // punctuation/symbols: keep size, just give optical sidebearings
-      var tt = sbTargets(c, b, ref);
-      translateX(contours, Math.round(tt.lsb - b.xMin));
-      g.advanceWidth = Math.round(tt.lsb + b.w + tt.rsb);
+      // punctuation/symbols: keep their size, just centre them in a standard box
+      translateX(contours, Math.round(MARGIN - b.xMin));
+      g.advanceWidth = Math.round(b.w + 2 * MARGIN);
     }
     spaced++;
   });
   var kn = optimizeKerning(project, mid);
   project.kerning = kn.table;
-  return { spaced: spaced, kernPairs: kn.pairs, ref: ref };
+  return { spaced: spaced, kernPairs: kn.pairs, ref: { capHeight: cap, xHeight: xh } };
 }
 
 module.exports = { buildRef, classify, sbTargets, optimizeSpacing, optimizeKerning, optimizeAll, optimizeTest, bezBounds };
