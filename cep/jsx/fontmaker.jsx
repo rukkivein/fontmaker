@@ -235,7 +235,7 @@ function fmGhostCalib(layer, M, upm) {
   function inkHeight(ch) {
     var f = layer.textFrames.add(); f.contents = ch;
     fmGhostFont(f.textRange.characterAttributes); f.textRange.characterAttributes.size = upm * FM_SCALE * scale;
-    var gb = f.geometricBounds; f.remove(); return gb[1] - gb[3];
+    var g = f.createOutline(); var gb = g.geometricBounds; g.remove(); return gb[1] - gb[3]; // OUTLINE = true ink
   }
   try {
     var rf = layer.textFrames.add(); rf.contents = 'H';
@@ -259,17 +259,20 @@ function fmGhost(layer, ch, left, right, bottom, M, upm, cal) {
     var attr = tf.textRange.characterAttributes;
     attr.size = upm * FM_SCALE * cal.scale;   // one uniform calibrated size for every letter
     fmGhostFont(attr);
-    tf.opacity = 12;
-    tf.name = 'fm-ghost';
-    var gb = tf.geometricBounds; // [l, t, r, b] (y up) ink bounds
+    // OUTLINE the glyph: textFrame.geometricBounds is the TYPE/line box (its bottom
+    // is the descent line, ~0.2em below the baseline), which made every ghost sit
+    // that much too HIGH. The outline's bounds are the real glyph ink.
+    var g = tf.createOutline();
+    g.opacity = 12; g.name = 'fm-ghost';
+    var gb = g.geometricBounds; // [l, t, r, b] (y up) REAL ink bounds
     var gridBase = bottom + (0 - M.descender) * FM_SCALE;   // the baseline grid line = fy(0)
-    // THIS frame's ink-bottom sits `below` units beneath the baseline (descenders
+    // this glyph's ink-bottom sits `below` units beneath the baseline (descenders
     // deep, round letters a touch); add it back to get the real baseline, then drop
-    // that onto the box's baseline grid line. Per-letter → no global drift.
+    // that onto the box's baseline grid line. Per-letter → no drift.
     var below = (FM_DESCENDERS.indexOf(ch) >= 0) ? cal.descDepth : (FM_ROUND.indexOf(ch) >= 0 ? cal.overshoot : 0);
     var dy = gridBase - (gb[3] + below);
     var cx = left + (right - left) / 2;
-    tf.translate(cx - (gb[0] + gb[2]) / 2, dy);
+    g.translate(cx - (gb[0] + gb[2]) / 2, dy);
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
 }
 
