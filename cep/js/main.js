@@ -13,6 +13,7 @@ var glyphset = require(ROOT + '/js/glyphset.js');
 var charsets = require(ROOT + '/js/charsets.js');
 var dna = require(ROOT + '/js/dna.js');
 var optimizer = require(ROOT + '/js/optimizer.js');
+var refspace = require(ROOT + '/js/refspace.js');
 var accentCompose = require(ROOT + '/js/accentCompose.js');
 var varCompat = require(ROOT + '/js/varCompat.js');
 var FEAT = require(ROOT + '/js/features.js').FEATURES;  // edition gating (alpha/pro)
@@ -1234,6 +1235,80 @@ function onOptimize() {
   renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
   setStatus('Optimized: re-spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' optical kern pair(s).', 'ok');
 }
+
+// ===== Reference spacing ("X value"): per-letter side bearings averaged from the
+// CLASSIC fonts Arial + Times New Roman, dialled by a single % (exaggerate/reduce).
+// The reference table is em-fractions so it's UPM-agnostic; the % scales it and we
+// re-space every drawn glyph to exactly X×%. It never reads the font's own spacing,
+// so it can't fall back to the original values — and it never resizes a glyph.
+var _refFracTable; // undefined = not tried yet; null = unavailable; else {ch:{lsb,rsb}}
+function refFracTable() {
+  if (_refFracTable !== undefined) return _refFracTable;
+  _refFracTable = null;
+  try {
+    var ot = getOpentype(); var fs = require('fs');
+    var WIN = (typeof process !== 'undefined' && process.env && process.env.WINDIR) ? process.env.WINDIR : 'C:\\Windows';
+    function load(name) {
+      var paths = [WIN + '\\Fonts\\' + name, 'C:\\Windows\\Fonts\\' + name];
+      for (var i = 0; i < paths.length; i++) {
+        try { if (fs.existsSync(paths[i])) { var b = fs.readFileSync(paths[i]); return ot.parse(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); } } catch (e) {}
+      }
+      return null;
+    }
+    var A = load('arial.ttf'), T = load('times.ttf');
+    if (!A && !T) return _refFracTable;
+    function fracs(f, ch) {
+      if (!f) return null;
+      try { var g = f.charToGlyph(ch); if (!g || g.index <= 0 || g.xMax == null) return null; var u = f.unitsPerEm || 2048; return { lsb: g.xMin / u, rsb: (g.advanceWidth - g.xMax) / u }; }
+      catch (e) { return null; }
+    }
+    var tbl = {}, seen = {};
+    curFont().glyphs.forEach(function (g) {
+      var ch = g.char; if (ch == null || ch === ' ' || seen[ch]) return; seen[ch] = 1;
+      var arr = []; var a = fracs(A, ch), t = fracs(T, ch);
+      if (a) arr.push(a); if (t) arr.push(t);
+      if (!arr.length) return;
+      var lsb = 0, rsb = 0; arr.forEach(function (s) { lsb += s.lsb; rsb += s.rsb; });
+      tbl[ch] = { lsb: lsb / arr.length, rsb: rsb / arr.length };   // average of the classics
+    });
+    _refFracTable = Object.keys(tbl).length ? tbl : null;
+  } catch (e) { _refFracTable = null; }
+  return _refFracTable;
+}
+function refSpaceValue() { var el = $('refSpace'); var P = el ? parseInt(el.value, 10) : 100; return isNaN(P) ? 100 : P; }
+// Apply the X spacing at the slider's %. commit=false → panel-only live preview
+// (cheap, for dragging); commit=true → also push to open glyph docs + autosave.
+function applyRefSpace(commit) {
+  if (!FEAT.optimize) return;
+  var f = curFont(); if (!f) return;
+  if (!f.glyphs.some(isFilled)) { if (commit) setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  var frac = refFracTable();
+  if (!frac) { if (commit) setStatus('Could not read Arial / Times New Roman for X spacing.', 'err'); return; }
+  var P = refSpaceValue(); f.refSpace = P;
+  if ($('refSpaceVal')) $('refSpaceVal').textContent = P + '%';
+  bakeAllOrigins(f);                                   // fold blue-line offsets first
+  var targets = refspace.spacingTargets(frac, f.unitsPerEm, P);
+  var minA = Math.round((f.unitsPerEm || 1000) * 0.03);
+  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA);
+  flatCache = {}; kernCache = {};
+  renderModGrid(); renderRight(); renderTesterText();
+  if (commit) {
+    f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
+    scheduleTester(); autosave();
+    setStatus('X spacing (Arial+Times) at ' + P + '% — re-spaced ' + n + ' glyph(s).', 'ok');
+  }
+}
+var _refRAF = 0;
+function scheduleRefSpace() {                          // coalesce live drags to one apply/frame
+  if (_refRAF) return;
+  var raf = (typeof window !== 'undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
+  _refRAF = raf(function () { _refRAF = 0; applyRefSpace(false); });
+}
+function syncRefSlider() {                             // reflect the saved % when (re)entering the page
+  var el = $('refSpace'); if (!el) return; var f = curFont();
+  el.value = (f && f.refSpace != null) ? f.refSpace : 100;
+  if ($('refSpaceVal')) $('refSpaceVal').textContent = el.value + '%';
+}
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
 // ink-left line (LSB) or the red advance line.
@@ -1935,6 +2010,7 @@ function buildCleanTtf(f, master) {
 function renderWorkspace() {
   renderMasterSelect(); renderFilters(); renderGrid(); updateAssign(); refreshTester();
   setTesterBg(true);   // testing. starts dark by default
+  syncRefSlider();     // reflect the saved Arial+Times X-spacing %
   setSection('glyphs');
 }
 
@@ -2308,6 +2384,7 @@ function applyEdition() {
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
   lockCtl('accentBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
+  lockCtl('refSpace', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
@@ -2365,6 +2442,10 @@ function boot() {
   });
   $('autoKern').addEventListener('click', onAutoKern);
   $('optimizeBtn').addEventListener('click', onOptimize);
+  if ($('refSpace')) {
+    $('refSpace').addEventListener('input', function () { if ($('refSpaceVal')) $('refSpaceVal').textContent = this.value + '%'; scheduleRefSpace(); });
+    $('refSpace').addEventListener('change', function () { applyRefSpace(true); });
+  }
   $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);

@@ -38,6 +38,7 @@ function sync() {
   out.ttfWriter = write('cep/js/lib/ttfWriter.js', read('core/ttfWriter.js'));
   out.accentCompose = write('cep/js/accentCompose.js', read('shared/accentCompose.js'));
   out.optimizer = write('cep/js/optimizer.js', read('shared/optimizer.js'));
+  out.refspace = write('cep/js/refspace.js', read('shared/refspace.js'));
   out.varCompat = write('cep/js/varCompat.js', read('shared/varCompat.js'));
   out.opentype = write('cep/js/lib/opentype.js', read('node_modules/opentype.js/dist/opentype.js'));
   return out;

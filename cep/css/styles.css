@@ -668,8 +668,10 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 /* ===== section tabs + modification/testing pages ===== */
 .w-msel { flex: 0 0 150px; align-self: center; margin-bottom: 8px; display: flex; }
 #w-masterSel { height: 34px; font-size: 12px; width: 100%; }
-.w-modauto { display: flex; gap: 8px; margin-top: 18px; }
+.w-modauto { display: flex; gap: 8px; margin-top: 18px; align-items: center; }
 .w-modauto .rune-btn { width: auto; flex: 0 0 auto; }
+.w-refspace { display: flex; align-items: center; gap: 6px; margin-left: auto; font-size: 10px; color: var(--txt2); white-space: nowrap; }
+.w-refval { min-width: 30px; text-align: right; color: var(--txt); font-variant-numeric: tabular-nums; }
 .w-modempty { color: var(--txt3); font-size: 12px; padding: 18px 6px; }
 .w-toast {
   position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%);

@@ -29,6 +29,8 @@ ok(read('cep/js/lib/fontEngine.js') === transformFontEngine(read('core/fontEngin
    'cep/js/lib/fontEngine.js is in sync with core/fontEngine.js');
 ok(read('cep/js/lib/fontEngine.js').indexOf("require('./opentype.js')") !== -1,
    'bundled engine requires opentype via sibling relative path');
+ok(read('cep/js/refspace.js') === read('shared/refspace.js'),
+   'cep/js/refspace.js matches shared/refspace.js (Arial+Times X spacing)');
 ok(read('cep/js/lib/opentype.js') === read('node_modules/opentype.js/dist/opentype.js'),
    'cep/js/lib/opentype.js matches the installed opentype.js dist');
 
