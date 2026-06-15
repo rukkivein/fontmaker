@@ -893,14 +893,22 @@ function templateAlphabets() {
 function onOpenTemplate() {
   if (!FEAT.template) return;
   var fam = $('nf-family').value.trim() || 'RuneType';
-  var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: templateAlphabets() });
-  var chars = [];
-  proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') chars.push(g.char); });
-  var cfg = { chars: chars, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
+  var alphabets = templateAlphabets();   // selected set keys, in selection order
+  var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: alphabets });
+  // ONE ROW PER SELECTED SET (in selection order) → the sheet grows downward as
+  // more alphabets are added on page 1.
+  var rows = [];
+  alphabets.forEach(function (key) {
+    var chs = [];
+    proj.glyphs.forEach(function (g) { if (g.alphabet === key && g.char != null && g.char !== ' ') chs.push(g.char); });
+    if (chs.length) rows.push(chs);
+  });
+  if (!rows.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) rows.push(all); }
+  var cfg = { rows: rows, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
   setStatus('Opening template in Illustrator…');
   evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
     var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (r && r.ok) setStatus('Template opened (' + (r.cells || chars.length) + ' glyphs) — draw each letter inside its box, then "Import from Template".', 'ok');
+    if (r && r.ok) setStatus('Template opened (' + r.cells + ' glyphs, ' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + ') — draw each letter inside its box, then "Import from Template".', 'ok');
     else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
   });
 }

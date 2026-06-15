@@ -225,44 +225,49 @@ function fmGhostFont(attr) {
   try { attr.textFont = app.textFonts.getByName('ArialMT'); }
   catch (e1) { try { attr.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
 }
-// Calibrate ONCE: (1) a uniform ghost scale measured from the OUTLINE of a cap
-// (true glyph ink, not the type line box) so caps land on the cap line and fill
-// the cell; (2) the BASELINE y of a default-placed frame at that scale (measured
-// from 'n', whose flat bottom sits exactly on the baseline) so every ghost can be
-// seated by its real baseline — round letters (o,s) and descenders stop drifting.
+var FM_ROUND = 'oceasbdgpqOCGSQUJ';   // curved bottoms that dip slightly below the baseline
+// Calibrate ONCE, using only ink HEIGHTS (origin-independent — no cross-frame
+// position assumptions): (1) a uniform ghost scale from the cap OUTLINE so caps
+// land on the cap line; (2) the descender depth ('p' minus 'n') and the round
+// overshoot ('o' minus 'n'), used per-letter to recover the true baseline.
 function fmGhostCalib(layer, M, upm) {
-  var scale = 1, baseY0 = null;
+  var scale = 1, descDepth = 0, ovsht = 0;
+  function inkHeight(ch) {
+    var f = layer.textFrames.add(); f.contents = ch;
+    fmGhostFont(f.textRange.characterAttributes); f.textRange.characterAttributes.size = upm * FM_SCALE * scale;
+    var gb = f.geometricBounds; f.remove(); return gb[1] - gb[3];
+  }
   try {
     var rf = layer.textFrames.add(); rf.contents = 'H';
     fmGhostFont(rf.textRange.characterAttributes); rf.textRange.characterAttributes.size = upm * FM_SCALE;
-    var ol = rf.createOutline(); var gb = ol.geometricBounds, inkH = gb[1] - gb[3]; ol.remove();
-    if (inkH > 0) scale = (M.capHeight * FM_SCALE) / inkH;
+    var ol = rf.createOutline(); var gb = ol.geometricBounds, capInk = gb[1] - gb[3]; ol.remove();
+    if (capInk > 0) scale = (M.capHeight * FM_SCALE) / capInk;
   } catch (e) {}
   try {
-    var nf = layer.textFrames.add(); nf.contents = 'n';
-    fmGhostFont(nf.textRange.characterAttributes); nf.textRange.characterAttributes.size = upm * FM_SCALE * scale;
-    baseY0 = nf.geometricBounds[3];     // flat bottom of 'n' = the baseline at the default origin
-    nf.remove();
+    var nH = inkHeight('n'), pH = inkHeight('p'), oH = inkHeight('o');  // at the calibrated size
+    descDepth = Math.max(0, pH - nH);     // 'p' = x-height + descender ; 'n' = x-height
+    ovsht = Math.max(0, (oH - nH) / 2);   // 'o' overshoots top AND bottom vs the flat 'n'
   } catch (e) {}
-  return { scale: scale, baseY0: baseY0 };
+  return { scale: scale, descDepth: descDepth, overshoot: ovsht };
 }
-function fmGhost(layer, ch, left, right, bottom, M, upm, scale, baseY0) {
+function fmGhost(layer, ch, left, right, bottom, M, upm, cal) {
   if (ch === ' ' || ch === '') return;
-  scale = scale || 1;
+  cal = cal || { scale: 1, descDepth: 0, overshoot: 0 };
   try {
     var tf = layer.textFrames.add();
     tf.contents = ch;
     var attr = tf.textRange.characterAttributes;
-    attr.size = upm * FM_SCALE * scale;   // one uniform calibrated size for every letter
+    attr.size = upm * FM_SCALE * cal.scale;   // one uniform calibrated size for every letter
     fmGhostFont(attr);
     tf.opacity = 12;
     tf.name = 'fm-ghost';
     var gb = tf.geometricBounds; // [l, t, r, b] (y up) ink bounds
-    var gridBase = bottom + (0 - M.descender) * FM_SCALE;   // grid baseline = fy(0)
-    // seat by the TRUE baseline (shared across all letters) so flat / round /
-    // ascender / descender all sit on the same grid baseline; fall back to
-    // ink-bottom only if calibration failed.
-    var dy = (baseY0 != null) ? (gridBase - baseY0) : (gridBase - gb[3]);
+    var gridBase = bottom + (0 - M.descender) * FM_SCALE;   // the baseline grid line = fy(0)
+    // THIS frame's ink-bottom sits `below` units beneath the baseline (descenders
+    // deep, round letters a touch); add it back to get the real baseline, then drop
+    // that onto the box's baseline grid line. Per-letter → no global drift.
+    var below = (FM_DESCENDERS.indexOf(ch) >= 0) ? cal.descDepth : (FM_ROUND.indexOf(ch) >= 0 ? cal.overshoot : 0);
+    var dy = gridBase - (gb[3] + below);
     var cx = left + (right - left) / 2;
     tf.translate(cx - (gb[0] + gb[2]) / 2, dy);
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
@@ -525,27 +530,20 @@ function fmReadActive() {
 // every box's artwork and maps it to that glyph. Each cell spans descender..
 // ascender (height = (asc-desc)*FM_SCALE), so the same baseline mapping that
 // fmReadActive/ilbridge.contoursFromArtboard uses works per cell. =====
-function fmTemplateCells(chars, M) {
+function fmTemplateCells(rows, M) {
   // cell HEIGHT must stay (ascender-descender)*FM_SCALE so the baseline mapping
   // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size.
   var AH = (M.ascender - M.descender) * FM_SCALE;
   var AW = Math.round(AH * 0.72);
   var GAP = Math.round(AH * 0.10);
-  var ROWGAP = Math.round(AH * 0.45);
-  var ox = 80, oy = -80;
-  // 3 rows: all uppercase, all lowercase, all numbers/other — each on one line
-  var rows = [[], [], []];
-  for (var i = 0; i < chars.length; i++) {
-    var c = chars[i];
-    if (c >= 'A' && c <= 'Z') rows[0].push(c);
-    else if (c >= 'a' && c <= 'z') rows[1].push(c);
-    else rows[2].push(c);
-  }
+  var ROWGAP = Math.round(AH * 0.55);
   var cells = [];
+  // ONE ROW PER SELECTED SET (rows = [[chars of set1], [chars of set2], …]) — the
+  // sheet grows DOWNWARD as more alphabet sets are added on page 1.
   for (var r = 0; r < rows.length; r++) {
-    var top = oy - r * (AH + ROWGAP);
+    var top = -r * (AH + ROWGAP);
     for (var k = 0; k < rows[r].length; k++) {
-      var left = ox + k * (AW + GAP);
+      var left = k * (AW + GAP);
       cells.push({ ch: rows[r][k], left: left, top: top, right: left + AW, bottom: top - AH });
     }
   }
@@ -554,29 +552,35 @@ function fmTemplateCells(chars, M) {
 function fmOpenTemplate(arg) {
   try {
     var cfg = eval('(' + arg + ')');
-    var M = cfg.metrics, grids = cfg.grids || [], chars = cfg.chars || [], upm = cfg.unitsPerEm || 1000;
-    if (!chars.length) return '{"ok":false,"error":"no characters"}';
-    var cells = fmTemplateCells(chars, M);
-    var maxRight = 80, minBottom = -80;
-    for (var i = 0; i < cells.length; i++) { if (cells[i].right > maxRight) maxRight = cells[i].right; if (cells[i].bottom < minBottom) minBottom = cells[i].bottom; }
-    var doc = app.documents.add(DocumentColorSpace.RGB, maxRight + 200, (-minBottom) + 200);
-    try { doc.artboards[0].artboardRect = [40, -40, maxRight + 120, minBottom - 120]; } catch (eA) {}
+    var M = cfg.metrics, grids = cfg.grids || [], rows = cfg.rows || [], upm = cfg.unitsPerEm || 1000;
+    if (!rows.length && cfg.chars && cfg.chars.length) rows = [cfg.chars]; // back-compat
+    if (!rows.length) return '{"ok":false,"error":"no characters"}';
+    var cells = fmTemplateCells(rows, M);
+    if (!cells.length) return '{"ok":false,"error":"no characters"}';
+    // content bounds, then a GENEROUS margin so the artboard is big and the content
+    // sits small (~78%) inside it (per request).
+    var cL = 1e9, cR = -1e9, cT = -1e9, cB = 1e9;
+    for (var i = 0; i < cells.length; i++) { var c0 = cells[i]; if (c0.left < cL) cL = c0.left; if (c0.right > cR) cR = c0.right; if (c0.top > cT) cT = c0.top; if (c0.bottom < cB) cB = c0.bottom; }
+    var padX = Math.round((cR - cL) * 0.14), padY = Math.round((cT - cB) * 0.14);
+    var abL = cL - padX, abR = cR + padX, abT = cT + padY, abB = cB - padY;
+    var doc = app.documents.add(DocumentColorSpace.RGB, Math.max(50, Math.ceil(abR - abL)), Math.max(50, Math.ceil(abT - abB)));
+    try { doc.artboards[0].artboardRect = [abL, abT, abR, abB]; } catch (eA) {}
     var tpl = doc.layers.add(); tpl.name = 'Template (locked)';
     var art = doc.layers.add(); art.name = 'Artwork'; art.zOrder(ZOrderMethod.BRINGTOFRONT);
     for (var li = doc.layers.length - 1; li >= 0; li--) { var L = doc.layers[li]; if (L !== tpl && L !== art) { try { L.locked = false; L.remove(); } catch (eX) {} } }
-    var gcal = fmGhostCalib(tpl, M, upm);   // one uniform ghost size + shared baseline for the whole sheet
+    var gcal = fmGhostCalib(tpl, M, upm);   // one uniform ghost size + baseline calibration for the sheet
     for (var c = 0; c < cells.length; c++) {
       var ce = cells[c];
       var box = tpl.pathItems.rectangle(ce.top, ce.left, ce.right - ce.left, ce.top - ce.bottom);
       box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
       box.name = 'fmcell:' + ce.ch.charCodeAt(0);             // tag the box so Import recovers the glyph
       fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
-      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gcal.scale, gcal.baseY0); // faint target letter to trace
+      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gcal); // faint target letter to trace
     }
     tpl.locked = true;
     doc.activeLayer = art;
     try { app.executeMenuCommand('fitall'); } catch (eF) {}
-    return '{"ok":true,"cells":' + cells.length + ',"doc":"' + String(doc.name).replace(/"/g, '\\"') + '"}';
+    return '{"ok":true,"cells":' + cells.length + ',"rows":' + rows.length + ',"doc":"' + String(doc.name).replace(/"/g, '\\"') + '"}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 function fmReadTemplate() {
