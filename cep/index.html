@@ -122,7 +122,18 @@
         <div class="w-modauto">
           <button id="optimizeBtn" class="rune-btn blue sm2" title="Optimize spacing &amp; kerning — sets the blue (LSB) and red (advance) lines + optical pair kerning. Never resizes a glyph.">Optimize</button>
           <button id="autoKern" class="rune-btn outline sm2" title="Bake optical pair kerning into the font's kern table">Auto Kern</button>
-          <label class="w-refspace" title="X spacing — each letter's side bearings averaged from Arial + Times New Roman. The % exaggerates (&gt;100%) or tightens (&lt;100%) that classic rhythm; it never uses your font's own values and never resizes a glyph.">X&nbsp;Spacing<input id="refSpace" class="gd-slider wctl" type="range" min="0" max="200" value="100" /><span id="refSpaceVal" class="w-refval">100%</span></label>
+        </div>
+        <div class="w-corr">
+          <div class="w-corr-row">
+            <button id="stdCorrect" class="rune-btn outline sm2" title="Standard correction — set every glyph's side bearings to the X value: each letter's bearings averaged from Arial + Times New Roman. The slider widens (&gt;100%) or tightens (&lt;100%) that spacing; at 0 the blue/red lines hug the ink. Never uses your font's own values; never resizes.">Standard</button>
+            <input id="refSpace" class="gd-slider wctl" type="range" min="0" max="200" value="100" />
+            <span id="refSpaceVal" class="w-refval">100%</span>
+          </div>
+          <div class="w-corr-row">
+            <button id="optCorrect" class="rune-btn outline sm2" title="Optical correction — nudge each glyph horizontally toward its ink density (e.g. C is heavy on the left → shifts left), staying within the bearings Standard set. The red/blue lines don't move; only the ink shifts. Horizontal only; never resizes.">Optical</button>
+            <input id="optical" class="gd-slider wctl" type="range" min="0" max="100" value="0" />
+            <span id="opticalVal" class="w-refval">0%</span>
+          </div>
         </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>

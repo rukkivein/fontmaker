@@ -60,4 +60,51 @@ var projf = { glyphs: [squareGlyph('f', 500)] };         // inkW 200 -> 20+200-3
 refspace.applyRefSpacing(projf, 'm0', tf, 30);
 ok(projf.glyphs[0].advanceWidth === 30, 'minAdvance clamps an absurd negative advance to the floor');
 
+// =====================================================================
+// OPTICAL correction (density nudge, horizontal-only, advance fixed)
+// =====================================================================
+// A left-heavy triangle: vertices (100,0),(300,0),(100,400). Its area centroid x is
+// (100+300+100)/3 = 166.7 — LEFT of the bbox centre (200), like a C.
+function leftHeavyGlyph(ch) {
+  return { char: ch, advanceWidth: 0, layers: { m0: { contours: [{ closed: true, points: [
+    { x: 100, y: 0 }, { x: 300, y: 0 }, { x: 100, y: 400 },
+  ] }] } } };
+}
+var cx = refspace.areaCentroidX(leftHeavyGlyph('C').layers.m0.contours);
+ok(cx != null && Math.abs(cx - 200 / 3 - 100) < 1, 'areaCentroidX: left-heavy triangle centroid ≈166.7 (left of centre 200)');
+
+var tC = refspace.spacingTargets({ C: { lsb: 0.05, rsb: 0.04 } }, 1000, 100); // lsb50 rsb40
+
+// standard only (opticalAmount = 0)
+var pStd = { glyphs: [leftHeavyGlyph('C')] };
+refspace.applyRefSpacing(pStd, 'm0', tC, 30, 0);
+var bStd = refspace.bezBounds(pStd.glyphs[0].layers.m0.contours);
+ok(bStd.xMin === 50, 'standard: ink-left = LSB (50)');
+ok(pStd.glyphs[0].advanceWidth === 290, 'standard: advance = 50+200+40 = 290');
+
+// standard + optical (amount 1.0) — ink nudges LEFT, advance UNCHANGED, width UNCHANGED
+var pOpt = { glyphs: [leftHeavyGlyph('C')] };
+refspace.applyRefSpacing(pOpt, 'm0', tC, 30, 1.0);
+var bOpt = refspace.bezBounds(pOpt.glyphs[0].layers.m0.contours);
+ok(pOpt.glyphs[0].advanceWidth === 290, 'optical: advance STILL 290 — the box never moves');
+ok(Math.round(bOpt.w) === 200, 'optical: ink width STILL 200 — never resized');
+ok(bOpt.xMin < bStd.xMin, 'optical: left-heavy glyph nudged LEFT (ink-left ' + bOpt.xMin + ' < ' + bStd.xMin + ')');
+ok(Math.abs(bOpt.xMin - (50 - 33.33)) < 1.5, 'optical: nudge = balance (≈ -33.3) within the bearings');
+
+// optical clamp: a huge amount can't push the ink past the pen origin (ink-left ≥ 0)
+var pClamp = { glyphs: [leftHeavyGlyph('C')] };
+refspace.applyRefSpacing(pClamp, 'm0', tC, 30, 100);
+var bClamp = refspace.bezBounds(pClamp.glyphs[0].layers.m0.contours);
+ok(bClamp.xMin === 0, 'optical clamp: ink-left pinned at 0 (within LSB), not driven negative');
+ok(pClamp.glyphs[0].advanceWidth === 290, 'optical clamp: advance still 290');
+
+// optical is purely horizontal — Y bounds untouched
+ok(bOpt.yMin === bStd.yMin && bOpt.yMax === bStd.yMax, 'optical: vertical bounds unchanged (horizontal-only)');
+
+// stacking is order-independent / idempotent: re-applying gives the same result
+var advBefore2 = bOpt.xMin;
+refspace.applyRefSpacing(pOpt, 'm0', tC, 30, 1.0);
+var bOpt2 = refspace.bezBounds(pOpt.glyphs[0].layers.m0.contours);
+ok(Math.abs(bOpt2.xMin - advBefore2) < 0.01 && pOpt.glyphs[0].advanceWidth === 290, 'standard+optical re-apply is idempotent');
+
 console.log('\nrefspace tests passed');

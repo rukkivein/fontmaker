@@ -1275,39 +1275,44 @@ function refFracTable() {
   } catch (e) { _refFracTable = null; }
   return _refFracTable;
 }
-function refSpaceValue() { var el = $('refSpace'); var P = el ? parseInt(el.value, 10) : 100; return isNaN(P) ? 100 : P; }
-// Apply the X spacing at the slider's %. commit=false → panel-only live preview
-// (cheap, for dragging); commit=true → also push to open glyph docs + autosave.
-function applyRefSpace(commit) {
+function sliderVal(id, dflt) { var el = $(id); var v = el ? parseInt(el.value, 10) : dflt; return isNaN(v) ? dflt : v; }
+// Apply BOTH corrections, stacked: STANDARD (Arial+Times X spacing at refSpace%) sets
+// the advance box; OPTICAL (optical%) nudges each glyph horizontally toward its ink
+// density within those bearings, leaving the box (red/blue lines) put. Neither
+// resizes. commit=false → panel-only live preview (cheap, for dragging); commit=true
+// → also push to open glyph docs + autosave.
+function applyCorrections(commit) {
   if (!FEAT.optimize) return;
   var f = curFont(); if (!f) return;
   if (!f.glyphs.some(isFilled)) { if (commit) setStatus('Draw and assign some glyphs first.', 'err'); return; }
   var frac = refFracTable();
-  if (!frac) { if (commit) setStatus('Could not read Arial / Times New Roman for X spacing.', 'err'); return; }
-  var P = refSpaceValue(); f.refSpace = P;
+  if (!frac) { if (commit) setStatus('Could not read Arial / Times New Roman for spacing.', 'err'); return; }
+  var P = sliderVal('refSpace', 100), O = sliderVal('optical', 0);
+  f.refSpace = P; f.optical = O;
   if ($('refSpaceVal')) $('refSpaceVal').textContent = P + '%';
+  if ($('opticalVal')) $('opticalVal').textContent = O + '%';
   bakeAllOrigins(f);                                   // fold blue-line offsets first
   var targets = refspace.spacingTargets(frac, f.unitsPerEm, P);
   var minA = Math.round((f.unitsPerEm || 1000) * 0.03);
-  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA);
+  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100);
   flatCache = {}; kernCache = {};
   renderModGrid(); renderRight(); renderTesterText();
   if (commit) {
     f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
     scheduleTester(); autosave();
-    setStatus('X spacing (Arial+Times) at ' + P + '% — re-spaced ' + n + ' glyph(s).', 'ok');
+    setStatus('Spacing — standard ' + P + '%, optical ' + O + '% on ' + n + ' glyph(s).', 'ok');
   }
 }
 var _refRAF = 0;
-function scheduleRefSpace() {                          // coalesce live drags to one apply/frame
+function scheduleCorrections() {                       // coalesce live drags to one apply/frame
   if (_refRAF) return;
   var raf = (typeof window !== 'undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
-  _refRAF = raf(function () { _refRAF = 0; applyRefSpace(false); });
+  _refRAF = raf(function () { _refRAF = 0; applyCorrections(false); });
 }
-function syncRefSlider() {                             // reflect the saved % when (re)entering the page
-  var el = $('refSpace'); if (!el) return; var f = curFont();
-  el.value = (f && f.refSpace != null) ? f.refSpace : 100;
-  if ($('refSpaceVal')) $('refSpaceVal').textContent = el.value + '%';
+function syncRefSlider() {                             // reflect the saved %s when (re)entering the page
+  var f = curFont();
+  var s = $('refSpace'); if (s) { s.value = (f && f.refSpace != null) ? f.refSpace : 100; if ($('refSpaceVal')) $('refSpaceVal').textContent = s.value + '%'; }
+  var o = $('optical'); if (o) { o.value = (f && f.optical != null) ? f.optical : 0; if ($('opticalVal')) $('opticalVal').textContent = o.value + '%'; }
 }
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
@@ -2384,7 +2389,8 @@ function applyEdition() {
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
   lockCtl('accentBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
-  lockCtl('refSpace', FEAT.optimize, PRO);
+  lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('optical', FEAT.optimize, PRO);
+  lockCtl('stdCorrect', FEAT.optimize, PRO); lockCtl('optCorrect', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
@@ -2443,9 +2449,15 @@ function boot() {
   $('autoKern').addEventListener('click', onAutoKern);
   $('optimizeBtn').addEventListener('click', onOptimize);
   if ($('refSpace')) {
-    $('refSpace').addEventListener('input', function () { if ($('refSpaceVal')) $('refSpaceVal').textContent = this.value + '%'; scheduleRefSpace(); });
-    $('refSpace').addEventListener('change', function () { applyRefSpace(true); });
+    $('refSpace').addEventListener('input', function () { if ($('refSpaceVal')) $('refSpaceVal').textContent = this.value + '%'; scheduleCorrections(); });
+    $('refSpace').addEventListener('change', function () { applyCorrections(true); });
   }
+  if ($('optical')) {
+    $('optical').addEventListener('input', function () { if ($('opticalVal')) $('opticalVal').textContent = this.value + '%'; scheduleCorrections(); });
+    $('optical').addEventListener('change', function () { applyCorrections(true); });
+  }
+  if ($('stdCorrect')) $('stdCorrect').addEventListener('click', function () { applyCorrections(true); });
+  if ($('optCorrect')) $('optCorrect').addEventListener('click', function () { applyCorrections(true); });
   $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
