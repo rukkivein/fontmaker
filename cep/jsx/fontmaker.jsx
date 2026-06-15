@@ -221,32 +221,40 @@ function fmEllipse(layer, cx, topY, width, height) {
 }
 
 var FM_DESCENDERS = 'gjpqyµç';
-function fmGhost(layer, ch, left, right, bottom, M, upm) {
+// Measure a reference cap so EVERY ghost uses ONE uniform size (caps land on the
+// cap line, proportions preserved) regardless of the host font's actual metrics.
+function fmGhostScale(layer, M, upm) {
+  try {
+    var rf = layer.textFrames.add(); rf.contents = 'H';
+    var ra = rf.textRange.characterAttributes; ra.size = upm * FM_SCALE;
+    try { ra.textFont = app.textFonts.getByName('ArialMT'); } catch (e1) { try { ra.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
+    var rb = rf.geometricBounds, inkH = rb[1] - rb[3];
+    rf.remove();
+    return (inkH > 0) ? (M.capHeight * FM_SCALE) / inkH : 1;
+  } catch (e) { return 1; }
+}
+function fmGhost(layer, ch, left, right, bottom, M, upm, scale) {
   function fy(u) { return bottom + (u - M.descender) * FM_SCALE; }
   if (ch === ' ' || ch === '') return;
+  scale = scale || 1;
   try {
     var tf = layer.textFrames.add();
     tf.contents = ch;
     var attr = tf.textRange.characterAttributes;
-    // Point size = the em in points, so Arial's own cap/x-height land on the
-    // grid lines (the grid metrics are chosen to match typical proportions).
-    attr.size = upm * FM_SCALE;
+    // ONE uniform calibrated size for every letter → all caps reach the cap line,
+    // x-height/ascenders/descenders stay proportional. No per-letter resizing
+    // (that made wide letters shrink and the row look crooked).
+    attr.size = upm * FM_SCALE * scale;
     try { attr.textFont = app.textFonts.getByName('ArialMT'); }
     catch (e1) { try { attr.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
     tf.opacity = 12;
     tf.name = 'fm-ghost';
-    // Proportional + CONTAINED: shrink (never enlarge) so the ink fits the cell —
-    // most caps stay full size (uniform); only very wide letters tuck in.
-    var cellH = (M.ascender - M.descender) * FM_SCALE, cellW = right - left;
+    // Seat on the baseline by ink bounds (descenders hang below); centre each
+    // letter by its OWN ink centre in the cell.
     var gb = tf.geometricBounds; // [l, t, r, b] (y up) ink bounds
-    var gh = gb[1] - gb[3], gw = gb[2] - gb[0], fit = 1;
-    if (gh > 0 && gw > 0) fit = Math.min(1, cellH * 0.9 / gh, cellW * 0.88 / gw);
-    if (fit > 0 && fit < 1) tf.resize(fit * 100, fit * 100);
-    // Align by ink bounds: baseline = bbox bottom; descenders nudge below.
-    gb = tf.geometricBounds;
     var baseY = fy(0);
     var hasDesc = FM_DESCENDERS.indexOf(ch) !== -1;
-    var targetBottom = hasDesc ? (baseY - 0.21 * upm * FM_SCALE * fit) : baseY;
+    var targetBottom = hasDesc ? (baseY - 0.21 * upm * FM_SCALE * scale) : baseY;
     var cx = left + (right - left) / 2;
     tf.translate(cx - (gb[0] + gb[2]) / 2, targetBottom - gb[3]);
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
@@ -548,13 +556,14 @@ function fmOpenTemplate(arg) {
     var tpl = doc.layers.add(); tpl.name = 'Template (locked)';
     var art = doc.layers.add(); art.name = 'Artwork'; art.zOrder(ZOrderMethod.BRINGTOFRONT);
     for (var li = doc.layers.length - 1; li >= 0; li--) { var L = doc.layers[li]; if (L !== tpl && L !== art) { try { L.locked = false; L.remove(); } catch (eX) {} } }
+    var gScale = fmGhostScale(tpl, M, upm);   // one uniform ghost size for the whole sheet
     for (var c = 0; c < cells.length; c++) {
       var ce = cells[c];
       var box = tpl.pathItems.rectangle(ce.top, ce.left, ce.right - ce.left, ce.top - ce.bottom);
       box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
       box.name = 'fmcell:' + ce.ch.charCodeAt(0);             // tag the box so Import recovers the glyph
       fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
-      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm); // faint target letter to trace
+      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gScale); // faint target letter to trace
     }
     tpl.locked = true;
     doc.activeLayer = art;
