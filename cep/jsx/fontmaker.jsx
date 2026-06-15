@@ -604,6 +604,28 @@ function fmOpenTemplate(arg) {
     return '{"ok":true,"cells":' + cells.length + ',"sets":' + sets.length + ',"doc":"' + String(doc.name).replace(/"/g, '\\"') + '"}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
+// Gather EVERY drawn leaf path on the Artwork layer ONCE, caching each path's bbox
+// CENTRE. This is the key to keeping template import fast: geometricBounds is an
+// expensive ExtendScript call (it flushes geometry), so we read it once per path
+// here instead of once per (box × path) — the old quadratic scan that froze big
+// multi-set templates (hundreds of boxes × the drawn paths = tens of thousands of
+// geometricBounds reads). Assignment to boxes is then just cheap number compares.
+function fmCollectArt(container, out) {
+  var items = container.pageItems;
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i], t = it.typename;
+    if (t === 'GroupItem') { fmCollectArt(it, out); continue; }
+    var bag = [];
+    if (t === 'PathItem') bag = [it];
+    else if (t === 'CompoundPathItem') { for (var c = 0; c < it.pathItems.length; c++) bag.push(it.pathItems[c]); }
+    for (var b = 0; b < bag.length; b++) {
+      var p = bag[b];
+      if (!p.pathPoints || p.pathPoints.length < 2) continue;
+      var gb = p.geometricBounds;                  // read ONCE per path
+      out.push({ p: p, cx: (gb[0] + gb[2]) / 2, cy: (gb[1] + gb[3]) / 2 });
+    }
+  }
+}
 function fmReadTemplate() {
   try {
     if (app.documents.length === 0) return '{"ok":false,"error":"no document open"}';
@@ -615,16 +637,19 @@ function fmReadTemplate() {
       var items = container.pageItems;
       for (var k = 0; k < items.length; k++) { var it = items[k]; if (it.typename === 'GroupItem') { scan(it); continue; } if (it.name && it.name.indexOf('fmcell:') === 0) boxes.push(it); }
     })(tpl);
+    var arts = [];
+    if (art) fmCollectArt(art, arts);              // ALL drawn paths + centres — bounds read once each
     var parts = [];
     for (var b = 0; b < boxes.length; b++) {
       var bx = boxes[b], code = parseInt(bx.name.split(':')[1], 10);
       if (!(code > 0)) continue;
       var gb = bx.geometricBounds;                 // [l, t, r, btm] (y-up)
-      var paths = [];
-      if (art) fmCollectInRect(art, gb, paths);
-      if (!paths.length) continue;
       var ps = [];
-      for (var p = 0; p < paths.length; p++) ps.push(fmSerializePath(paths[p]));
+      for (var a = 0; a < arts.length; a++) {      // assign by centre-in-box — pure arithmetic, no DOM reads
+        var ar = arts[a];
+        if (ar.cx >= gb[0] && ar.cx <= gb[2] && ar.cy <= gb[1] && ar.cy >= gb[3]) ps.push(fmSerializePath(ar.p));
+      }
+      if (!ps.length) continue;
       parts.push('{"code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
     }
     return '{"ok":true,"scale":' + FM_SCALE + ',"cells":[' + parts.join(',') + ']}';
