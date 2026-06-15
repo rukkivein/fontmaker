@@ -258,9 +258,14 @@ function fmGhost(layer, ch, left, right, bottom, M, upm, cal) {
     var attr = tf.textRange.characterAttributes;
     attr.size = upm * FM_SCALE * cal.scale;   // one uniform calibrated size for every letter
     fmGhostFont(attr);
+    // SOLID faint gray, NOT 12% opacity. Transparency forces Illustrator into
+    // transparency-group compositing on every redraw; hundreds of transparent
+    // ghosts on a big artboard overwhelmed the GPU (display driver TDR — the screen
+    // went black every few seconds). A solid light fill looks the same but is cheap.
+    attr.fillColor = fmColor(205);
     var typeBottom = tf.geometricBounds[3];     // line-box bottom — SAME y for every glyph at this size
     var g = tf.createOutline();                 // outline for the visual + the horizontal (ink) centre
-    g.opacity = 12; g.name = 'fm-ghost';
+    g.name = 'fm-ghost';                        // opacity stays 100% — no transparency
     var ink = g.geometricBounds;                // [l, t, r, b] (y up) real ink bounds — used ONLY for X centring
     var baseline = typeBottom + cal.typeDescent; // glyph-independent baseline (accent-proof)
     var gridBase = bottom + (0 - M.descender) * FM_SCALE;   // baseline grid line = fy(0)
@@ -505,6 +510,11 @@ function fmReadActive() {
   try {
     if (app.documents.length === 0) return '{"ok":false,"error":"no document"}';
     var doc = app.activeDocument;
+    // The TEMPLATE is a batch workflow (Open → draw every letter → Import), not live
+    // per-glyph sync. Bail instantly here so the 700ms poller doesn't read+serialize
+    // the whole sheet's artwork and force Illustrator to flush geometry / redraw a
+    // big document on a timer (which, with the GPU already busy, made it stutter).
+    for (var ti = 0; ti < doc.layers.length; ti++) if (doc.layers[ti].name.indexOf('Template') === 0) return '{"ok":false,"error":"template"}';
     var idx = doc.artboards.getActiveArtboardIndex();
     var ab = doc.artboards[idx];
     var r = ab.artboardRect;
