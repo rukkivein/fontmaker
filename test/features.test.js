@@ -13,14 +13,14 @@ ok(EDITION === 'pro', "active EDITION is 'pro' (full version)");
 ok(FEATURES === EDITIONS.pro, 'FEATURES resolves to the pro set');
 
 // Pro unlocks the whole premium surface.
-['masters', 'exportTtf', 'exportVariable', 'fontImport', 'accents', 'optimize', 'alternates', 'gridPresets']
+['masters', 'exportTtf', 'exportVariable', 'fontImport', 'accents', 'optimize', 'alternates', 'gridPresets', 'template']
   .forEach((k) => ok(EDITIONS.pro[k] === true, 'pro unlocks "' + k + '"'));
 ok(EDITIONS.pro.exportOtf === true, 'pro keeps OTF export on');
 ok(EDITIONS.pro.charsets === null, 'pro offers all character sets');
 ok(EDITIONS.pro.emptyGlyphArt === null, 'pro exports drawn glyphs only (no placeholder)');
 
 // The alpha SET stays correctly defined (so a future free build is still safe).
-['masters', 'exportTtf', 'exportVariable', 'fontImport', 'accents', 'optimize', 'alternates', 'gridPresets']
+['masters', 'exportTtf', 'exportVariable', 'fontImport', 'accents', 'optimize', 'alternates', 'gridPresets', 'template']
   .forEach((k) => ok(EDITIONS.alpha[k] === false, 'alpha set still gates "' + k + '" off'));
 ok(EDITIONS.alpha.exportOtf === true, 'alpha set keeps OTF export on (core deliverable)');
 ok(Array.isArray(EDITIONS.alpha.charsets) &&

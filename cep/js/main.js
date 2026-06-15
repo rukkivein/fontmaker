@@ -882,6 +882,51 @@ function onImport() {
   else pickPath('Open a RuneType project to edit', 'RuneType Projects:*.runetype').then(openFromPath);
 }
 
+// --- Fontself-style template: an Illustrator sheet with a locked box + grid +
+// ghost per glyph (A–Z, a–z, 0–9). Draw each letter in its box, then import all
+// boxes at once — each box's artwork maps to its glyph at the drawn size/position.
+function templateChars() {
+  return ('ABCDEFGHIJKLMNOPQRSTUVWXYZ' + 'abcdefghijklmnopqrstuvwxyz' + '0123456789').split('');
+}
+function onOpenTemplate() {
+  if (!FEAT.template) return;
+  var fam = $('nf-family').value.trim() || 'RuneType';
+  var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: ['latinUpper', 'latinLower', 'numbers'] });
+  var cfg = { chars: templateChars(), metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
+  setStatus('Opening template in Illustrator…');
+  evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (r && r.ok) setStatus('Template opened — draw each letter inside its box (boxes/grid/ghosts are locked), then "Import from Template".', 'ok');
+    else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
+  });
+}
+function onImportTemplate() {
+  if (!FEAT.template) return;
+  setStatus('Reading template…');
+  evalScript('fmReadTemplate()').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!r || !r.ok) { setStatus('Could not read template: ' + ((r && r.error) || 'open a template first'), 'err'); return; }
+    if (!r.cells || !r.cells.length) { setStatus('No drawn letters found in the template boxes.', 'err'); return; }
+    var fam = $('nf-family').value.trim() || 'RuneType Sans';
+    var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: ['latinUpper', 'latinLower', 'numbers'] });
+    var mid = proj.masters[0].id, desc = proj.metrics.descender, placed = 0;
+    var byChar = {}; proj.glyphs.forEach(function (g, i) { if (g.char != null) byChar[g.char] = i; });
+    r.cells.forEach(function (cell) {
+      var ch = String.fromCharCode(cell.code), idx = byChar[ch];
+      if (idx == null) return;
+      var contours = ilbridge.contoursFromArtboard(cell.paths, cell.rect, r.scale, desc);
+      if (!contours.length) return;
+      glyphset.setGlyphContours(proj, idx, mid, contours, null); // auto advance from the drawn ink
+      placed++;
+    });
+    if (!placed) { setStatus('No letters could be imported — draw inside the boxes first.', 'err'); return; }
+    fonts.push(proj); activeFont = fonts.length - 1;
+    selectedSlot = -1; openGlyphIndex = -1; searchQuery = ''; alphaFilters = []; activeMaster = 0; lastSig = {}; flatCache = {}; kernCache = {};
+    show('work'); renderWorkspace();
+    setStatus('Imported ' + placed + ' letter(s) from the template.', 'ok');
+  });
+}
+
 // --- Start Creating: build the font from the draft, then enter the workspace ---
 function onStartCreating() {
   var alphabets = Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; });
@@ -2300,6 +2345,7 @@ function applyEdition() {
   lockCtl('w-masterSel', FEAT.masters, PRO);
   lockCtl('countryBtn', !FEAT.charsets, PRO);           // country auto-select (locked sets greyed in the list)
   lockCtl('tg-grid', FEAT.gridPresets, 'Grid presets are a Pro feature');
+  lockCtl('nf-opentpl', FEAT.template, PRO); lockCtl('nf-importtpl', FEAT.template, PRO);
   lockCtl('altBtn', FEAT.alternates, PRO); lockCtl('altChip', FEAT.alternates, PRO);
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
   lockCtl('accentBtn', FEAT.accents, PRO);
@@ -2320,6 +2366,8 @@ function boot() {
   $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
   $('nf-family').addEventListener('input', renderProfile);
+  $('nf-opentpl').addEventListener('click', onOpenTemplate);
+  $('nf-importtpl').addEventListener('click', onImportTemplate);
   $('nf-import').addEventListener('click', onImport);
   $('nf-create').addEventListener('click', onStartCreating);
   // page 2 (workspace)

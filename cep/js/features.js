@@ -22,6 +22,7 @@ var EDITIONS = {
     optimize: false,                      // Optimize + Auto Kern mini-AI (Auto Fit stays on)
     alternates: false,                    // + Alternate / + Ligature + per-occurrence swap
     gridPresets: false,                   // only the default grid; no preset menu / Grid pill
+    template: false,                      // Fontself-style Open/Import Template sheet
     charsets: ['latinUpper', 'numbers'],  // New Font sets offered (null = all sets)
     emptyGlyphArt: 'bosharf',             // placeholder art assets/<art>.svg for empty cells (null = letter ghost)
   },
@@ -37,6 +38,7 @@ var EDITIONS = {
     optimize: true,
     alternates: true,
     gridPresets: true,
+    template: true,
     charsets: null,
     emptyGlyphArt: null,
   },

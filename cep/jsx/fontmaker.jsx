@@ -500,3 +500,77 @@ function fmReadActive() {
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 
+// ===== Fontself-style TEMPLATE: one document with a locked box+grid+ghost per
+// glyph (A–Z, a–z, 0–9). The user draws each letter into its box; Import reads
+// every box's artwork and maps it to that glyph. Each cell spans descender..
+// ascender (height = (asc-desc)*FM_SCALE), so the same baseline mapping that
+// fmReadActive/ilbridge.contoursFromArtboard uses works per cell. =====
+function fmTemplateCells(chars, M) {
+  var AH = (M.ascender - M.descender) * FM_SCALE;
+  var AW = Math.round(AH * 0.74);
+  var GAP = Math.round(AH * 0.18);
+  var COLS = 13;                       // 26 upper -> 2 rows, 26 lower -> 2 rows, 10 num -> 1 row
+  var ox = 80, oy = -80;               // top-left of the first cell (Illustrator y-up)
+  var cells = [];
+  for (var i = 0; i < chars.length; i++) {
+    var col = i % COLS, row = Math.floor(i / COLS);
+    var left = ox + col * (AW + GAP);
+    var top = oy - row * (AH + GAP);
+    cells.push({ ch: chars[i], left: left, top: top, right: left + AW, bottom: top - AH });
+  }
+  return cells;
+}
+function fmOpenTemplate(arg) {
+  try {
+    var cfg = eval('(' + arg + ')');
+    var M = cfg.metrics, grids = cfg.grids || [], chars = cfg.chars || [], upm = cfg.unitsPerEm || 1000;
+    if (!chars.length) return '{"ok":false,"error":"no characters"}';
+    var cells = fmTemplateCells(chars, M);
+    var maxRight = 80, minBottom = -80;
+    for (var i = 0; i < cells.length; i++) { if (cells[i].right > maxRight) maxRight = cells[i].right; if (cells[i].bottom < minBottom) minBottom = cells[i].bottom; }
+    var doc = app.documents.add(DocumentColorSpace.RGB, maxRight + 200, (-minBottom) + 200);
+    try { doc.artboards[0].artboardRect = [40, -40, maxRight + 120, minBottom - 120]; } catch (eA) {}
+    var tpl = doc.layers.add(); tpl.name = 'Template (locked)';
+    var art = doc.layers.add(); art.name = 'Artwork'; art.zOrder(ZOrderMethod.BRINGTOFRONT);
+    for (var li = doc.layers.length - 1; li >= 0; li--) { var L = doc.layers[li]; if (L !== tpl && L !== art) { try { L.locked = false; L.remove(); } catch (eX) {} } }
+    for (var c = 0; c < cells.length; c++) {
+      var ce = cells[c];
+      var box = tpl.pathItems.rectangle(ce.top, ce.left, ce.right - ce.left, ce.top - ce.bottom);
+      box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
+      box.name = 'fmcell:' + ce.ch.charCodeAt(0);             // tag the box so Import recovers the glyph
+      fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
+      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm); // faint target letter to trace
+    }
+    tpl.locked = true;
+    doc.activeLayer = art;
+    try { app.executeMenuCommand('fitall'); } catch (eF) {}
+    return '{"ok":true,"cells":' + cells.length + ',"doc":"' + String(doc.name).replace(/"/g, '\\"') + '"}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+function fmReadTemplate() {
+  try {
+    if (app.documents.length === 0) return '{"ok":false,"error":"no document open"}';
+    var doc = app.activeDocument, tpl = null, art = null;
+    for (var i = 0; i < doc.layers.length; i++) { var L = doc.layers[i]; if (L.name.indexOf('Template') === 0) tpl = L; else if (L.name === 'Artwork') art = L; }
+    if (!tpl) return '{"ok":false,"error":"This document is not a RuneType template (no Template layer)."}';
+    var boxes = [];
+    (function scan(container) {
+      var items = container.pageItems;
+      for (var k = 0; k < items.length; k++) { var it = items[k]; if (it.typename === 'GroupItem') { scan(it); continue; } if (it.name && it.name.indexOf('fmcell:') === 0) boxes.push(it); }
+    })(tpl);
+    var parts = [];
+    for (var b = 0; b < boxes.length; b++) {
+      var bx = boxes[b], code = parseInt(bx.name.split(':')[1], 10);
+      if (!(code > 0)) continue;
+      var gb = bx.geometricBounds;                 // [l, t, r, btm] (y-up)
+      var paths = [];
+      if (art) fmCollectInRect(art, gb, paths);
+      if (!paths.length) continue;
+      var ps = [];
+      for (var p = 0; p < paths.length; p++) ps.push(fmSerializePath(paths[p]));
+      parts.push('{"code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
+    }
+    return '{"ok":true,"scale":' + FM_SCALE + ',"cells":[' + parts.join(',') + ']}';
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+}
+
