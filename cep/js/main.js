@@ -883,20 +883,24 @@ function onImport() {
 }
 
 // --- Fontself-style template: an Illustrator sheet with a locked box + grid +
-// ghost per glyph (A–Z, a–z, 0–9). Draw each letter in its box, then import all
-// boxes at once — each box's artwork maps to its glyph at the drawn size/position.
-function templateChars() {
-  return ('ABCDEFGHIJKLMNOPQRSTUVWXYZ' + 'abcdefghijklmnopqrstuvwxyz' + '0123456789').split('');
+// ghost per glyph for the SELECTED character sets. Draw each letter in its box,
+// then import all boxes at once — each box's artwork maps to its glyph at the
+// drawn size/position (imported exactly as drawn, never re-scaled).
+function templateAlphabets() {
+  var sel = draft && draft.lang ? Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; }) : [];
+  return sel.length ? sel : (FEAT.charsets || ['latinUpper', 'latinLower', 'numbers']);
 }
 function onOpenTemplate() {
   if (!FEAT.template) return;
   var fam = $('nf-family').value.trim() || 'RuneType';
-  var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: ['latinUpper', 'latinLower', 'numbers'] });
-  var cfg = { chars: templateChars(), metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
+  var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: templateAlphabets() });
+  var chars = [];
+  proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') chars.push(g.char); });
+  var cfg = { chars: chars, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
   setStatus('Opening template in Illustrator…');
   evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
     var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (r && r.ok) setStatus('Template opened — draw each letter inside its box (boxes/grid/ghosts are locked), then "Import from Template".', 'ok');
+    if (r && r.ok) setStatus('Template opened (' + (r.cells || chars.length) + ' glyphs) — draw each letter inside its box, then "Import from Template".', 'ok');
     else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
   });
 }
@@ -908,7 +912,7 @@ function onImportTemplate() {
     if (!r || !r.ok) { setStatus('Could not read template: ' + ((r && r.error) || 'open a template first'), 'err'); return; }
     if (!r.cells || !r.cells.length) { setStatus('No drawn letters found in the template boxes.', 'err'); return; }
     var fam = $('nf-family').value.trim() || 'RuneType Sans';
-    var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: ['latinUpper', 'latinLower', 'numbers'] });
+    var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: templateAlphabets() });
     var mid = proj.masters[0].id, desc = proj.metrics.descender, placed = 0;
     var byChar = {}; proj.glyphs.forEach(function (g, i) { if (g.char != null) byChar[g.char] = i; });
     r.cells.forEach(function (cell) {

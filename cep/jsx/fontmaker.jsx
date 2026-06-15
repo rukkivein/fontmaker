@@ -221,15 +221,17 @@ function fmEllipse(layer, cx, topY, width, height) {
 }
 
 var FM_DESCENDERS = 'gjpqyµç';
-// Measure a reference cap so EVERY ghost uses ONE uniform size (caps land on the
-// cap line, proportions preserved) regardless of the host font's actual metrics.
+// Measure a reference cap (OUTLINED, so it's the true glyph ink — not the type
+// line box) so EVERY ghost uses ONE uniform size where caps land exactly on the
+// cap line and fill the cell, proportions preserved, host-font-metrics-agnostic.
 function fmGhostScale(layer, M, upm) {
   try {
     var rf = layer.textFrames.add(); rf.contents = 'H';
     var ra = rf.textRange.characterAttributes; ra.size = upm * FM_SCALE;
     try { ra.textFont = app.textFonts.getByName('ArialMT'); } catch (e1) { try { ra.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
-    var rb = rf.geometricBounds, inkH = rb[1] - rb[3];
-    rf.remove();
+    var outlined = rf.createOutline();              // true cap ink (no leading/line box)
+    var gb = outlined.geometricBounds, inkH = gb[1] - gb[3];
+    outlined.remove();
     return (inkH > 0) ? (M.capHeight * FM_SCALE) / inkH : 1;
   } catch (e) { return 1; }
 }
