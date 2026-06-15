@@ -1187,11 +1187,7 @@ function renderModGrid() {
   if (!shown) grid.innerHTML = '<div class="w-modempty">Nothing placed yet — assign shapes on the glyphs. page first.</div>';
 }
 
-// ===== AUTOMATION — class-aware fitting: A reaches the cap, a the x-height,
-// b/d/k the ascender, g/p/y hangs its tail; W stays wide, I stays thin and
-// breathes more. Heights normalize per class, widths stay natural, spacing
-// scales with the glyph's width.
-var FIT_ASC = 'bdfhklt', FIT_DESC = 'gjpqy';
+// transformContours scales+translates a contour set (used by shiftContoursXY).
 function transformContours(contours, sc, x0, y0) {
   return contours.map(function (c) {
     return { closed: c.closed, points: c.points.map(function (pt) {
@@ -1203,44 +1199,13 @@ function transformContours(contours, sc, x0, y0) {
     }) };
   });
 }
-function autoFitGlyph(f, i) {
-  var g = f.glyphs[i], mid = curMasterId(), l = g.layers[mid];
-  if (!l || !l.contours || !l.contours.length) return false;
-  var b = glyphset.contoursBounds(l.contours);
-  if (!b || b.h <= 2) return false;
-  var M = f.metrics, ch = g.char || '', U = f.unitsPerEm;
-  var topAlign = null, target;
-  if (/^[A-Z0-9]$/.test(ch)) target = M.capHeight;
-  else if (/^[a-z]$/.test(ch)) {
-    if (FIT_DESC.indexOf(ch) >= 0) { target = M.xHeight - M.descender; topAlign = M.xHeight; }
-    else if (FIT_ASC.indexOf(ch) >= 0) target = M.capHeight;
-    else target = M.xHeight;
-  } else target = Math.min(b.h, M.capHeight); // punctuation & symbols stay sane
-  var sc = target / b.h, w = b.w * sc;
-  // spacing aware of width: thin glyphs (I) breathe, wide ones (W) tighten
-  var side = Math.round(0.055 * U * (w < 0.22 * U ? 1.5 : w > 0.75 * U ? 0.75 : 1));
-  var x0 = -b.minX * sc + side;
-  var y0 = topAlign != null ? topAlign - b.maxY * sc : -b.minY * sc;
-  l.contours = transformContours(l.contours, sc, x0, y0);
-  g.advanceWidth = Math.round(w + 2 * side);
-  g.lsbLineX = 0;   // auto-fit re-bases the ink onto the origin
-  lastSig[i] = glyphset.layerSignature(g, mid);
-  return true;
-}
 function syncOpenGlyph(g) {
   var l = g.layers[curMasterId()];
   evalScript('fmSetArt(' + JSON.stringify(JSON.stringify({ name: g.name, contours: (l && l.contours) || [], metrics: curFont().metrics })) + ')');
 }
-function onAutoAll() {
-  var f = curFont(), n = 0;
-  f.glyphs.forEach(function (g, i) { if (autoFitGlyph(f, i)) { n++; syncOpenGlyph(g); } });
-  if (!n) { setStatus('Nothing to fit yet — assign some shapes first.', 'err'); return; }
-  flatCache = {}; kernCache = {};
-  renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
-  setStatus('Auto-fitted ' + n + ' glyph(s): heights per class, spacing per width.', 'ok');
-}
 // The embedded optimizer ("mini AI"): class-aware sidebearings/advance for the
-// whole font + optical pair kerning, in one pass. Re-spaces consistently.
+// whole font + optical pair kerning, in one pass. ONLY moves the blue (LSB) and
+// red (advance) spacing lines + kern table — it never scales/resizes a glyph.
 function onOptimize() {
   if (!FEAT.optimize) return;
   var f = curFont();
@@ -1252,29 +1217,6 @@ function onOptimize() {
   renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
   setStatus('Optimized: re-spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' optical kern pair(s).', 'ok');
 }
-// EXPERIMENTAL: the optical pass we designed — align to the class box, uniformly
-// size each letter with density-driven overshoot, and add L/R kerning. Mutates
-// outlines, so it's a separate "test" button (Save the project first to keep originals).
-function onOptimizeTest() {
-  if (!FEAT.optimize) return;
-  var f = curFont();
-  if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
-  bakeAllOrigins(f);
-  var r = optimizer.optimizeTest(f, curMasterId());
-  f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
-  flatCache = {}; kernCache = {};
-  renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
-  setStatus('Optimize Test: optically sized + spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' kern pair(s).', 'ok');
-}
-function onAutoOne() {
-  if (selectedSlot < 0) return;
-  var f = curFont();
-  if (!autoFitGlyph(f, selectedSlot)) { setStatus('This glyph has no outline yet.', 'err'); return; }
-  syncOpenGlyph(f.glyphs[selectedSlot]);
-  renderGrid(); renderModGrid(); renderRight(); scheduleTester(); autosave();
-  setStatus('Auto-fitted "' + glyphLabel(f.glyphs[selectedSlot]) + '".', 'ok');
-}
-
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
 // ink-left line (LSB) or the red advance line.
@@ -1693,7 +1635,6 @@ function updateAssign() {
   else gchip.innerHTML = g ? glyphLabelHtml(g) : '';
   // match the glyphs. chip: a near-black backing behind a drawn shape thumbnail
   if (gwrap && gwrap.classList) gwrap.classList.toggle('has-shape', !!gShape);
-  $('autoOne').disabled = !(g && isFilled(g));
 }
 
 // ---- modification: alternates & ligatures ----
@@ -2350,7 +2291,6 @@ function applyEdition() {
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
   lockCtl('accentBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
-  lockCtl('optimizeTestBtn', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
@@ -2406,11 +2346,8 @@ function boot() {
     activeMaster = +this.value; lastSig = {}; flatCache = {}; kernCache = {};
     renderGrid(); renderModGrid(); refreshTester(); renderRight(); updateAssign();
   });
-  $('autoAll').addEventListener('click', onAutoAll);
-  $('autoOne').addEventListener('click', onAutoOne);
   $('autoKern').addEventListener('click', onAutoKern);
   $('optimizeBtn').addEventListener('click', onOptimize);
-  $('optimizeTestBtn').addEventListener('click', onOptimizeTest);
   $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);

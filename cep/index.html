@@ -120,11 +120,8 @@
       <!-- ===== modification. — kerning & metrics; only the placed glyphs ===== -->
       <div id="sec-mod" class="w-left hidden">
         <div class="w-modauto">
-          <button id="autoAll" class="rune-btn blue sm2">Auto Fit All</button>
-          <button id="autoOne" class="rune-btn outline sm2" disabled>Auto Fit Selected</button>
+          <button id="optimizeBtn" class="rune-btn blue sm2" title="Optimize spacing &amp; kerning — sets the blue (LSB) and red (advance) lines + optical pair kerning. Never resizes a glyph.">Optimize</button>
           <button id="autoKern" class="rune-btn outline sm2" title="Bake optical pair kerning into the font's kern table">Auto Kern</button>
-          <button id="optimizeBtn" class="rune-btn blue sm2" title="Smart pass: class-aware spacing for the whole font + optical kerning">Optimize</button>
-          <button id="optimizeTestBtn" class="rune-btn outline sm2" title="EXPERIMENTAL optical pass: align to the class box, uniformly size with density-driven overshoot, and add left/right kerning">Optimize Test</button>
         </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>
