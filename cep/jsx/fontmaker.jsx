@@ -542,8 +542,8 @@ function fmTemplateCells(sets, M) {
   // cell HEIGHT must stay (ascender-descender)*FM_SCALE so the baseline mapping
   // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size.
   var AH = (M.ascender - M.descender) * FM_SCALE;
-  var AW = Math.round(AH * 0.72);
-  var GAP = Math.round(AH * 0.10);
+  var AW = Math.round(AH * 0.81);   // ~13% wider boxes for more drawing room (does NOT
+  var GAP = Math.round(AH * 0.10);  //   affect import: the map uses only the box's left+bottom)
   var GAP_IN = Math.round(AH * 0.07);     // TIGHT gap between wrapped rows of the SAME set
   var GAP_SET = Math.round(AH * 0.34);    // small but clear gap BETWEEN sets (so a 2-row set
   var LABEL_BAND = Math.round(AH * 0.22); //   doesn't blur into a 1-row set); new set = fresh row
