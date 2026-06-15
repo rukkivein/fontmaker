@@ -233,18 +233,22 @@ function fmGhost(layer, ch, left, right, bottom, M, upm) {
     attr.size = upm * FM_SCALE;
     try { attr.textFont = app.textFonts.getByName('ArialMT'); }
     catch (e1) { try { attr.textFont = app.textFonts.getByName('Arial'); } catch (e2) {} }
-    tf.opacity = 11;
+    tf.opacity = 12;
     tf.name = 'fm-ghost';
-    // Align by ink bounds: baseline = bbox bottom for most letters; nudge down
-    // by a descender's depth for letters that sit below the baseline.
-    var gb = tf.geometricBounds; // [l, t, r, b] (y up)
+    // Proportional + CONTAINED: shrink (never enlarge) so the ink fits the cell —
+    // most caps stay full size (uniform); only very wide letters tuck in.
+    var cellH = (M.ascender - M.descender) * FM_SCALE, cellW = right - left;
+    var gb = tf.geometricBounds; // [l, t, r, b] (y up) ink bounds
+    var gh = gb[1] - gb[3], gw = gb[2] - gb[0], fit = 1;
+    if (gh > 0 && gw > 0) fit = Math.min(1, cellH * 0.9 / gh, cellW * 0.88 / gw);
+    if (fit > 0 && fit < 1) tf.resize(fit * 100, fit * 100);
+    // Align by ink bounds: baseline = bbox bottom; descenders nudge below.
+    gb = tf.geometricBounds;
     var baseY = fy(0);
     var hasDesc = FM_DESCENDERS.indexOf(ch) !== -1;
-    var targetBottom = hasDesc ? (baseY - 0.21 * upm * FM_SCALE) : baseY;
+    var targetBottom = hasDesc ? (baseY - 0.21 * upm * FM_SCALE * fit) : baseY;
     var cx = left + (right - left) / 2;
-    var dx = cx - (gb[0] + gb[2]) / 2;
-    var dy = targetBottom - gb[3];
-    tf.translate(dx, dy);
+    tf.translate(cx - (gb[0] + gb[2]) / 2, targetBottom - gb[3]);
   } catch (e) { /* ghost is best-effort (e.g. CJK not in Arial) */ }
 }
 
@@ -506,17 +510,28 @@ function fmReadActive() {
 // ascender (height = (asc-desc)*FM_SCALE), so the same baseline mapping that
 // fmReadActive/ilbridge.contoursFromArtboard uses works per cell. =====
 function fmTemplateCells(chars, M) {
+  // cell HEIGHT must stay (ascender-descender)*FM_SCALE so the baseline mapping
+  // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size.
   var AH = (M.ascender - M.descender) * FM_SCALE;
-  var AW = Math.round(AH * 0.74);
-  var GAP = Math.round(AH * 0.18);
-  var COLS = 13;                       // 26 upper -> 2 rows, 26 lower -> 2 rows, 10 num -> 1 row
-  var ox = 80, oy = -80;               // top-left of the first cell (Illustrator y-up)
-  var cells = [];
+  var AW = Math.round(AH * 0.72);
+  var GAP = Math.round(AH * 0.10);
+  var ROWGAP = Math.round(AH * 0.45);
+  var ox = 80, oy = -80;
+  // 3 rows: all uppercase, all lowercase, all numbers/other — each on one line
+  var rows = [[], [], []];
   for (var i = 0; i < chars.length; i++) {
-    var col = i % COLS, row = Math.floor(i / COLS);
-    var left = ox + col * (AW + GAP);
-    var top = oy - row * (AH + GAP);
-    cells.push({ ch: chars[i], left: left, top: top, right: left + AW, bottom: top - AH });
+    var c = chars[i];
+    if (c >= 'A' && c <= 'Z') rows[0].push(c);
+    else if (c >= 'a' && c <= 'z') rows[1].push(c);
+    else rows[2].push(c);
+  }
+  var cells = [];
+  for (var r = 0; r < rows.length; r++) {
+    var top = oy - r * (AH + ROWGAP);
+    for (var k = 0; k < rows[r].length; k++) {
+      var left = ox + k * (AW + GAP);
+      cells.push({ ch: rows[r][k], left: left, top: top, right: left + AW, bottom: top - AH });
+    }
   }
   return cells;
 }
