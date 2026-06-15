@@ -895,16 +895,20 @@ function onOpenTemplate() {
   var fam = $('nf-family').value.trim() || 'RuneType';
   var alphabets = templateAlphabets();   // selected set keys, in selection order
   var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: alphabets });
-  // ONE BLOCK PER SELECTED SET (in selection order). The jsx wraps a set past 100
-  // glyphs onto extra rows but always starts a new set on a fresh row; the sheet
-  // grows downward as more alphabets are added on page 1.
+  // ONE BLOCK PER SELECTED SET (in selection order), each captioned with its set
+  // name. The jsx wraps a set past 50 glyphs onto extra rows but always starts a new
+  // set on a fresh row; the sheet grows downward as more alphabets are added.
+  function setLabel(key) {
+    var a = (charsets.ALPHABETS || []).filter(function (it) { return it.key === key; })[0];
+    return a && a.label ? a.label : key;
+  }
   var sets = [];
   alphabets.forEach(function (key) {
     var chs = [];
     proj.glyphs.forEach(function (g) { if (g.alphabet === key && g.char != null && g.char !== ' ') chs.push(g.char); });
-    if (chs.length) sets.push(chs);
+    if (chs.length) sets.push({ name: setLabel(key), chars: chs });
   });
-  if (!sets.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) sets.push(all); }
+  if (!sets.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) sets.push({ name: '', chars: all }); }
   var cfg = { sets: sets, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
   setStatus('Opening template in Illustrator…');
   evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
