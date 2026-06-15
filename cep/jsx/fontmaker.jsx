@@ -530,39 +530,44 @@ function fmReadActive() {
 // every box's artwork and maps it to that glyph. Each cell spans descender..
 // ascender (height = (asc-desc)*FM_SCALE), so the same baseline mapping that
 // fmReadActive/ilbridge.contoursFromArtboard uses works per cell. =====
-function fmTemplateCells(rows, M) {
+function fmTemplateCells(sets, M) {
   // cell HEIGHT must stay (ascender-descender)*FM_SCALE so the baseline mapping
   // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size.
   var AH = (M.ascender - M.descender) * FM_SCALE;
   var AW = Math.round(AH * 0.72);
   var GAP = Math.round(AH * 0.10);
-  var ROWGAP = Math.round(AH * 0.55);
-  var cells = [];
-  // ONE ROW PER SELECTED SET (rows = [[chars of set1], [chars of set2], …]) — the
-  // sheet grows DOWNWARD as more alphabet sets are added on page 1.
-  for (var r = 0; r < rows.length; r++) {
-    var top = -r * (AH + ROWGAP);
-    for (var k = 0; k < rows[r].length; k++) {
-      var left = k * (AW + GAP);
-      cells.push({ ch: rows[r][k], left: left, top: top, right: left + AW, bottom: top - AH });
+  var GAP_IN = Math.round(AH * 0.07);   // TIGHT gap between wrapped rows of the SAME set
+  var GAP_SET = Math.round(AH * 0.30);  // small but clear gap BETWEEN sets (so a 2-row set
+  var MAX_COLS = 100;                    //   doesn't blur into a 1-row set); new set = fresh row
+  var cells = [], top = 0;
+  // ONE block PER SELECTED SET (sets = [[chars of set1], …]). A set wraps to extra
+  // rows past MAX_COLS, but a NEW set always starts on a fresh row. Sheet grows down.
+  for (var s = 0; s < sets.length; s++) {
+    var chs = sets[s], n = chs.length, rowsUsed = Math.max(1, Math.ceil(n / MAX_COLS));
+    for (var i = 0; i < n; i++) {
+      var col = i % MAX_COLS, ri = (i - col) / MAX_COLS;
+      var rowTop = top - ri * (AH + GAP_IN);
+      var left = col * (AW + GAP);
+      cells.push({ ch: chs[i], left: left, top: rowTop, right: left + AW, bottom: rowTop - AH });
     }
+    top -= rowsUsed * AH + (rowsUsed - 1) * GAP_IN + GAP_SET;  // drop below this set, then the set gap
   }
   return cells;
 }
 function fmOpenTemplate(arg) {
   try {
     var cfg = eval('(' + arg + ')');
-    var M = cfg.metrics, grids = cfg.grids || [], rows = cfg.rows || [], upm = cfg.unitsPerEm || 1000;
-    if (!rows.length && cfg.chars && cfg.chars.length) rows = [cfg.chars]; // back-compat
-    if (!rows.length) return '{"ok":false,"error":"no characters"}';
-    var cells = fmTemplateCells(rows, M);
+    var M = cfg.metrics, grids = cfg.grids || [], sets = cfg.sets || cfg.rows || [], upm = cfg.unitsPerEm || 1000;
+    if (!sets.length && cfg.chars && cfg.chars.length) sets = [cfg.chars]; // back-compat
+    if (!sets.length) return '{"ok":false,"error":"no characters"}';
+    var cells = fmTemplateCells(sets, M);
     if (!cells.length) return '{"ok":false,"error":"no characters"}';
-    // content bounds, then a GENEROUS margin so the artboard is big and the content
-    // sits small (~78%) inside it (per request).
+    // the artboard hugs the letters: it always grows to exactly fit the content
+    // (one cell-ish margin), and extends downward as more sets/rows are added.
     var cL = 1e9, cR = -1e9, cT = -1e9, cB = 1e9;
     for (var i = 0; i < cells.length; i++) { var c0 = cells[i]; if (c0.left < cL) cL = c0.left; if (c0.right > cR) cR = c0.right; if (c0.top > cT) cT = c0.top; if (c0.bottom < cB) cB = c0.bottom; }
-    var padX = Math.round((cR - cL) * 0.14), padY = Math.round((cT - cB) * 0.14);
-    var abL = cL - padX, abR = cR + padX, abT = cT + padY, abB = cB - padY;
+    var pad = Math.round((M.ascender - M.descender) * FM_SCALE * 0.4);
+    var abL = cL - pad, abR = cR + pad, abT = cT + pad, abB = cB - pad;
     var doc = app.documents.add(DocumentColorSpace.RGB, Math.max(50, Math.ceil(abR - abL)), Math.max(50, Math.ceil(abT - abB)));
     try { doc.artboards[0].artboardRect = [abL, abT, abR, abB]; } catch (eA) {}
     var tpl = doc.layers.add(); tpl.name = 'Template (locked)';

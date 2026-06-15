@@ -895,20 +895,21 @@ function onOpenTemplate() {
   var fam = $('nf-family').value.trim() || 'RuneType';
   var alphabets = templateAlphabets();   // selected set keys, in selection order
   var proj = glyphset.createProject({ familyName: fam, masterName: 'Regular', masterType: 'Regular', alphabets: alphabets });
-  // ONE ROW PER SELECTED SET (in selection order) → the sheet grows downward as
-  // more alphabets are added on page 1.
-  var rows = [];
+  // ONE BLOCK PER SELECTED SET (in selection order). The jsx wraps a set past 100
+  // glyphs onto extra rows but always starts a new set on a fresh row; the sheet
+  // grows downward as more alphabets are added on page 1.
+  var sets = [];
   alphabets.forEach(function (key) {
     var chs = [];
     proj.glyphs.forEach(function (g) { if (g.alphabet === key && g.char != null && g.char !== ' ') chs.push(g.char); });
-    if (chs.length) rows.push(chs);
+    if (chs.length) sets.push(chs);
   });
-  if (!rows.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) rows.push(all); }
-  var cfg = { rows: rows, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
+  if (!sets.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) sets.push(all); }
+  var cfg = { sets: sets, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
   setStatus('Opening template in Illustrator…');
   evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
     var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
-    if (r && r.ok) setStatus('Template opened (' + r.cells + ' glyphs, ' + rows.length + ' row' + (rows.length === 1 ? '' : 's') + ') — draw each letter inside its box, then "Import from Template".', 'ok');
+    if (r && r.ok) setStatus('Template opened (' + r.cells + ' glyphs, ' + sets.length + ' set' + (sets.length === 1 ? '' : 's') + ') — draw each letter inside its box, then "Import from Template".', 'ok');
     else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
   });
 }
