@@ -2412,13 +2412,27 @@ function setTesterBg(darkBg) {
 }
 
 // ---- live sync: poll the active glyph project, update that glyph live ----
-var POLL_MS = 700, polling = false, lastSig = {}, testerTimer = null;
-function startPolling() { if (polling) return; polling = true; setInterval(pollActive, POLL_MS); setInterval(pollSelection, 1200); }
+// Self-scheduling + adaptive so it doesn't hammer Illustrator with script forever:
+//  • when the panel is HIDDEN (collapsed tab / Illustrator minimised) it backs off
+//    and skips the host call entirely — the Page Visibility API works in CEP;
+//  • when nothing's changed for a few ticks it widens 700ms → 3s, snapping back to
+//    700ms the instant a live edit is detected, so drawing still feels instant.
+var POLL_MS = 700, POLL_MAX = 3000, pollMs = POLL_MS, pollIdle = 0, polling = false, lastSig = {}, testerTimer = null;
+function panelHidden() { return (typeof document !== 'undefined' && document.hidden) || $('view-work').classList.contains('hidden') || !fonts.length; }
+function pollBackoff(changed) {
+  if (changed) { pollMs = POLL_MS; pollIdle = 0; }
+  else if (++pollIdle > 4 && pollMs < POLL_MAX) pollMs = Math.min(POLL_MAX, pollMs + 350);
+}
+function startPolling() {
+  if (polling) return; polling = true;
+  (function loopA() { setTimeout(function () { try { pollActive(); } catch (e) {} loopA(); }, panelHidden() ? 2000 : pollMs); })();
+  (function loopS() { setTimeout(function () { try { pollSelection(); } catch (e) {} loopS(); }, panelHidden() ? 2000 : 1200); })();
+}
 
 // Live-read the Illustrator selection while on the glyphs page so the Assign
 // handle shows the shape you're about to drop and the drop is instant.
 function pollSelection() {
-  if (!fonts.length || $('view-work').classList.contains('hidden') || activeSection !== 'glyphs') return;
+  if (panelHidden() || activeSection !== 'glyphs') return;
   evalScript('fmReadSelection()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { res = null; }
     var contours = (res && res.ok && res.paths) ? ilbridge.contoursFromSelection(res.paths) : null;
@@ -2438,23 +2452,23 @@ function shapeThumbSVG(contours, cls) {
 function scheduleTester() { if (testerTimer) clearTimeout(testerTimer); testerTimer = setTimeout(refreshTester, 1200); }
 
 function pollActive() {
-  if (!fonts.length || $('view-work').classList.contains('hidden')) return;
+  if (panelHidden()) return;
   evalScript('fmReadActive()').then(function (raw) {
-    var res; try { res = JSON.parse(raw); } catch (e) { return; }
-    if (!res || !res.ok || !res.paths || !res.paths.length) return;
+    var res; try { res = JSON.parse(raw); } catch (e) { return pollBackoff(false); }
+    if (!res || !res.ok || !res.paths || !res.paths.length) return pollBackoff(false);
     var f = curFont();
     // multiple glyph projects can be open — map the ACTIVE document to its glyph
     var idx = -1;
     if (res.glyph) { f.glyphs.forEach(function (g, k) { if (g.name === res.glyph) idx = k; }); }
     if (idx < 0) idx = openGlyphIndex;
-    if (idx < 0 || idx >= f.glyphs.length) return;
+    if (idx < 0 || idx >= f.glyphs.length) return pollBackoff(false);
     var contours = ilbridge.contoursFromArtboard(res.paths, res.rect, res.scale, f.metrics.descender);
-    if (!contours.length) return;
+    if (!contours.length) return pollBackoff(false);
     var adv = (res.rect[2] - res.rect[0]) / res.scale;
     glyphset.setGlyphContours(f, idx, curMasterId(), contours, adv);
     var sig = glyphset.layerSignature(f.glyphs[idx], curMasterId());
-    if (sig === lastSig[idx]) return;
-    lastSig[idx] = sig;
+    if (sig === lastSig[idx]) return pollBackoff(false);
+    lastSig[idx] = sig; pollBackoff(true);
     renderGrid();
     if (activeSection === 'mod') renderModGrid();
     if (idx === selectedSlot) renderRight();
