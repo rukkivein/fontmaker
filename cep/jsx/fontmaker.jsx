@@ -249,7 +249,7 @@ function fmGhostCalib(layer, M, upm) {
   } catch (e) {}
   return { scale: scale, typeDescent: typeDescent };
 }
-function fmGhost(layer, ch, left, right, bottom, M, upm, cal) {
+function fmGhost(layer, ch, left, right, bottom, M, upm, cal, yb) {
   if (ch === ' ' || ch === '') return;
   cal = cal || { scale: 1, typeDescent: 0 };
   try {
@@ -263,11 +263,22 @@ function fmGhost(layer, ch, left, right, bottom, M, upm, cal) {
     // ghosts on a big artboard overwhelmed the GPU (display driver TDR — the screen
     // went black every few seconds). A solid light fill looks the same but is cheap.
     attr.fillColor = fmColor(205);
-    var typeBottom = tf.geometricBounds[3];     // line-box bottom — SAME y for every glyph at this size
-    var g = tf.createOutline();                 // outline for the visual + the horizontal (ink) centre
+    var typeBottom = tf.geometricBounds[3];     // line-box bottom (fallback only)
+    var g = tf.createOutline();                 // real outline (visual + ink bounds)
     g.name = 'fm-ghost';                        // opacity stays 100% — no transparency
-    var ink = g.geometricBounds;                // [l, t, r, b] (y up) real ink bounds — used ONLY for X centring
-    var baseline = typeBottom + cal.typeDescent; // glyph-independent baseline (accent-proof)
+    var ink = g.geometricBounds;                // [l, t, r, b] (y up) real ink bounds
+    // Seat by the glyph's TRUE ink + Arial's known y-bounds for this char: the ink
+    // [ink[3]..ink[1]] corresponds to Arial [yMin..yMax] (em fractions), so the
+    // baseline (y=0) sits ink[3] - yMin*k above the ink bottom. This places '_' below
+    // the baseline, '-' at mid-height, accents above — exactly, regardless of how the
+    // text frame reports its box. Falls back to the line-box estimate if no data.
+    var baseline;
+    if (yb && yb.length === 2 && (yb[1] - yb[0]) > 0.000001) {
+      var k = (ink[1] - ink[3]) / (yb[1] - yb[0]);   // pt per em-fraction
+      baseline = ink[3] - yb[0] * k;
+    } else {
+      baseline = typeBottom + cal.typeDescent;
+    }
     var gridBase = bottom + (0 - M.descender) * FM_SCALE;   // baseline grid line = fy(0)
     var cx = left + (right - left) / 2;
     g.translate(cx - (ink[0] + ink[2]) / 2, gridBase - baseline);
@@ -583,6 +594,7 @@ function fmOpenTemplate(arg) {
   try {
     var cfg = eval('(' + arg + ')');
     var M = cfg.metrics, grids = cfg.grids || [], sets = cfg.sets || cfg.rows || [], upm = cfg.unitsPerEm || 1000;
+    var ybounds = cfg.ybounds || null;   // per-char Arial ink y-bounds for exact ghost seating
     if (!sets.length && cfg.chars && cfg.chars.length) sets = [cfg.chars]; // back-compat
     if (!sets.length) return '{"ok":false,"error":"no characters"}';
     var tc = fmTemplateCells(sets, M), cells = tc.cells, labels = tc.labels, MARGIN = tc.margin;
@@ -606,7 +618,8 @@ function fmOpenTemplate(arg) {
       box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
       box.name = 'fmcell:' + ce.ch.charCodeAt(0);             // tag the box so Import recovers the glyph
       fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
-      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gcal); // faint target letter to trace
+      var yb = ybounds ? ybounds['' + ce.ch.charCodeAt(0)] : null;
+      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gcal, yb); // faint target letter to trace
     }
     tpl.locked = true;
     doc.activeLayer = art;

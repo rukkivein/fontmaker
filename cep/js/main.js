@@ -910,7 +910,7 @@ function onOpenTemplate() {
     if (chs.length) sets.push({ name: setLabel(key), chars: chs });
   });
   if (!sets.length) { var all = []; proj.glyphs.forEach(function (g) { if (g.char != null && g.char !== ' ') all.push(g.char); }); if (all.length) sets.push({ name: '', chars: all }); }
-  var cfg = { sets: sets, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }] };
+  var cfg = { sets: sets, metrics: proj.metrics, unitsPerEm: proj.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }], ybounds: arialGhostBounds(proj) || {} };
   setStatus('Opening template in Illustrator…');
   evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
     var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
@@ -1194,6 +1194,7 @@ function renderGrid() {
 // ---- modification. — only the glyphs that have outlines ----
 function renderModGrid() {
   var grid = $('modGrid'); if (!grid) return;
+  syncSpaceSliders();   // keep the modification Space slider in sync
   grid.innerHTML = '';
   var f = curFont();
   var shown = 0;
@@ -1284,6 +1285,28 @@ function refFracTable() {
     _refFracTable = Object.keys(tbl).length ? tbl : null;
   } catch (e) { _refFracTable = null; }
   return _refFracTable;
+}
+// Per-character Arial ink y-bounds (em fractions), keyed by char code, for the
+// template ghosts. The JSX seats each ghost using its REAL outline ink + these known
+// bounds, so glyphs whose ink is far from the baseline land correctly — '_' below
+// the baseline, '-' at mid-height, accents above — instead of all being collapsed by
+// the unreliable text-frame line-box.
+function arialGhostBounds(proj) {
+  try {
+    var ot = getOpentype(); var fs = require('fs');
+    var WIN = (typeof process !== 'undefined' && process.env && process.env.WINDIR) ? process.env.WINDIR : 'C:\\Windows';
+    var paths = [WIN + '\\Fonts\\arial.ttf', 'C:\\Windows\\Fonts\\arial.ttf'];
+    var buf = null;
+    for (var i = 0; i < paths.length; i++) { try { if (fs.existsSync(paths[i])) { buf = fs.readFileSync(paths[i]); break; } } catch (e) {} }
+    if (!buf) return null;
+    var font = ot.parse(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength));
+    var u = font.unitsPerEm || 2048, out = {}, seen = {};
+    (proj || curFont()).glyphs.forEach(function (g) {
+      var ch = g.char; if (ch == null || ch === ' ' || seen[ch]) return; seen[ch] = 1;
+      try { var gl = font.charToGlyph(ch); if (gl && gl.index > 0 && gl.yMax != null && gl.yMin != null && gl.yMax > gl.yMin) out['' + ch.charCodeAt(0)] = [gl.yMin / u, gl.yMax / u]; } catch (e) {}
+    });
+    return out;
+  } catch (e) { return null; }
 }
 function sliderVal(id, dflt) { var el = $(id); var v = el ? parseInt(el.value, 10) : dflt; return isNaN(v) ? dflt : v; }
 // Apply BOTH corrections, stacked: STANDARD (Arial+Times X spacing at refSpace%) sets
@@ -2177,7 +2200,7 @@ function onAutoKern() {
 // ---- live font tester (@font-face from the built OTF) ----
 function refreshTester() {
   var f = curFont(); if (!f) return;
-  syncSpaceSlider();   // reflect the font's saved space width
+  syncSpaceSliders();   // reflect the font's saved space width
   var filled = f.glyphs.filter(isFilled).length;
   var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
@@ -2223,11 +2246,16 @@ function applyTesterCtl() {
 // ---- space character width (the testing 'Space' slider) ----
 function spaceGlyph(f) { f = f || curFont(); if (!f) return null; for (var i = 0; i < f.glyphs.length; i++) if (f.glyphs[i].char === ' ') return f.glyphs[i]; return null; }
 function spaceAdvance(f) { f = f || curFont(); var upm = f ? (f.unitsPerEm || 1000) : 1000; var g = spaceGlyph(f); return (g && g.advanceWidth) ? g.advanceWidth : Math.round(0.25 * upm); }
-function syncSpaceSlider() { var el = $('t-space'); if (!el) return; var f = curFont(); if (!f) return; el.value = Math.round(spaceAdvance(f) / (f.unitsPerEm || 1000) * 100); }
-function setSpaceWidth(commit) {                         // % of em → space glyph advance (saved into the font)
+function syncSpaceSliders() {                            // reflect the font's space width on BOTH sliders
+  var f = curFont(); var pct = f ? Math.round(spaceAdvance(f) / (f.unitsPerEm || 1000) * 100) : 25;
+  ['t-space', 'm-space'].forEach(function (id) { var el = $(id); if (el) el.value = pct; });
+  if ($('mSpaceVal')) $('mSpaceVal').textContent = pct + '%';
+}
+function setSpaceWidth(pct, commit) {                    // % of em → space glyph advance (saved into the font)
   var f = curFont(); if (!f) return;
-  var pct = $('t-space') ? parseInt($('t-space').value, 10) : 25; if (isNaN(pct)) pct = 25;
+  if (isNaN(pct)) pct = 25;
   var g = spaceGlyph(f); if (g) g.advanceWidth = Math.round(pct / 100 * (f.unitsPerEm || 1000));
+  syncSpaceSliders();
   renderTesterText();
   if (commit) autosave();
 }
@@ -2417,7 +2445,6 @@ function applyEdition() {
   lockCtl('accentBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
   lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('optical', FEAT.optimize, PRO);
-  lockCtl('stdCorrect', FEAT.optimize, PRO); lockCtl('optCorrect', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
@@ -2483,8 +2510,10 @@ function boot() {
     $('optical').addEventListener('input', function () { if ($('opticalVal')) $('opticalVal').textContent = this.value + '%'; scheduleCorrections(); });
     $('optical').addEventListener('change', function () { applyCorrections(true); });
   }
-  if ($('stdCorrect')) $('stdCorrect').addEventListener('click', function () { applyCorrections(true); });
-  if ($('optCorrect')) $('optCorrect').addEventListener('click', function () { applyCorrections(true); });
+  if ($('m-space')) {
+    $('m-space').addEventListener('input', function () { setSpaceWidth(parseInt(this.value, 10), false); });
+    $('m-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
+  }
   $('accentBtn').addEventListener('click', onComposeAccents);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
@@ -2494,8 +2523,8 @@ function boot() {
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
   if ($('t-space')) {
-    $('t-space').addEventListener('input', function () { setSpaceWidth(false); });
-    $('t-space').addEventListener('change', function () { setSpaceWidth(true); });
+    $('t-space').addEventListener('input', function () { setSpaceWidth(parseInt(this.value, 10), false); });
+    $('t-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
   }
   $('t-kern').addEventListener('change', applyTesterCtl);
   $('t-text').addEventListener('input', function () { testerAlts = {}; renderTesterText(); });  // edits clear per-position overrides

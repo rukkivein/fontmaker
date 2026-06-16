@@ -125,14 +125,19 @@
         </div>
         <div class="w-corr">
           <div class="w-corr-row">
-            <button id="stdCorrect" class="rune-btn outline sm2" title="Standard correction — set every glyph's side bearings to the X value: each letter's bearings averaged from Arial + Times New Roman. The slider widens (&gt;100%) or tightens (&lt;100%) that spacing; at 0 the blue/red lines hug the ink. Never uses your font's own values; never resizes.">Standard</button>
+            <span class="w-corr-lbl" title="Standard correction — every glyph's side bearings set to the X value (each letter's bearings averaged from Arial + Times New Roman). &gt;100% widens, &lt;100% tightens; at 0 the blue/red lines hug the ink. Never uses your font's own values; never resizes.">Standard</span>
             <input id="refSpace" class="gd-slider wctl" type="range" min="0" max="200" value="100" />
             <span id="refSpaceVal" class="w-refval">100%</span>
           </div>
           <div class="w-corr-row">
-            <button id="optCorrect" class="rune-btn outline sm2" title="Optical correction — nudge each glyph horizontally toward its ink density (e.g. C is heavy on the left → shifts left), staying within the bearings Standard set. The red/blue lines don't move; only the ink shifts. Horizontal only; never resizes.">Optical</button>
+            <span class="w-corr-lbl" title="Optical correction — nudges each glyph horizontally toward its ink density (e.g. C is heavy on the left → shifts left), within the Standard bearings. The blue/red lines stay put; horizontal only; never resizes.">Optical</span>
             <input id="optical" class="gd-slider wctl" type="range" min="0" max="100" value="0" />
             <span id="opticalVal" class="w-refval">0%</span>
+          </div>
+          <div class="w-corr-row">
+            <span class="w-corr-lbl" title="Width of the space character, as a % of the em. Saved into the font.">Space</span>
+            <input id="m-space" class="gd-slider wctl" type="range" min="0" max="80" value="25" />
+            <span id="mSpaceVal" class="w-refval">25%</span>
           </div>
         </div>
         <div class="ul ul-sm ul-o2"></div>
