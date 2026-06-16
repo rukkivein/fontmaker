@@ -67,18 +67,22 @@ const ALPHABETS = [
     glyphs: () => chars('½¼¾').concat(cp(0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E, 0x2044,
       0x00B9, 0x00B2, 0x00B3, 0x2070, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079))
       .concat(range(0x2080, 0x2089)) },
-  { key: 'punct', label: 'Punctuation', desc: 'Punctuation, quotes & dashes',
-    glyphs: () => chars('.,;:!?\'"()[]{}-/\\').concat(cp(0x2013, 0x2014, 0x2026, 0x2018, 0x2019,
-      0x201C, 0x201D, 0x00AB, 0x00BB, 0x2039, 0x203A, 0x2022, 0x00B7, 0x00A1, 0x00BF), [{ char: ' ', unicode: 32 }]) },
+  { key: 'punct', label: 'Basic Punctuation', desc: 'Everyday marks: . , ? ! ; : ‘ ’ " - ( ) / & @ # + quotes, dashes, space',
+    glyphs: () => chars('.,;:!?\'"()-/&@#').concat(cp(0x2013, 0x2014, 0x2026, 0x2018, 0x2019,
+      0x201C, 0x201D), [{ char: ' ', unicode: 32 }]) },
+  { key: 'punctExtra', label: 'Punctuation Extended', desc: 'Brackets, guillemets, inverted marks & reference dots — the rarer punctuation',
+    glyphs: () => chars('[]{}\\_').concat(cp(0x00AB, 0x00BB, 0x2039, 0x203A, 0x2022, 0x00B7, 0x00A1, 0x00BF)) },
   { key: 'symbols', label: 'Symbols & Currency', desc: 'Currency, ©®™ & reference marks',
-    glyphs: () => chars('&@#*').concat(cp(0x0024, 0x20AC, 0x00A3, 0x00A5, 0x00A2, 0x20BA, 0x00A4,
+    glyphs: () => chars('*').concat(cp(0x0024, 0x20AC, 0x00A3, 0x00A5, 0x00A2, 0x20BA, 0x00A4,
       0x00A9, 0x00AE, 0x2122, 0x00A7, 0x00B6, 0x00B0, 0x2020, 0x2021)) },
   { key: 'math', label: 'Math', desc: 'Operators · GF Latin Plus',
     glyphs: () => chars('+<>=~^|').concat(cp(0x2212, 0x00D7, 0x00F7, 0x2260, 0x00B1, 0x2264, 0x2265,
       0x0025, 0x2030, 0x221A, 0x221E, 0x2248, 0x00B5, 0x03C0)) },
 ];
 // Display order: the classic/essential sets first, then by rough popularity.
-const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math',
+// Basic Punctuation sits right after Numbers (everyday marks, easy to grab); the
+// rarer Punctuation Extended / Symbols / Math come later.
+const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'fractions', 'symbols', 'math', 'punctExtra',
   'cyrillic', 'greek', 'arabic', 'hebrew', 'hanzi', 'hiragana', 'katakana', 'latinVietnamese',
   'devanagari', 'thai', 'hangul', 'armenian', 'georgian'];
 ALPHABETS.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
@@ -141,7 +145,7 @@ function collectGlyphs(alphabetKeys, opts) {
 }
 
 // The "classic" sets every common font ships — flagged important in the UI.
-const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'fractions', 'punct', 'symbols', 'math'];
+const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'fractions', 'symbols', 'math', 'punctExtra'];
 
 // Pick a country → auto-select the sets its written language needs (+ the common
 // numbers/punctuation/symbols/math every font ships). Picking a country UNIONS

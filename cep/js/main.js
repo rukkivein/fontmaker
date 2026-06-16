@@ -1110,8 +1110,18 @@ function glyphThumb(g) {
   if (!l || !l.contours) return null;
   var contours = l.contours;
   var b = glyphset.contoursBounds(contours); if (!b) return null;
-  var pad = Math.max(b.w, b.h) * 0.12 + 1;
-  var vb = (b.minX - pad) + ' ' + (-(b.maxY) - pad) + ' ' + (b.w + pad * 2) + ' ' + (b.h + pad * 2);
+  // FIXED reference box = the font's em (ascender..descender), centred horizontally
+  // on the glyph's ink. Every glyph is drawn at its TRUE relative size, so a '.' is a
+  // small dot near the baseline and an 'H' fills the cap height — instead of each
+  // shape being blown up to fill the cell.
+  var M = (curFont() && curFont().metrics) || {};
+  var asc = (M.ascender != null ? M.ascender : 800), desc = (M.descender != null ? M.descender : -200);
+  var side = (asc - desc) || 1000;
+  var cx = (b.minX + b.maxX) / 2;
+  // if the ink is wider/taller than the em, grow the box so it still fits (rare)
+  var halfW = Math.max(side / 2, (b.w / 2) + side * 0.06);
+  var top = Math.min(-asc, -b.maxY - side * 0.06), bot = Math.max(-desc, -b.minY + side * 0.06);
+  var vb = (cx - halfW) + ' ' + top + ' ' + (halfW * 2) + ' ' + (bot - top);
   return '<svg class="thumb" viewBox="' + vb + '" preserveAspectRatio="xMidYMid meet">' +
          '<path d="' + contoursToSVG(contours) + '" fill="#eaeaee"/></svg>';
 }
@@ -2167,6 +2177,7 @@ function onAutoKern() {
 // ---- live font tester (@font-face from the built OTF) ----
 function refreshTester() {
   var f = curFont(); if (!f) return;
+  syncSpaceSlider();   // reflect the font's saved space width
   var filled = f.glyphs.filter(isFilled).length;
   var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
@@ -2208,6 +2219,17 @@ function applyTesterCtl() {
   t.style.fontSize = $('t-size').value + 'px';
   t.style.fontKerning = 'none';            // WE drive the pair spacing below
   renderTesterText();
+}
+// ---- space character width (the testing 'Space' slider) ----
+function spaceGlyph(f) { f = f || curFont(); if (!f) return null; for (var i = 0; i < f.glyphs.length; i++) if (f.glyphs[i].char === ' ') return f.glyphs[i]; return null; }
+function spaceAdvance(f) { f = f || curFont(); var upm = f ? (f.unitsPerEm || 1000) : 1000; var g = spaceGlyph(f); return (g && g.advanceWidth) ? g.advanceWidth : Math.round(0.25 * upm); }
+function syncSpaceSlider() { var el = $('t-space'); if (!el) return; var f = curFont(); if (!f) return; el.value = Math.round(spaceAdvance(f) / (f.unitsPerEm || 1000) * 100); }
+function setSpaceWidth(commit) {                         // % of em → space glyph advance (saved into the font)
+  var f = curFont(); if (!f) return;
+  var pct = $('t-space') ? parseInt($('t-space').value, 10) : 25; if (isNaN(pct)) pct = 25;
+  var g = spaceGlyph(f); if (g) g.advanceWidth = Math.round(pct / 100 * (f.unitsPerEm || 1000));
+  renderTesterText();
+  if (commit) autosave();
 }
 // Rebuild the line as spans: each gap = track + the pair's kern (Optical live /
 // Metric from the table), scaled to the current size. Caret is preserved.
@@ -2294,9 +2316,14 @@ function renderTesterText() {
       html += '<span' + idAttr + ' data-altch="' + chEsc.replace(/"/g, '&quot;') + '" class="' + cls + ' talt" ' +
               'style="display:inline-block;line-height:0;width:' + W.toFixed(2) + 'px;height:' + H.toFixed(2) + 'px;vertical-align:' + vAlign.toFixed(2) + 'px;margin-right:' + marg + 'px;">' +
               '<svg width="' + W.toFixed(2) + '" height="' + H.toFixed(2) + '" viewBox="0 ' + (-asc) + ' ' + aw + ' ' + (asc - desc) + '" preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible"><path d="' + contoursToSVG(ac) + '" fill="currentColor"/></svg></span>';
+    } else if (ch === ' ') {
+      // the SPACE glyph's own advance (set by the testing 'Space' slider), so its
+      // width is the real font space, not the browser's &nbsp;
+      var spW = spaceAdvance(f) / upm * fsPx;
+      html += '<span' + idAttr + ' class="' + cls + '" style="display:inline-block;width:' + spW.toFixed(2) + 'px;margin-right:' + marg + 'px">&nbsp;</span>';
     } else {
       html += '<span' + idAttr + ' class="' + cls + '" style="margin-right:' + marg + 'px">' +
-              (ch === ' ' ? '&nbsp;' : ch.replace(/&/g, '&amp;').replace(/</g, '&lt;')) + '</span>';
+              ch.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
     }
   }
   el.innerHTML = html || '';
@@ -2466,6 +2493,10 @@ function boot() {
   $('bg-b').addEventListener('click', function () { setTesterBg(true); });
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });
+  if ($('t-space')) {
+    $('t-space').addEventListener('input', function () { setSpaceWidth(false); });
+    $('t-space').addEventListener('change', function () { setSpaceWidth(true); });
+  }
   $('t-kern').addEventListener('change', applyTesterCtl);
   $('t-text').addEventListener('input', function () { testerAlts = {}; renderTesterText(); });  // edits clear per-position overrides
   // click a drawn letter in the tester → select it in the metrics editor so its
