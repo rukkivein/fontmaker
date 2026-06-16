@@ -107,4 +107,25 @@ refspace.applyRefSpacing(pOpt, 'm0', tC, 30, 1.0);
 var bOpt2 = refspace.bezBounds(pOpt.glyphs[0].layers.m0.contours);
 ok(Math.abs(bOpt2.xMin - advBefore2) < 0.01 && pOpt.glyphs[0].advanceWidth === 290, 'standard+optical re-apply is idempotent');
 
+// =====================================================================
+// EXPERIMENTAL: silhouette-profile optical anchor
+// =====================================================================
+var triB = refspace.bezBounds(leftHeavyGlyph('C').layers.m0.contours);
+var pm = refspace.profileMidX(leftHeavyGlyph('C').layers.m0.contours, triB);
+ok(pm != null && pm < 0, 'profileMidX: left-heavy triangle silhouette leans left (' + Math.round(pm) + ')');
+
+// profile nudge (6th arg) shifts left too, advance + width unchanged
+var pProf = { glyphs: [leftHeavyGlyph('C')] };
+refspace.applyRefSpacing(pProf, 'm0', tC, 30, 0, 1.0);   // opticalAmount 0, profileAmount 1
+var bProf = refspace.bezBounds(pProf.glyphs[0].layers.m0.contours);
+ok(pProf.glyphs[0].advanceWidth === 290, 'profile: advance unchanged (290)');
+ok(Math.round(bProf.w) === 200, 'profile: width unchanged (no resize)');
+ok(bProf.xMin < 50, 'profile: left-heavy glyph nudged left');
+
+// optical + profile compose (both applied), still clamped within the box
+var pBoth = { glyphs: [leftHeavyGlyph('C')] };
+refspace.applyRefSpacing(pBoth, 'm0', tC, 30, 0.5, 0.5);
+var bBoth = refspace.bezBounds(pBoth.glyphs[0].layers.m0.contours);
+ok(bBoth.xMin >= 0 && pBoth.glyphs[0].advanceWidth === 290, 'optical+profile compose, clamped in box, advance fixed');
+
 console.log('\nrefspace tests passed');

@@ -140,6 +140,18 @@
             <span id="mSpaceVal" class="w-refval">25%</span>
           </div>
         </div>
+        <div class="w-exp">
+          <div class="w-exp-head">experimental optimisation<span class="dot">.</span></div>
+          <div class="w-corr-row">
+            <span class="w-corr-lbl" title="Experimental optical method — balances each glyph by its SILHOUETTE profile (outer edges across heights) instead of its mass. An alternative to Optical; stacks within the Standard bearings. Horizontal only; never resizes.">Profile</span>
+            <input id="expProfile" class="gd-slider wctl" type="range" min="0" max="100" value="0" />
+            <span id="expProfileVal" class="w-refval">0%</span>
+          </div>
+          <div class="w-corr-row w-airow">
+            <button id="aiAnalyze" class="rune-btn outline sm2" title="A small built-in assistant (no internet, no API): scans your glyphs and flags spacing / height / coverage issues, with a suggested next step.">✦ Analyze</button>
+          </div>
+          <div id="aiReport" class="w-ai"></div>
+        </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>
         <div class="w-assign">

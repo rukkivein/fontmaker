@@ -68,6 +68,33 @@ function flattenContour(c) {
   }
   return out;
 }
+// EXPERIMENTAL optical anchor — the silhouette midpoint. At many heights we take the
+// midpoint between the leftmost and rightmost ink, then average. Unlike the area
+// centroid (mass-based), this follows the OUTLINE/profile, so open shapes (C, S, E)
+// balance by where their edges sit rather than where the bulk is. Returns the signed
+// offset of that midpoint from the bbox centre (>0 = leans right). null if no ink.
+function profileMidX(contours, b) {
+  var segs = [];
+  for (var i = 0; i < contours.length; i++) {
+    var poly = flattenContour(contours[i]), m = poly.length;
+    for (var j = 0; j < m; j++) { var p = poly[j], q = poly[(j + 1) % m]; segs.push([p[0], p[1], q[0], q[1]]); }
+  }
+  if (!segs.length) return null;
+  var yMin = b.yMin, yMax = b.yMax, N = 16, midSum = 0, cnt = 0;
+  for (var s = 0; s <= N; s++) {
+    var y = yMin + (yMax - yMin) * (s + 0.5) / (N + 1), lo = Infinity, hi = -Infinity;
+    for (var k = 0; k < segs.length; k++) {
+      var sg = segs[k], y1 = sg[1], y2 = sg[3];
+      if ((y1 <= y && y2 >= y) || (y2 <= y && y1 >= y)) {
+        var x = (y2 === y1) ? sg[0] : sg[0] + (sg[2] - sg[0]) * (y - y1) / (y2 - y1);
+        if (x < lo) lo = x; if (x > hi) hi = x;
+      }
+    }
+    if (lo < Infinity) { midSum += (lo + hi) / 2; cnt++; }
+  }
+  if (!cnt) return null;
+  return (midSum / cnt) - (b.xMin + b.xMax) / 2;
+}
 // X of the FILLED area's centroid (holes subtract via opposite winding). This is
 // the "ink density" anchor: for a glyph like C (heavy left arc, open right) it lands
 // left of the bounding-box centre. null if there's no area.
@@ -107,8 +134,8 @@ function spacingTargets(fracTable, upm, percent) {
 //               just shifts inside its slot).
 // Absolute (not cumulative): applying again with the same args is a no-op, and the
 // result never depends on the glyph's previous spacing. Returns glyphs touched.
-function applyRefSpacing(project, mid, targets, minAdvance, opticalAmount) {
-  var n = 0, minA = minAdvance || 1, opt = opticalAmount || 0;
+function applyRefSpacing(project, mid, targets, minAdvance, opticalAmount, profileAmount) {
+  var n = 0, minA = minAdvance || 1, opt = opticalAmount || 0, prof = profileAmount || 0;
   project.glyphs.forEach(function (g) {
     if (g.kind === 'ligature' || g.kind === 'composed') return;   // leave multi-char specials
     var ch = g.char; if (ch == null) return;
@@ -117,21 +144,23 @@ function applyRefSpacing(project, mid, targets, minAdvance, opticalAmount) {
     if (!l || !l.contours || !l.contours.length) return;
     var b = bezBounds(l.contours); if (!isFinite(b.xMin)) return;
     var lsb = t.lsb, rsb = t.rsb;
-    var advance = Math.round(lsb + b.w + rsb);         // STANDARD box — optical never changes this
+    var advance = Math.round(lsb + b.w + rsb);         // STANDARD box — the nudges never change this
     var dx = 0;
-    if (opt) {
+    if (opt) {                                          // OPTICAL: area-centroid (mass) anchor
       var cx = areaCentroidX(l.contours);
-      if (cx != null) {
-        dx = opt * (cx - (b.xMin + b.xMax) / 2);       // toward the dense side (C leans left → dx<0)
-        if (dx < -lsb) dx = -lsb;                      // stay within the X-set bearings (ink in box)
-        if (dx > rsb) dx = rsb;
-      }
+      if (cx != null) dx += opt * (cx - (b.xMin + b.xMax) / 2);
     }
-    translateX(l.contours, (lsb + dx) - b.xMin);       // ink-left = LSB + optical nudge
-    g.advanceWidth = Math.max(minA, advance);          // advance independent of dx → box stays put
+    if (prof) {                                         // EXPERIMENTAL: silhouette-profile anchor
+      var pm = profileMidX(l.contours, b);
+      if (pm != null) dx += prof * pm;
+    }
+    if (dx < -lsb) dx = -lsb;                           // stay within the X-set bearings (ink in box)
+    if (dx > rsb) dx = rsb;
+    translateX(l.contours, (lsb + dx) - b.xMin);        // ink-left = LSB + the combined nudge
+    g.advanceWidth = Math.max(minA, advance);           // advance independent of dx → box stays put
     n++;
   });
   return n;
 }
 
-module.exports = { spacingTargets, applyRefSpacing, translateX, bezBounds, areaCentroidX };
+module.exports = { spacingTargets, applyRefSpacing, translateX, bezBounds, areaCentroidX, profileMidX };

@@ -1320,20 +1320,21 @@ function applyCorrections(commit) {
   if (!f.glyphs.some(isFilled)) { if (commit) setStatus('Draw and assign some glyphs first.', 'err'); return; }
   var frac = refFracTable();
   if (!frac) { if (commit) setStatus('Could not read Arial / Times New Roman for spacing.', 'err'); return; }
-  var P = sliderVal('refSpace', 100), O = sliderVal('optical', 0);
-  f.refSpace = P; f.optical = O;
+  var P = sliderVal('refSpace', 100), O = sliderVal('optical', 0), E = sliderVal('expProfile', 0);
+  f.refSpace = P; f.optical = O; f.expProfile = E;
   if ($('refSpaceVal')) $('refSpaceVal').textContent = P + '%';
   if ($('opticalVal')) $('opticalVal').textContent = O + '%';
+  if ($('expProfileVal')) $('expProfileVal').textContent = E + '%';
   bakeAllOrigins(f);                                   // fold blue-line offsets first
   var targets = refspace.spacingTargets(frac, f.unitsPerEm, P);
   var minA = Math.round((f.unitsPerEm || 1000) * 0.03);
-  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100);
+  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100, E / 100);
   flatCache = {}; kernCache = {};
   renderModGrid(); renderRight(); renderTesterText();
   if (commit) {
     f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
     scheduleTester(); autosave();
-    setStatus('Spacing — standard ' + P + '%, optical ' + O + '% on ' + n + ' glyph(s).', 'ok');
+    setStatus('Spacing — standard ' + P + '%, optical ' + O + '%, profile ' + E + '% on ' + n + ' glyph(s).', 'ok');
   }
 }
 var _refRAF = 0;
@@ -1346,6 +1347,52 @@ function syncRefSlider() {                             // reflect the saved %s w
   var f = curFont();
   var s = $('refSpace'); if (s) { s.value = (f && f.refSpace != null) ? f.refSpace : 100; if ($('refSpaceVal')) $('refSpaceVal').textContent = s.value + '%'; }
   var o = $('optical'); if (o) { o.value = (f && f.optical != null) ? f.optical : 0; if ($('opticalVal')) $('opticalVal').textContent = o.value + '%'; }
+  var e = $('expProfile'); if (e) { e.value = (f && f.expProfile != null) ? f.expProfile : 0; if ($('expProfileVal')) $('expProfileVal').textContent = e.value + '%'; }
+}
+// ===== mini, no-API "assistant": pure heuristics that scan the font and surface a
+// few plain-language observations + a suggested next move. It only reads stats
+// (spacing, heights, coverage) — no network, no model — and never changes anything.
+function aiAnalyze() {
+  var f = curFont(); var box = $('aiReport'); if (!box) return;
+  if (!f) { box.innerHTML = ''; return; }
+  var mid = curMasterId(), upm = f.unitsPerEm || 1000, M = f.metrics || {};
+  var filled = f.glyphs.filter(function (g) { return isFilled(g) && g.char != null && g.kind !== 'ligature' && g.kind !== 'composed'; });
+  var notes = [];
+  if (filled.length < 2) { box.innerHTML = '<div class="ai-note">Draw a few glyphs first — then I can analyse spacing, heights and coverage.</div>'; return; }
+  // --- spacing rhythm: flag side-bearing outliers vs the median ---
+  var sbs = [], info = [];
+  filled.forEach(function (g) {
+    var b = refspace.bezBounds(g.layers[mid].contours); if (!isFinite(b.xMin)) return;
+    var lx = g.lsbLineX || 0, lsb = Math.round(b.xMin - lx), rsb = Math.round((g.advanceWidth || 0) - (b.xMax - lx));
+    sbs.push(lsb); sbs.push(rsb); info.push({ g: g, lsb: lsb, rsb: rsb, w: b.w });
+  });
+  function median(a) { a = a.slice().sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : 0; }
+  var med = median(sbs) || Math.round(0.06 * upm), tight = [], loose = [];
+  info.forEach(function (d) {
+    if (d.lsb < med * 0.25 || d.rsb < med * 0.25) tight.push(d.g.char);
+    if (d.lsb > med * 2.5 || d.rsb > med * 2.5) loose.push(d.g.char);
+  });
+  if (tight.length) notes.push(['tight', tight.length + ' glyph(s) look tight: ' + tight.slice(0, 12).join(' ') + ' — Standard at a higher % or Optical may even them out.']);
+  if (loose.length) notes.push(['loose', loose.length + ' glyph(s) look loose: ' + loose.slice(0, 12).join(' ') + ' — a lower Standard % tightens them.']);
+  // --- cap-height consistency ---
+  var caps = filled.filter(function (g) { return g.char >= 'A' && g.char <= 'Z'; })
+    .map(function (g) { return { c: g.char, h: refspace.bezBounds(g.layers[mid].contours).yMax }; });
+  if (caps.length >= 3) {
+    var hs = caps.map(function (c) { return c.h; }), mh = median(hs);
+    var off = caps.filter(function (c) { return mh && Math.abs(c.h - mh) > mh * 0.06; });
+    if (off.length) notes.push(['height', 'Cap heights vary: ' + off.slice(0, 8).map(function (c) { return c.c + '(' + (c.h > mh ? '+' : '') + Math.round((c.h - mh) / mh * 100) + '%)'; }).join(' ') + ' — consider matching them to the cap line.']);
+    else notes.push(['ok', 'Cap heights are consistent (within 6%). 👍']);
+  }
+  // --- coverage ---
+  var total = f.glyphs.filter(function (g) { return g.char != null; }).length;
+  notes.push(['cover', filled.length + ' of ' + total + ' glyphs drawn (' + Math.round(filled.length / total * 100) + '%).']);
+  // --- a single suggested next move ---
+  var sug = tight.length > loose.length ? 'Try Standard ≈ 120% to open the rhythm, then Optical ≈ 30%.'
+    : (loose.length ? 'Try Standard ≈ 85% to tighten, then Optical ≈ 30%.'
+      : 'Spacing looks even — a touch of Optical (≈ 25%) will refine the round/diagonal letters.');
+  notes.push(['sug', '✦ Suggestion: ' + sug]);
+  box.innerHTML = notes.map(function (nz) { return '<div class="ai-note ai-' + nz[0] + '">' + nz[1].replace(/</g, '&lt;') + '</div>'; }).join('');
+  setStatus('Assistant analysed ' + filled.length + ' glyph(s).', 'ok');
 }
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
 // lines + optic allowances; drag the shape, its transform handles, the blue
@@ -2445,6 +2492,7 @@ function applyEdition() {
   lockCtl('accentBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
   lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('optical', FEAT.optimize, PRO);
+  lockCtl('expProfile', FEAT.optimize, PRO); lockCtl('aiAnalyze', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
@@ -2510,6 +2558,11 @@ function boot() {
     $('optical').addEventListener('input', function () { if ($('opticalVal')) $('opticalVal').textContent = this.value + '%'; scheduleCorrections(); });
     $('optical').addEventListener('change', function () { applyCorrections(true); });
   }
+  if ($('expProfile')) {
+    $('expProfile').addEventListener('input', function () { if ($('expProfileVal')) $('expProfileVal').textContent = this.value + '%'; scheduleCorrections(); });
+    $('expProfile').addEventListener('change', function () { applyCorrections(true); });
+  }
+  if ($('aiAnalyze')) $('aiAnalyze').addEventListener('click', aiAnalyze);
   if ($('m-space')) {
     $('m-space').addEventListener('input', function () { setSpaceWidth(parseInt(this.value, 10), false); });
     $('m-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
