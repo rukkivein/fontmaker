@@ -1331,9 +1331,10 @@ function applyCorrections(commit) {
   var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100, E / 100);
   flatCache = {}; kernCache = {};
   // Live drag (commit=false) does the CHEAP render only — the metrics editor, which
-  // is where spacing actually shows. The heavy grid + tester rebuilds (and host sync)
-  // wait for release so dragging stays smooth on low-RAM machines.
-  renderRight();
+  // is where spacing actually shows, plus the floating Live Test window if it's open.
+  // The heavy grid + tester rebuilds (and host sync) wait for release so dragging
+  // stays smooth on low-RAM machines.
+  renderRight(); renderFloatTester();
   if (commit) {
     renderModGrid(); renderTesterText();
     f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
@@ -2321,7 +2322,7 @@ function applyTesterCtl() {
   var t = $('t-text');
   t.style.fontSize = $('t-size').value + 'px';
   t.style.fontKerning = 'none';            // WE drive the pair spacing below
-  renderTesterText();
+  renderTesterText(); renderFloatTester();
 }
 // ---- space character width (the testing 'Space' slider) ----
 function spaceGlyph(f) { f = f || curFont(); if (!f) return null; for (var i = 0; i < f.glyphs.length; i++) if (f.glyphs[i].char === ' ') return f.glyphs[i]; return null; }
@@ -2336,7 +2337,7 @@ function setSpaceWidth(pct, commit) {                    // % of em → space gl
   if (isNaN(pct)) pct = 25;
   var g = spaceGlyph(f); if (g) g.advanceWidth = Math.round(pct / 100 * (f.unitsPerEm || 1000));
   syncSpaceSliders();
-  renderTesterText();
+  renderTesterText(); renderFloatTester();
   if (commit) autosave();
 }
 // Rebuild the line as spans: each gap = track + the pair's kern (Optical live /
@@ -2443,6 +2444,61 @@ function setTesterBg(darkBg) {
   $('bg-b').classList.toggle('on', darkBg);
   $('bg-w').classList.toggle('on', !darkBg);
 }
+// ---- floating Live Test window: live-renders a word with the CURRENT spacing/kern
+// so you can watch modification changes update in place. Cheap (one short line) and
+// no-ops while hidden, so it costs nothing when closed. ----
+function renderFloatTester() {
+  var win = $('floatTester'); if (!win || win.classList.contains('hidden')) return;
+  var box = $('ft-text'); if (!box) return;
+  var f = fonts.length ? curFont() : null;
+  var text = $('ft-input') ? $('ft-input').value : 'Handgloves'; if (!text) text = ' ';
+  var fsPx = parseFloat($('ft-size') ? $('ft-size').value : 48) || 48;
+  var mode = $('t-kern') ? $('t-kern').value : 'optical';
+  var trackPx = $('t-track') ? ($('t-track').value / 10) : 0;
+  var mid = f ? curMasterId() : null, M = f ? f.metrics : null, upm = f ? (f.unitsPerEm || 1000) : 1000;
+  var html = '';
+  for (var i = 0; i < text.length; i++) {
+    var ch = text[i], gL = null, kernPx = 0;
+    if (f) for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; break; } }
+    if (f && i < text.length - 1) {
+      var gR = null; for (var rx = 0; rx < f.glyphs.length; rx++) { if (f.glyphs[rx].char === text[i + 1]) { gR = f.glyphs[rx]; break; } }
+      kernPx = pairKern(f, gL, gR, mode) / upm * fsPx;
+    }
+    var marg = (trackPx + kernPx).toFixed(2);
+    if (ch === ' ') { var sw = spaceAdvance(f) / upm * fsPx; html += '<span style="display:inline-block;width:' + sw.toFixed(2) + 'px;margin-right:' + marg + 'px"></span>'; continue; }
+    if (gL && isFilled(gL) && M) {
+      var ac = gL.layers[mid].contours, aw = gL.advanceWidth || Math.round(upm * 0.5);
+      var asc = M.ascender, desc = M.descender, W = aw / upm * fsPx, H = (asc - desc) / upm * fsPx, vA = desc / upm * fsPx;
+      html += '<span style="display:inline-block;line-height:0;width:' + W.toFixed(2) + 'px;height:' + H.toFixed(2) + 'px;vertical-align:' + vA.toFixed(2) + 'px;margin-right:' + marg + 'px">' +
+              '<svg width="' + W.toFixed(2) + '" height="' + H.toFixed(2) + '" viewBox="0 ' + (-asc) + ' ' + aw + ' ' + (asc - desc) + '" preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible"><path d="' + contoursToSVG(ac) + '" fill="currentColor"/></svg></span>';
+    } else {
+      html += '<span style="margin-right:' + marg + 'px">' + ch.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</span>';
+    }
+  }
+  box.innerHTML = html;
+}
+function toggleLiveTest() {
+  var win = $('floatTester'); if (!win) return;
+  win.classList.toggle('hidden');
+  if (!win.classList.contains('hidden')) renderFloatTester();
+}
+// make an element draggable by a handle (used for the Live Test window)
+function makeDraggable(win, handle) {
+  if (!win || !handle) return;
+  var dx = 0, dy = 0, down = false;
+  handle.addEventListener('mousedown', function (e) {
+    if (e.target && e.target.id === 'ft-close') return;
+    down = true; var r = win.getBoundingClientRect(); dx = e.clientX - r.left; dy = e.clientY - r.top;
+    win.style.right = 'auto'; win.style.left = r.left + 'px'; win.style.top = r.top + 'px';
+    e.preventDefault();
+  });
+  document.addEventListener('mousemove', function (e) {
+    if (!down) return;
+    win.style.left = Math.max(0, Math.min(window.innerWidth - 60, e.clientX - dx)) + 'px';
+    win.style.top = Math.max(0, Math.min(window.innerHeight - 30, e.clientY - dy)) + 'px';
+  });
+  document.addEventListener('mouseup', function () { down = false; });
+}
 
 // ---- live sync: poll the active glyph project, update that glyph live ----
 // Self-scheduling + adaptive so it doesn't hammer Illustrator with script forever:
@@ -2505,6 +2561,7 @@ function pollActive() {
     renderGrid();
     if (activeSection === 'mod') renderModGrid();
     if (idx === selectedSlot) renderRight();
+    renderFloatTester();
     setStatus('Live · "' + glyphLabel(f.glyphs[idx]) + '" updated from its project', 'ok');
     scheduleTester(); autosave();
   });
@@ -2623,6 +2680,11 @@ function boot() {
   if ($('resetCancel')) $('resetCancel').addEventListener('click', function () { var m = $('resetModal'); if (m) m.classList.add('hidden'); });
   if ($('resetNo')) $('resetNo').addEventListener('click', hardReset);
   if ($('resetSave')) $('resetSave').addEventListener('click', saveThenReset);
+  if ($('liveTestBtn')) $('liveTestBtn').addEventListener('click', toggleLiveTest);
+  if ($('ft-close')) $('ft-close').addEventListener('click', toggleLiveTest);
+  if ($('ft-input')) $('ft-input').addEventListener('input', renderFloatTester);
+  if ($('ft-size')) $('ft-size').addEventListener('input', renderFloatTester);
+  makeDraggable($('floatTester'), $('ft-head'));
   $('bg-b').addEventListener('click', function () { setTesterBg(true); });
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });

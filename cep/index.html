@@ -23,6 +23,16 @@
     </div>
   </div>
 
+  <!-- floating LIVE TEST window — stays on top while you edit spacing; updates live -->
+  <div id="floatTester" class="ft-win hidden">
+    <div id="ft-head" class="ft-head"><span>Live Test</span><button id="ft-close" class="ft-close" title="Close">×</button></div>
+    <div class="ft-ctl">
+      <input id="ft-input" class="ft-in" type="text" value="Handgloves" spellcheck="false" />
+      <input id="ft-size" class="gd-slider" type="range" min="14" max="120" value="48" title="Size" />
+    </div>
+    <div id="ft-text" class="ft-text"></div>
+  </div>
+
   <!-- ============ PAGE 1 — New Font (RuneType Glyphmaker) ============ -->
   <div id="view-new" class="view rune">
     <!-- header: logo + font name + masters -->
@@ -136,6 +146,7 @@
         <div class="w-modauto">
           <button id="optimizeBtn" class="rune-btn blue sm2" title="Optimize spacing &amp; kerning — sets the blue (LSB) and red (advance) lines + optical pair kerning. Never resizes a glyph.">Optimize</button>
           <button id="autoKern" class="rune-btn outline sm2" title="Bake optical pair kerning into the font's kern table">Auto Kern</button>
+          <button id="liveTestBtn" class="rune-btn outline sm2" title="Open a floating Live Test window — type a word and watch your spacing/kerning changes update live while you edit.">⊞ Live Test</button>
         </div>
         <div class="w-corr">
           <div class="w-corr-row">

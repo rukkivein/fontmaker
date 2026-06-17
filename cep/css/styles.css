@@ -668,6 +668,16 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 /* ===== section tabs + modification/testing pages ===== */
 .w-msel { flex: 0 0 150px; align-self: center; margin-bottom: 8px; display: flex; }
 #w-masterSel { height: 34px; font-size: 12px; width: 100%; }
+/* floating Live Test window */
+.ft-win { position: fixed; top: 64px; right: 18px; z-index: 9000; width: 360px; max-width: 92vw; background: #1b1b1d; border: 1px solid var(--line, #444); border-radius: 9px; box-shadow: 0 12px 40px rgba(0,0,0,0.5); overflow: hidden; }
+.ft-win.hidden { display: none; }
+.ft-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; background: #262629; cursor: move; font-size: 11px; color: var(--txt2, #bbb); user-select: none; }
+.ft-close { background: none; border: none; color: var(--txt2, #bbb); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.ft-close:hover { color: #fff; }
+.ft-ctl { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.ft-in { flex: 1 1 auto; min-width: 0; background: #2a2a2d; border: 1px solid var(--line, #444); border-radius: 5px; color: var(--txt, #eee); font-size: 12px; padding: 4px 7px; }
+.ft-ctl .gd-slider { flex: 0 0 96px; }
+.ft-text { min-height: 70px; max-height: 320px; overflow: auto; padding: 14px 12px; color: #f2f2f2; background: #111; line-height: 1; word-break: break-word; }
 /* floating reset/rescue button + confirm modal */
 .rt-reset { position: fixed; top: 7px; right: 9px; z-index: 9999; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line, #444); background: rgba(40,40,40,0.82); color: var(--txt2, #aaa); font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
 .rt-reset:hover { color: #fff; border-color: var(--accent, #1473e6); }
