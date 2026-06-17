@@ -1,6 +1,8 @@
 # RuneType™ Glyphmaker — Handoff
 
-_Last updated: 2026-06-14 · branch `claude/inspiring-bardeen-fqkF4` · tip `52db33f`_
+_Last updated: 2026-06 (this session) · branch `claude/inspiring-bardeen-fqkF4` · repo `rukkivein/fontmaker`_
+_This file is **editable**. Newest work is in **§ This session**; the variable-font state (for the
+second AI) is in **§ Variable fonts**._
 
 ## What it is
 RuneType™ Glyphmaker by **BRST STUDIO** — a tool that turns shapes drawn in **Adobe
@@ -35,9 +37,12 @@ CEP is the only way to ship an Illustrator panel, which is also how Fontself doe
    cell to open that glyph as its own Illustrator document for editing (edits sync live).
    Right-click a cell → Delete shape / Delete glyph / Open in Illustrator.
 3. **modification.** (kerning & metrics): the right pane is a metrics editor — drag the
-   shape, the blue **LSB** line, the red **advance** line (all independent); a **hand**
-   pan-tool (top-left) for zoom/pan; **Auto Fit**, **Auto Kern**, and **Optimize** (the
-   offline "mini-AI" spacing/kerning pass).
+   shape, the blue **LSB** line, the red **advance** line (all independent); a 3-state
+   **hand** pan-tool (blue=pan → red=lock → reset). Tools: **Optimize** + **Auto Kern**
+   (kern table), the **Standard / Optical / Profile / Space** sliders (the new spacing
+   system — see § This session), an **experimental optimisation** block, the **✦ Analyze**
+   assistant, and a **⊞ Live Test** floating preview. (Note: the old size-changing
+   "Auto Fit / Optimize Test" were removed — font size never auto-changes.)
 4. **testing.** (type & preview): a live @font-face preview; click a letter to tune its
    spacing in the metrics editor; **right-click a letter to swap in one of its alternates**
    for that occurrence only.
@@ -86,7 +91,59 @@ swap) → save/export (OTF + TTF, .runetype save+reopen, OTF/TTF import for edit
 with counters (O/D/B…) draw as compound paths (holes). UI verified responsive / no overflow
 on 1920×1080 (and the user's 4K). All tests green; EXE + backup on the Desktop.
 
-## Edition gating — free **alpha** is SHIPPED (2026-06-14)
+## This session (2026-06) — spacing system, optical/AI, template, perf
+
+Major additions on top of the state above:
+
+- **Reference spacing — the "X value"** (`shared/refspace.js`, unit-tested in `test/refspace.test.js`).
+  In **modification**, three stacked, **horizontal-only, never-resizing** sliders:
+  - **Standard (0–200%)** — every glyph's side bearings set to the average of **Arial + Times
+    New Roman** bearings (read live from `C:\Windows\Fonts\arial.ttf`/`times.ttf` via opentype,
+    as em-fractions). 100% = the classic consensus (I tight, W open), >100% widens, <100% tightens.
+    It **never** uses the font's own values, so it can't fall back to the original.
+  - **Optical (0–100%)** — nudges each glyph toward its ink **area centroid** (mass) within the
+    Standard bearings; advance box (blue/red lines) stays put.
+  - **Profile (0–100%, experimental)** — same idea but by the **silhouette** profile.
+  - **Space (0–80%)** — the space glyph's advance as % of em; in both testing AND modification.
+  - All compose; apply live on drag (cheap render only), commit on release.
+- **Experimental optimisation** block + **✦ Analyze** — a tiny **no-API** assistant: local
+  heuristics that flag tight/loose spacing outliers, cap-height inconsistency, coverage %, and
+  glyphs sitting off the baseline (↑/↓ suggestion), plus one suggested next move.
+- **Template overhaul:** selected sets each on their own row, wrap at 50/row, tiny set captions,
+  artboard anchored top-left and hugging content, ~13% wider cells, ghosts seated by **real Arial
+  per-char y-bounds** (passed from `main.js`), so `_` sits low, `-` mid, accents high. GPU fixes:
+  ghosts are **solid gray** (no transparency → no driver TDR), artwork scan de-quadratic, and the
+  whole sheet builds at **`FM_TPL_SCALE = 0.1`** (was 0.25) → a ~2000–3000pt document instead of
+  ~8000×5000 (much lighter on low-RAM machines). Import preserves drawn size & position exactly.
+- **Reset/rescue:** floating **⟳** button (top-right) → modal (Save .runetype & Reset / Reset /
+  Cancel) → `hardReset()` clears caches + reloads the panel.
+- **Live Test window:** floating, in-panel (NOT a 2nd OS window → RAM-safe), updates live with
+  spacing/kern/space changes.
+- **Perf:** the live-sync poller is now **adaptive** (700ms→3s when idle, sleeps when the panel is
+  hidden via Page Visibility) and spacing drags do only the light metrics-editor render.
+- **Misc:** grid thumbnails scale to the em (`.` small, `H` cap-height); punctuation reorganised
+  (one "Basic Punctuation" set + a separate "Punctuation Extended"); **EDITION flipped to `'pro'`**.
+
+## Variable fonts (READ THIS — the second-AI target area)
+
+- **Masters exist** as data: `project.masters[]` (`{id,name,type}`) + per-glyph
+  `layers[masterId].contours`. `glyphset.addMaster()` adds an empty layer to every glyph.
+- **`shared/varCompat.js` is ready:** `report(f)` checks interpolation compatibility (same contour
+  & point counts across masters); `matchPoints(f)` aligns start points/rotation. No changes needed.
+- **What's MISSING:** a single-file **fvar/gvar** variable font is **not produced yet**. Today the
+  "Variable" export (`cep/js/main.js` ~1975) only validates compatibility, writes a
+  `-variable-report.txt`, and exports **each master as a separate file**. Code note: *"a single-file
+  .ttf with fvar/gvar is the follow-up."*
+- **To implement real variable export (in order):**
+  1. `core/fontEngine.js` — extend `buildFont` to take multiple master ids → emit **fvar** (axes)
+     + **gvar** (per-glyph point deltas).
+  2. `core/ttfWriter.js` — write the **gvar** binary (per-master point deltas) alongside glyf.
+     (Note: bundled opentype.js 1.3.4 writes CFF/OTTO only, so TTF/variable go through `ttfWriter`.)
+  3. `cep/js/main.js` (~1975) — rewire the export to produce one variable file from the compatible
+     masters instead of looping.
+  4. `shared/features.js` — `exportVariable` gate (already defined).
+
+## Edition gating — current = **`pro`** (full); alpha is the free build
 One flag drives the whole premium surface: **`shared/features.js`** → `EDITION = 'alpha' | 'pro'`
 (exposes `FEATURES`). Flip to `'pro'` = one line, everything unlocks. Synced into
 `cep/js/features.js` (in `sync-cep.js`; guarded by `cepsync.test.js`).
