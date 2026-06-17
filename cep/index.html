@@ -9,6 +9,20 @@
 <body>
 <div id="app">
 
+  <!-- floating rescue button (top-right) — reset the panel if it's stuck/sluggish -->
+  <button id="resetBtn" class="rt-reset" title="Reset the panel — rescue from a freeze (asks to save your project first)">⟳</button>
+  <div id="resetModal" class="rt-modal hidden">
+    <div class="rt-modal-box">
+      <div class="rt-modal-h">Reset RuneType</div>
+      <div class="rt-modal-t">If the panel is stuck or sluggish, reset it to a fresh state. Save your project (.runetype) first so you don't lose any work — you'll choose where to save it.</div>
+      <div class="rt-modal-btns">
+        <button id="resetSave" class="rune-btn blue sm2">Save .runetype &amp; Reset</button>
+        <button id="resetNo" class="rune-btn outline sm2">Reset without saving</button>
+        <button id="resetCancel" class="rune-btn outline sm2">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ PAGE 1 — New Font (RuneType Glyphmaker) ============ -->
   <div id="view-new" class="view rune">
     <!-- header: logo + font name + masters -->

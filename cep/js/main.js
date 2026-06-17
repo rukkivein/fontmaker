@@ -1319,7 +1319,7 @@ function applyCorrections(commit) {
   var f = curFont(); if (!f) return;
   if (!f.glyphs.some(isFilled)) { if (commit) setStatus('Draw and assign some glyphs first.', 'err'); return; }
   var frac = refFracTable();
-  if (!frac) { if (commit) setStatus('Could not read Arial / Times New Roman for spacing.', 'err'); return; }
+  if (!frac) { setStatus('Could not read Arial / Times New Roman — the spacing reference needs them.', 'err'); return; }
   var P = sliderVal('refSpace', 100), O = sliderVal('optical', 0), E = sliderVal('expProfile', 0);
   f.refSpace = P; f.optical = O; f.expProfile = E;
   if ($('refSpaceVal')) $('refSpaceVal').textContent = P + '%';
@@ -1330,8 +1330,12 @@ function applyCorrections(commit) {
   var minA = Math.round((f.unitsPerEm || 1000) * 0.03);
   var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100, E / 100);
   flatCache = {}; kernCache = {};
-  renderModGrid(); renderRight(); renderTesterText();
+  // Live drag (commit=false) does the CHEAP render only — the metrics editor, which
+  // is where spacing actually shows. The heavy grid + tester rebuilds (and host sync)
+  // wait for release so dragging stays smooth on low-RAM machines.
+  renderRight();
   if (commit) {
+    renderModGrid(); renderTesterText();
     f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
     scheduleTester(); autosave();
     setStatus('Spacing — standard ' + P + '%, optical ' + O + '%, profile ' + E + '% on ' + n + ' glyph(s).', 'ok');
@@ -1382,6 +1386,18 @@ function aiAnalyze() {
     var off = caps.filter(function (c) { return mh && Math.abs(c.h - mh) > mh * 0.06; });
     if (off.length) notes.push(['height', 'Cap heights vary: ' + off.slice(0, 8).map(function (c) { return c.c + '(' + (c.h > mh ? '+' : '') + Math.round((c.h - mh) / mh * 100) + '%)'; }).join(' ') + ' — consider matching them to the cap line.']);
     else notes.push(['ok', 'Cap heights are consistent (within 6%). 👍']);
+  }
+  // --- baseline alignment: flag glyphs whose ink bottom strays from the baseline,
+  //     and say which way to nudge them (vertical is a manual move in the editor) ---
+  var DESC = 'gjpqyµ', base = [];
+  filled.forEach(function (g) {
+    if (g.char.length === 1 && DESC.indexOf(g.char) >= 0) return;   // descenders legitimately dip
+    base.push({ c: g.char, y: refspace.bezBounds(g.layers[mid].contours).yMin });
+  });
+  if (base.length >= 3) {
+    var mb = median(base.map(function (d) { return d.y; }));
+    var stray = base.filter(function (d) { return Math.abs(d.y - mb) > 0.06 * upm; });
+    if (stray.length) notes.push(['vert', stray.length + ' glyph(s) sit off the baseline — ' + stray.slice(0, 8).map(function (d) { return d.c + (d.y > mb ? '↓' : '↑'); }).join(' ') + ' (↓ = drop it down to the line, ↑ = lift it up).']);
   }
   // --- coverage ---
   var total = f.glyphs.filter(function (g) { return g.char != null; }).length;
@@ -1920,6 +1936,23 @@ function onSaveProject() {
       fs.writeFileSync(path, serializeProject(f));
         setStatus('Project saved → ' + path, 'ok');
     } catch (e) { setStatus('Save failed: ' + e.message, 'err'); }
+  });
+}
+// ---- reset / rescue: clear the in-memory state and reload the panel fresh ----
+function hardReset() {
+  try { flatCache = {}; kernCache = {}; lastSig = {}; } catch (e) {}
+  try { window.location.reload(); } catch (e) { try { location.reload(); } catch (e2) {} }
+}
+// Save & Reset: offer a file dialog (cancel still resets), write, then reload.
+function saveThenReset() {
+  var m = $('resetModal'); if (m) m.classList.add('hidden');
+  var f = fonts.length ? curFont() : null;
+  if (!f) { hardReset(); return; }
+  try { commitSig(); } catch (e) {}
+  var dlg = '(function(){var fl=File.saveDialog("Save RuneType project","RuneType:*.runetype");if(!fl)return "";if(fl.name.indexOf(".")<0)fl=new File(fl.fsName+".runetype");return fl.fsName;})()';
+  evalScript(dlg).then(function (path) {
+    if (path) { try { fs.writeFileSync(path, serializeProject(f)); } catch (e) {} }
+    hardReset();
   });
 }
 function onExportGo() {
@@ -2586,6 +2619,10 @@ function boot() {
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
   $('openFileBtn').addEventListener('click', onOpenFile);
+  if ($('resetBtn')) $('resetBtn').addEventListener('click', function () { var m = $('resetModal'); if (m) m.classList.remove('hidden'); });
+  if ($('resetCancel')) $('resetCancel').addEventListener('click', function () { var m = $('resetModal'); if (m) m.classList.add('hidden'); });
+  if ($('resetNo')) $('resetNo').addEventListener('click', hardReset);
+  if ($('resetSave')) $('resetSave').addEventListener('click', saveThenReset);
   $('bg-b').addEventListener('click', function () { setTesterBg(true); });
   $('bg-w').addEventListener('click', function () { setTesterBg(false); });
   ['t-size', 't-track'].forEach(function (id) { $(id).addEventListener('input', applyTesterCtl); });

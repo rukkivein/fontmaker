@@ -82,7 +82,12 @@ function fmPing() {
  * glyph, the selected construction grids drawn on a locked reference layer, a
  * low-opacity ghost letter (Arial) to trace, and an unlocked "Artwork" layer to
  * draw on. SCALE maps font units → points so everything is consistent. */
-var FM_SCALE = 0.25; // points per font unit
+var FM_SCALE = 0.25; // points per font unit (per-glyph editing — comfortable draw size)
+// The TEMPLATE sheet uses a much smaller scale: with hundreds of cells the 0.25 sheet
+// was ~8000×5000pt and choked low-RAM machines / the GPU. It's all vector, so a
+// smaller scale loses no quality — it just makes a far lighter document (~2000–3000pt).
+// fmOpenTemplate swaps FM_SCALE to this while building; fmReadTemplate maps back with it.
+var FM_TPL_SCALE = 0.1;
 
 function fmColor(g) {
   var c = new RGBColor();
@@ -591,6 +596,7 @@ function fmTemplateCells(sets, M) {
   return { cells: cells, labels: labels, margin: MARGIN };
 }
 function fmOpenTemplate(arg) {
+  var _savedScale = FM_SCALE; FM_SCALE = FM_TPL_SCALE;   // build the whole sheet at the compact scale
   try {
     var cfg = eval('(' + arg + ')');
     var M = cfg.metrics, grids = cfg.grids || [], sets = cfg.sets || cfg.rows || [], upm = cfg.unitsPerEm || 1000;
@@ -626,6 +632,7 @@ function fmOpenTemplate(arg) {
     try { app.executeMenuCommand('fitall'); } catch (eF) {}
     return '{"ok":true,"cells":' + cells.length + ',"sets":' + sets.length + ',"doc":"' + String(doc.name).replace(/"/g, '\\"') + '"}';
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
+  finally { FM_SCALE = _savedScale; }
 }
 // Gather EVERY drawn leaf path on the Artwork layer ONCE, caching each path's bbox
 // CENTRE. This is the key to keeping template import fast: geometricBounds is an
@@ -675,7 +682,7 @@ function fmReadTemplate() {
       if (!ps.length) continue;
       parts.push('{"code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
     }
-    return '{"ok":true,"scale":' + FM_SCALE + ',"cells":[' + parts.join(',') + ']}';
+    return '{"ok":true,"scale":' + FM_TPL_SCALE + ',"cells":[' + parts.join(',') + ']}';   // template was built at FM_TPL_SCALE
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 

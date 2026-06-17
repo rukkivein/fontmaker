@@ -668,6 +668,16 @@ input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
 /* ===== section tabs + modification/testing pages ===== */
 .w-msel { flex: 0 0 150px; align-self: center; margin-bottom: 8px; display: flex; }
 #w-masterSel { height: 34px; font-size: 12px; width: 100%; }
+/* floating reset/rescue button + confirm modal */
+.rt-reset { position: fixed; top: 7px; right: 9px; z-index: 9999; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line, #444); background: rgba(40,40,40,0.82); color: var(--txt2, #aaa); font-size: 14px; line-height: 1; cursor: pointer; padding: 0; }
+.rt-reset:hover { color: #fff; border-color: var(--accent, #1473e6); }
+.rt-modal { position: fixed; inset: 0; z-index: 10000; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); }
+.rt-modal.hidden { display: none; }
+.rt-modal-box { width: 320px; max-width: 86%; background: var(--panel, #232323); border: 1px solid var(--line, #444); border-radius: 10px; padding: 18px; box-shadow: 0 12px 44px rgba(0,0,0,0.55); }
+.rt-modal-h { font-size: 14px; font-weight: 700; color: var(--txt, #eee); margin-bottom: 8px; }
+.rt-modal-t { font-size: 11.5px; line-height: 1.5; color: var(--txt2, #aaa); margin-bottom: 14px; }
+.rt-modal-btns { display: flex; flex-direction: column; gap: 8px; }
+.rt-modal-btns .rune-btn { width: 100%; }
 .w-modauto { display: flex; gap: 8px; margin-top: 18px; align-items: center; }
 .w-modauto .rune-btn { width: auto; flex: 0 0 auto; }
 .w-corr { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
