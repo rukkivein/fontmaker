@@ -71,6 +71,126 @@ function fmReadSelection() {
   }
 }
 
+/* ===================== Image Import (Illustrator Image Trace) =============
+ * fmPickImages() shows a native multi-select file dialog -> the chosen paths.
+ * fmTraceImage({path}) places one sheet in a throwaway document, runs Illustrator's
+ * own Image Trace (black & white), expands it to paths, and returns them as the
+ * usual {paths, bounds} JSON. Counters come back as real compound-path holes; the
+ * panel clusters the paths into glyphs. White/background fills are dropped so the
+ * sheet's background never becomes one giant blob (robust even where the v28+
+ * ignoreWhite property no longer applies). */
+
+// Is this item a light/white fill (the sheet background, not ink)?
+function fmIsLight(item) {
+  try {
+    if (!item.filled) return false;
+    var c = item.fillColor; if (!c) return false;
+    var t = c.typename;
+    if (t === 'RGBColor') return (c.red + c.green + c.blue) > 660;            // near white
+    if (t === 'GrayColor') return c.gray < 40;                               // 0=white,100=black
+    if (t === 'CMYKColor') return (c.cyan + c.magenta + c.yellow + c.black) < 12;
+  } catch (e) {}
+  return false;
+}
+
+// Flatten traced art into ink PathItems, skipping white/background fills.
+function fmCollectTrace(item, out) {
+  var t = item.typename;
+  if (t === 'PathItem') {
+    if (item.pathPoints && item.pathPoints.length >= 2 && !fmIsLight(item)) out.push(item);
+  } else if (t === 'CompoundPathItem') {
+    if (fmIsLight(item)) return out;        // a white compound = background, skip whole thing
+    var cp = item.pathItems;
+    for (var i = 0; i < cp.length; i++) if (cp[i].pathPoints && cp[i].pathPoints.length >= 2) out.push(cp[i]);
+  } else if (t === 'GroupItem') {
+    var pi = item.pageItems;
+    for (var j = 0; j < pi.length; j++) fmCollectTrace(pi[j], out);
+  }
+  return out;
+}
+
+function fmPickImages() {
+  try {
+    var filt;
+    if ($.os && String($.os).toLowerCase().indexOf('windows') !== -1) {
+      filt = 'Reference sheets:*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.tif;*.tiff;*.webp';
+    } else {
+      filt = function (f) { return (f instanceof Folder) || /\.(png|jpe?g|gif|bmp|tiff?|webp)$/i.test(f.name); };
+    }
+    var sel = File.openDialog('Select 1–4 reference sheets', filt, true);
+    if (!sel) return '{"ok":false,"error":"cancelled"}';
+    if (!(sel instanceof Array)) sel = [sel];
+    var parts = [];
+    for (var i = 0; i < sel.length; i++) {
+      var fp = String(sel[i].fsName).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      parts.push('"' + fp + '"');
+    }
+    return '{"ok":true,"files":[' + parts.join(',') + ']}';
+  } catch (e) {
+    return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}';
+  }
+}
+
+function fmTraceImage(arg) {
+  var doc = null;
+  try {
+    var cfg = eval('(' + arg + ')');
+    var f = new File(cfg.path);
+    if (!f.exists) return '{"ok":false,"error":"file not found"}';
+
+    doc = app.documents.add(DocumentColorSpace.RGB, 2000, 2000);
+    var placed = doc.placedItems.add();
+    placed.file = f;
+    var imgB = placed.geometricBounds; // full placed-image frame [l,t,r,b] — lets the panel align the trace to the raster preview
+    app.redraw();
+
+    var traced = null;
+    try { traced = placed.trace(); }
+    catch (e1) {
+      try { placed.embed(); if (doc.rasterItems.length) traced = doc.rasterItems[0].trace(); } catch (e2) {}
+    }
+    if (!traced) { doc.close(SaveOptions.DONOTSAVECHANGES); return '{"ok":false,"error":"could not start Image Trace"}'; }
+
+    // Black & white settings (property names vary across versions → all best-effort).
+    try {
+      var to = traced.tracing.tracingOptions;
+      var presets = app.tracingPresetList, chosen = null, i;
+      for (i = 0; i < presets.length; i++) {
+        var pn = String(presets[i]).toLowerCase();
+        if (pn.indexOf('black') !== -1 && pn.indexOf('white') !== -1) { chosen = presets[i]; break; }
+      }
+      if (chosen) { try { to.loadFromPreset(chosen); } catch (eP) {} }
+      try { to.tracingMode = TracingModeType.TRACINGMODEBLACKANDWHITE; } catch (eM) {}
+      try { to.threshold = (cfg.threshold != null ? cfg.threshold : 128); } catch (eT) {}
+      try { to.pathFidelity = (cfg.paths != null ? cfg.paths : 50); } catch (eF) {}   // Illustrator "Paths"
+      try { to.cornerFidelity = (cfg.corners != null ? cfg.corners : 75); } catch (eC) {} // "Corners"
+      try { to.noiseFidelity = (cfg.noise != null ? cfg.noise : 25); } catch (eN) {}    // "Noise"
+      try { to.fills = true; } catch (eFi) {}
+      try { to.strokes = false; } catch (eSt) {}
+      try { to.ignoreWhite = true; } catch (eW) {}
+    } catch (eOpt) {}
+    app.redraw();
+
+    var grp;
+    try { grp = traced.tracing.expandTracing(); }
+    catch (eExp) { doc.close(SaveOptions.DONOTSAVECHANGES); return '{"ok":false,"error":"expand failed"}'; }
+
+    var b = grp.geometricBounds; // [left, top, right, bottom] (Y-up)
+    var paths = [];
+    fmCollectTrace(grp, paths);
+    var parts = [];
+    for (var k = 0; k < paths.length; k++) parts.push(fmSerializePath(paths[k]));
+    var bs = '[' + fmNum(b[0]) + ',' + fmNum(b[1]) + ',' + fmNum(b[2]) + ',' + fmNum(b[3]) + ']';
+    var ibs = '[' + fmNum(imgB[0]) + ',' + fmNum(imgB[1]) + ',' + fmNum(imgB[2]) + ',' + fmNum(imgB[3]) + ']';
+
+    doc.close(SaveOptions.DONOTSAVECHANGES);
+    return '{"ok":true,"bounds":' + bs + ',"imgBounds":' + ibs + ',"count":' + paths.length + ',"paths":[' + parts.join(',') + ']}';
+  } catch (e) {
+    try { if (doc) doc.close(SaveOptions.DONOTSAVECHANGES); } catch (eC2) {}
+    return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}';
+  }
+}
+
 // Public: minimal probe so the panel can confirm the bridge is alive.
 function fmPing() {
   var name = (app.documents.length > 0) ? app.activeDocument.name : '';
@@ -564,34 +684,41 @@ function fmLabel(layer, text, x, y, size) {
     t.translate(x - gb[0], y - gb[1]);
   } catch (e) {}
 }
+// A cell spec is either a bare character (string) — the classic per-letter template —
+// or an object { ghost, id, w } used for alternates/ligatures: ghost = the faint
+// letter(s) to trace, id = the glyph NAME (boxes are matched back by it, not a char
+// code, since alternates/ligatures have no unique char), w = width factor (ligatures
+// are wider so they fit and aren't clipped on import).
+function fmCellSpec(item) {
+  if (typeof item === 'string') return { ghost: item, id: '' + item.charCodeAt(0), w: 1 };
+  return { ghost: item.ghost != null ? item.ghost : '', id: '' + (item.id != null ? item.id : ''), w: (item.w > 0 ? item.w : 1) };
+}
 function fmTemplateCells(sets, M) {
   // cell HEIGHT must stay (ascender-descender)*FM_SCALE so the baseline mapping
-  // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size.
+  // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size. WIDTH
+  // may vary per cell (alternates = 1, ligatures wider) — height is constant.
   var AH = (M.ascender - M.descender) * FM_SCALE;
-  var AW = Math.round(AH * 0.81);   // ~13% wider boxes for more drawing room (does NOT
-  var GAP = Math.round(AH * 0.10);  //   affect import: the map uses only the box's left+bottom)
+  var AW = Math.round(AH * 0.81);   // single-letter box width (~13% wider for drawing room)
+  var GAP = Math.round(AH * 0.10);
   var GAP_IN = Math.round(AH * 0.07);     // TIGHT gap between wrapped rows of the SAME set
-  var GAP_SET = Math.round(AH * 0.34);    // small but clear gap BETWEEN sets (so a 2-row set
-  var LABEL_BAND = Math.round(AH * 0.22); //   doesn't blur into a 1-row set); new set = fresh row
-  var LABEL_SIZE = Math.round(AH * 0.07); // the caption above each set is very small
-  var MAX_COLS = 50;                      // wrap a set to a new row every 50 glyphs
-  var MARGIN = Math.round(AH * 0.4);      // inset from the artboard's top-left corner
-  var cells = [], labels = [], top = -MARGIN;   // content flows from the top-left, downward
-  // ONE block PER SELECTED SET (sets = [{name, chars}, …]). A set wraps to extra
-  // rows past MAX_COLS, but a NEW set always starts on a fresh row (with its caption
-  // above). Sheet grows DOWN as sets are added.
+  var GAP_SET = Math.round(AH * 0.34);    // clear gap BETWEEN sets; a new set starts a fresh row
+  var LABEL_BAND = Math.round(AH * 0.22);
+  var LABEL_SIZE = Math.round(AH * 0.07);
+  var MAX_ROW_W = 50 * (AW + GAP);        // wrap a row at ~50 single cells wide (variable widths honoured)
+  var MARGIN = Math.round(AH * 0.4);
+  var cells = [], labels = [], top = -MARGIN;   // content flows top-left, downward
   for (var s = 0; s < sets.length; s++) {
     var set = sets[s], chs = set.chars || set, n = chs.length;
-    var rowsUsed = Math.max(1, Math.ceil(n / MAX_COLS));
     labels.push({ name: set.name || '', x: MARGIN, y: top, size: LABEL_SIZE }); // caption in the band
-    var rowTop0 = top - LABEL_BAND;       // first row of this set sits below the caption band
+    var rowTop = top - LABEL_BAND, left = MARGIN, rows = 1;
     for (var i = 0; i < n; i++) {
-      var col = i % MAX_COLS, ri = (i - col) / MAX_COLS;
-      var rowTop = rowTop0 - ri * (AH + GAP_IN);
-      var left = MARGIN + col * (AW + GAP);
-      cells.push({ ch: chs[i], left: left, top: rowTop, right: left + AW, bottom: rowTop - AH });
+      var sp = fmCellSpec(chs[i]);
+      var cw = Math.round(AW * sp.w);
+      if (left > MARGIN && (left + cw) > (MARGIN + MAX_ROW_W)) { left = MARGIN; rowTop = rowTop - (AH + GAP_IN); rows++; } // wrap
+      cells.push({ ghost: sp.ghost, id: sp.id, left: left, top: rowTop, right: left + cw, bottom: rowTop - AH });
+      left = left + cw + GAP;
     }
-    top = rowTop0 - (rowsUsed * AH + (rowsUsed - 1) * GAP_IN) - GAP_SET; // drop below set + gap
+    top = rowTop - AH - GAP_SET;       // drop below the last row of this set + gap
   }
   return { cells: cells, labels: labels, margin: MARGIN };
 }
@@ -622,10 +749,10 @@ function fmOpenTemplate(arg) {
       var ce = cells[c];
       var box = tpl.pathItems.rectangle(ce.top, ce.left, ce.right - ce.left, ce.top - ce.bottom);
       box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
-      box.name = 'fmcell:' + ce.ch.charCodeAt(0);             // tag the box so Import recovers the glyph
+      box.name = 'fmcell:' + ce.id;                          // tag the box by glyph id (char code OR glyph name) so Import recovers it
       fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
-      var yb = ybounds ? ybounds['' + ce.ch.charCodeAt(0)] : null;
-      fmGhost(tpl, ce.ch, ce.left, ce.right, ce.bottom, M, upm, gcal, yb); // faint target letter to trace
+      var yb = ybounds ? ybounds[ce.id] : null;
+      fmGhost(tpl, ce.ghost, ce.left, ce.right, ce.bottom, M, upm, gcal, yb); // faint target letter(s) to trace
     }
     tpl.locked = true;
     doc.activeLayer = art;
@@ -671,8 +798,9 @@ function fmReadTemplate() {
     if (art) fmCollectArt(art, arts);              // ALL drawn paths + centres — bounds read once each
     var parts = [];
     for (var b = 0; b < boxes.length; b++) {
-      var bx = boxes[b], code = parseInt(bx.name.split(':')[1], 10);
-      if (!(code > 0)) continue;
+      var bx = boxes[b], id = bx.name.substring(7);  // everything after 'fmcell:' — char code OR glyph name
+      if (!id) continue;
+      var code = parseInt(id, 10); if (!(code > 0)) code = 0;        // back-compat numeric code for the char template
       var gb = bx.geometricBounds;                 // [l, t, r, btm] (y-up)
       var ps = [];
       for (var a = 0; a < arts.length; a++) {      // assign by centre-in-box — pure arithmetic, no DOM reads
@@ -680,7 +808,8 @@ function fmReadTemplate() {
         if (ar.cx >= gb[0] && ar.cx <= gb[2] && ar.cy <= gb[1] && ar.cy >= gb[3]) ps.push(fmSerializePath(ar.p));
       }
       if (!ps.length) continue;
-      parts.push('{"code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
+      var idEsc = id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+      parts.push('{"id":"' + idEsc + '","code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
     }
     return '{"ok":true,"scale":' + FM_TPL_SCALE + ',"cells":[' + parts.join(',') + ']}';   // template was built at FM_TPL_SCALE
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }

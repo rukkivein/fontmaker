@@ -15,7 +15,19 @@ var dna = require(ROOT + '/js/dna.js');
 var optimizer = require(ROOT + '/js/optimizer.js');
 var refspace = require(ROOT + '/js/refspace.js');
 var accentCompose = require(ROOT + '/js/accentCompose.js');
+var markgen = require(ROOT + '/js/markgen.js');   // synthesize diacritic marks from existing shapes
 var varCompat = require(ROOT + '/js/varCompat.js');
+var imagetrace = require(ROOT + '/js/imagetrace.js');   // legacy imagetracerjs path (kept for fallback)
+var potrace = require(ROOT + '/js/potrace.js');         // clean-room pixel-faithful, minimal-node tracer (primary)
+var imgglyphs = require(ROOT + '/js/imgglyphs.js');     // cluster/detect/map/seat traced glyphs
+var glyphreco = require(ROOT + '/js/glyphreco.js');     // offline onnxruntime-web glyph recognizer (first-guess)
+var vecai = require(ROOT + '/js/vecai.js');             // offline onnxruntime-web vector refiner (smooth/sharpen AIs)
+// CEP is a Node-integrated Chromium. onnxruntime-web's wasm glue otherwise detects
+// "Node" (process.versions.node && process.type != 'renderer') and tries to
+// import('worker_threads') — which fails here, breaking BOTH the recognizer and the
+// refiner. Posing as an Electron renderer makes it take the browser path (works,
+// single-thread, wasmBinary = no fetch). This is the documented Electron escape hatch.
+try { if (typeof process !== 'undefined' && process.type !== 'renderer') process.type = 'renderer'; } catch (e) {}
 var FEAT = require(ROOT + '/js/features.js').FEATURES;  // edition gating (alpha/pro)
 var placeholder = require(ROOT + '/js/placeholder.js');
 var fontEngine = require(ROOT + '/js/lib/fontEngine.js');
@@ -945,10 +957,60 @@ function onImportTemplate() {
   });
 }
 
-// --- Start Creating: build the font from the draft, then enter the workspace ---
-function onStartCreating() {
+// ---- Alternates & Ligatures template (workspace) ---------------------------
+// Open a template (same cell HEIGHT as the main one) with a box for every alternate
+// and ligature in the CURRENT font, ghosted with the base letter / joined letters.
+// Boxes are keyed by glyph NAME (alternates/ligatures have no char), and ligatures
+// get wider boxes so they fit and aren't clipped on import.
+function onOpenAltLigTemplate() {
+  if (!FEAT.alternates) return;
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  var alts = [], ligs = [];
+  f.glyphs.forEach(function (g) {
+    if (g.kind === 'alternate') alts.push({ ghost: g.ghost || '', id: g.name, w: 1 });
+    else if (g.kind === 'ligature') ligs.push({ ghost: g.ghost || (g.components || []).join(''), id: g.name, w: Math.max(1.6, Math.min(3, (g.components || []).length || 2)) });
+  });
+  if (!alts.length && !ligs.length) { setStatus('No alternates or ligatures yet — add them with + Alternate / + Ligature first.', 'err'); return; }
+  var sets = [];
+  if (alts.length) sets.push({ name: 'Alternates', chars: alts });
+  if (ligs.length) sets.push({ name: 'Ligatures', chars: ligs });
+  var cfg = { sets: sets, metrics: f.metrics, unitsPerEm: f.unitsPerEm, grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }], ybounds: {} };
+  setStatus('Opening alternates/ligatures template in Illustrator…');
+  evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (r && r.ok) setStatus('Template opened (' + r.cells + ' glyph' + (r.cells === 1 ? '' : 's') + ') — draw each inside its box, then "Import Alt/Lig".', 'ok');
+    else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
+  });
+}
+function onImportAltLigTemplate() {
+  if (!FEAT.alternates) return;
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  setStatus('Reading template…');
+  evalScript('fmReadTemplate()').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!r || !r.ok) { setStatus('Could not read template: ' + ((r && r.error) || 'open a template first'), 'err'); return; }
+    if (!r.cells || !r.cells.length) { setStatus('No drawn glyphs found in the boxes.', 'err'); return; }
+    var mid = curMasterId(), desc = f.metrics.descender, placed = 0;
+    var byName = {}; f.glyphs.forEach(function (g, i) { byName[g.name] = i; });
+    r.cells.forEach(function (cell) {
+      var idx = byName[cell.id]; if (idx == null) return;   // match boxes back to glyphs by NAME
+      var contours = ilbridge.contoursFromArtboard(cell.paths, cell.rect, r.scale, desc);
+      if (!contours.length) return;
+      glyphset.setGlyphContours(f, idx, mid, contours, null); // auto advance from the drawn ink
+      placed++;
+    });
+    if (!placed) { setStatus('No glyphs imported — draw inside the boxes first.', 'err'); return; }
+    lastSig = {}; flatCache = {};
+    renderGrid(); updateAssign(); renderRight(); scheduleTester(); autosave();
+    setStatus('Imported ' + placed + ' alternate/ligature glyph(s) from the template.', 'ok');
+  });
+}
+
+// --- Build the font from the page-1 draft, then enter the workspace. Shared by
+// Start Creating and the page-1 Image Import (which then opens the picker). ---
+function createFontFromDraft() {
   var alphabets = Object.keys(draft.lang).filter(function (k) { return draft.lang[k]; });
-  if (!alphabets.length) { setToggle('lang'); return; }
+  if (!alphabets.length) { setToggle('lang'); return false; }
   var m0 = draft.masters[0];
   var opts = {
     familyName: ($('nf-family').value.trim() || 'Untitled'),
@@ -964,6 +1026,16 @@ function onStartCreating() {
   // No document is created here — the plugin just shows the glyphs. A per-glyph
   // artboard opens only when you click a letter (openGlyph).
   show('work'); renderWorkspace();
+  return true;
+}
+function onStartCreating() { createFontFromDraft(); }
+
+// Page-1 Image Import: create the font from the chosen sets, enter the
+// workspace, then immediately open the image picker (the rest of the flow —
+// trace, review dialog, fill — is the shared onImgFiles/onImgFill path).
+function onImgImportPage1() {
+  if (!createFontFromDraft()) return;
+  onImgImportClick();
 }
 
 // ============ PAGE 2 — Workspace ============
@@ -1189,6 +1261,698 @@ function renderGrid() {
     });
     grid.appendChild(cell);
   });
+}
+
+// ============ IMAGE IMPORT — trace reference sheets, auto-fill the grid ======
+// Pick 1–4 raster sheets (numbers / letters / symbols, in any order). Our own
+// optimized vectorizer (shared/imagetrace.js — threshold → boundary → RDP →
+// corner-detect → smooth Bézier fit) traces each sheet entirely in-panel: smooth,
+// low-path, corners preserved, no pixel glitches, and counters (o a 0 8 …) come
+// back as real compound-path HOLES. The panel then clusters blobs into glyphs,
+// runs the offline AI recognizer + positional fallback, shows a review dialog,
+// and seats the chosen glyphs into the active master. All pure JS (unit-tested in
+// test/imgimport.test.js).
+var imgSheets = []; // [{ name, filter, imgd, traceOpts, category, clusters, mapping, _gen, _nameEl }]
+// OPTIONAL manual recognition scope (never auto-detected). Default 'all' = the
+// whole Latin+symbol union, so a MIXED sheet (letters + symbols, upper + lower)
+// is recognized glyph-by-glyph. Narrow it only when a sheet really is one set.
+// Illustrator Image Trace controls (Black & White): Threshold + Paths/Corners/Noise.
+// Image Import (image→vector recognition) is PARKED as a demo for now — the
+// recognition isn't reliable enough yet, so its entry buttons are hidden and we
+// focus on the template workflow. All the code (potrace/vecai/imgglyphs/wizard)
+// stays intact; flip this to true to re-enable the feature in the UI.
+var IMG_IMPORT_ENABLED = false;
+
+var IMG_TRACE_DEFAULTS = { threshold: 128, paths: 50, corners: 75, noise: 2 };
+
+// One-click style presets for the trace controls (+ K supersample). The first two
+// are tuned for the user's reference sheets: a bold solid display serif, and a
+// rough brush/calligraphy face.
+var IMG_PRESETS = [
+  { id: 'clean', name: 'Clean / Solid', tip: 'Bold solid display type — crisp sharp corners, pixel-faithful, minimal nodes (e.g. the blackletter caps sheet).', opts: { threshold: 128, paths: 55, corners: 85, noise: 3, K: 1 } },
+  { id: 'brush', name: 'Brush / Calligraphy', tip: 'Rough brush & ink calligraphy — follows organic edges, keeps thin tapers & texture, rounder joins (e.g. the KAGEN sheet). Uses 2× supersampling.', opts: { threshold: 138, paths: 85, corners: 35, noise: 3, K: 2 } },
+  { id: 'balanced', name: 'Balanced', tip: 'General-purpose default — good for most clean type.', opts: { threshold: 128, paths: 50, corners: 75, noise: 2, K: 1 } },
+  { id: 'geometric', name: 'Geometric', tip: 'Maximum corners, fewest nodes — logos / geometric / monoline letters.', opts: { threshold: 128, paths: 45, corners: 95, noise: 4, K: 1 } },
+];
+
+// The 4 controls map onto the clean-room potrace tracer's knobs (see potrace.ilToOpts):
+// Paths = fidelity (hi → more nodes hugging pixels), Corners = sharpness (hi → more
+// corners, lo → rounder), Noise = drop specks below N px, Threshold = bilevel cutoff.
+var IMG_RECO_MIN_CONF = 0.35;
+
+// Per-image SCRIPT scope, chosen in the import wizard. Latin is split into UPPER /
+// LOWER (ornate caps and lowercase are best recognized when scoped apart, and the
+// positional fallback then uses the right canonical order). Letter/number/symbol
+// scopes use the curated SEQ lists; other scripts use Unicode RANGES filtered to
+// what the trained model actually covers. So an image is read within its script —
+// never confused across scripts.
+var IMG_SCOPES = [
+  { id: 'latinUpper', label: 'Latin uppercase', seq: 'upper' },
+  { id: 'latinLower', label: 'Latin lowercase', seq: 'lower' },
+  { id: 'numbers',    label: 'Numbers',          seq: 'digits' },
+  { id: 'symbols',    label: 'Symbols & shapes', seq: 'symbols' },
+  { id: 'greek',      label: 'Greek',            ranges: [[0x370, 0x3FF]] },
+  { id: 'cyrillic',   label: 'Cyrillic',         ranges: [[0x400, 0x4FF]] },
+  { id: 'hebrew',     label: 'Hebrew',           ranges: [[0x590, 0x5FF]] },
+  { id: 'arabic',     label: 'Arabic',           ranges: [[0x600, 0x6FF]] },
+  { id: 'hiragana',   label: 'Hiragana',         ranges: [[0x3040, 0x309F]] },
+  { id: 'katakana',   label: 'Katakana',         ranges: [[0x30A0, 0x30FF]] },
+  { id: 'han',        label: 'Chinese / Kanji',  ranges: [[0x3400, 0x9FFF]] },
+];
+function imgScope(id) { for (var i = 0; i < IMG_SCOPES.length; i++) if (IMG_SCOPES[i].id === id) return IMG_SCOPES[i]; return null; }
+function imgScopeSeq(id) { var s = imgScope(id); return (s && s.seq) || null; }
+
+// Codepoints the recognizer may pick from for a sheet's chosen script — the SEQ
+// list (letters/numbers/symbols) or the model's classes in the script ranges.
+// Falls back to the whole Latin+symbol union if unknown / model not loaded yet.
+var _imgUnionCps = null;
+function imgUnionCps() {
+  if (_imgUnionCps) return _imgUnionCps;
+  var s = imgglyphs.SEQ, seen = {}, out = [];
+  ['digits', 'upper', 'lower', 'symbols'].forEach(function (k) {
+    (s[k] || []).forEach(function (c) { var cp = c.codePointAt(0); if (!seen[cp]) { seen[cp] = 1; out.push(cp); } });
+  });
+  _imgUnionCps = out; return out;
+}
+function imgAllowedCps(id) {
+  var s = imgScope(id);
+  if (s) {
+    if (s.seq) { var seq = imgglyphs.SEQ[s.seq]; if (seq) return seq.map(function (c) { return c.codePointAt(0); }); }
+    if (s.ranges) { var cps = glyphreco.cpsInRanges(s.ranges); if (cps) return cps; }
+  }
+  return imgUnionCps();
+}
+
+// Recognize ONE sheet over its allowed set; overwrite each glyph's guess with the
+// AI's confident pick, but KEEP any character the user typed (source:'manual').
+// A per-sheet generation token drops a stale async result that lands after a
+// newer re-trace. Returns false only if the model was unavailable.
+async function recognizeSheetEntry(sheet, label) {
+  if (!glyphreco.isAvailable()) {
+    try { await glyphreco.init(ROOT); } catch (e) { return false; }
+    if (!glyphreco.isAvailable()) return false;
+  }
+  var gen = sheet._gen, preds;
+  try {
+    preds = await glyphreco.recognizeSheet(sheet.clusters, imgAllowedCps(sheet.scope), function (done, total) {
+      setStatus('Recognizing' + (label ? ' — ' + label : '') + ': ' + done + '/' + total + '…');
+    });
+  } catch (e) { preds = null; }
+  if (sheet._gen !== gen) return true;   // superseded by a newer re-trace; discard
+  if (!preds) return false;
+  for (var k = 0; k < sheet.clusters.length; k++) {
+    var p = preds[k], prev = sheet.mapping[k];
+    if (prev && prev.source === 'manual') continue;          // never clobber a user edit
+    if (p && p.char != null && p.conf >= IMG_RECO_MIN_CONF) {
+      sheet.mapping[k] = { clusterIndex: k, char: p.char, unicode: p.cp, conf: p.conf, source: 'ai', candidates: p.candidates || null };
+    }
+  }
+  return true;
+}
+
+// First guess for every sheet — free recognition over the Latin+symbol union (no
+// per-sheet category is ever forced). If the model can't load, the positional
+// placeholder mapping stays so Image Import still works.
+async function recognizeSheets() {
+  setStatus('Loading recognition model…');
+  try { await glyphreco.init(ROOT); }
+  catch (e) { return; }   // model unavailable -> keep placeholder mapping
+  if (!glyphreco.isAvailable()) return;
+  for (var s = 0; s < imgSheets.length; s++) {
+    await recognizeSheetEntry(imgSheets[s], 'sheet ' + (s + 1) + '/' + imgSheets.length);
+  }
+}
+
+// Open Illustrator's native file picker (host side), then run the per-image wizard.
+function onImgImportClick() {
+  if (!curFont()) { setStatus('Create or open a font first.', 'err'); return; }
+  setStatus('Pick your reference sheets…');
+  evalScript('fmPickImages()').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!r || !r.ok) {
+      if (r && r.error === 'cancelled') setStatus('');
+      else setStatus('Could not open the file picker.', 'err');
+      return;
+    }
+    var files = (r.files || []).slice(0, 4);
+    if (!files.length) { setStatus('No images selected.', 'err'); return; }
+    startImgWizard(files);
+  });
+}
+
+// Decode a picked PNG/JPG into ImageData via an offscreen canvas (CEP is
+// Chromium → file:// images load and are same-origin, so getImageData isn't
+// tainted). Very large sheets are downscaled; glyph detail at ~1800px is plenty
+// and it keeps tracing fast.
+function loadImageData(path, maxDim) {
+  return new Promise(function (resolve, reject) {
+    var img = new Image();
+    img.onload = function () {
+      var w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+      if (!w || !h) { reject(new Error('empty image')); return; }
+      var md = maxDim || 1800, scale = Math.min(1, md / Math.max(w, h));
+      var cw = Math.max(1, Math.round(w * scale)), ch = Math.max(1, Math.round(h * scale));
+      var cv = document.createElement('canvas'); cv.width = cw; cv.height = ch;
+      var g = cv.getContext('2d'); g.drawImage(img, 0, 0, cw, ch);
+      try { resolve(g.getImageData(0, 0, cw, ch)); } catch (e) { reject(e); }
+    };
+    img.onerror = function () { reject(new Error('image load failed')); };
+    img.src = 'file:///' + String(path).replace(/\\/g, '/');
+  });
+}
+
+// ===== Image Import WIZARD — ONE popup per image. Top: vectorization sliders +
+// a zoomable, point-level preview (faint original under crisp Bézier outlines +
+// anchor/handle dots) so you can see exactly how it vectorized. Bottom: which
+// SCRIPT this image holds. Picking a script stores it and advances to the next
+// image; after the last, the AI recognizes every glyph within each image's
+// script and the review/fill grid opens. No Illustrator anywhere.
+var SVGNS = 'http://www.w3.org/2000/svg';
+var wiz = null; // { files:[paths], idx, sheets:[sheet|undefined per file] }
+
+function imgdToDataURL(imgd) {
+  var cv = document.createElement('canvas'); cv.width = imgd.width; cv.height = imgd.height;
+  cv.getContext('2d').putImageData(imgd, 0, 0);
+  return cv.toDataURL('image/png');
+}
+function wizFileName(p) { return String(p).replace(/^.*[\\\/]/, ''); }
+function wizStatus(msg, err) { var s = $('wizStatus'); if (s) { s.textContent = msg || ''; s.classList.toggle('err', !!err); } }
+
+function startImgWizard(files) {
+  imgSheets = [];
+  wiz = { files: files, idx: 0, sheets: new Array(files.length) };
+  $('imgWizModal').classList.remove('hidden');
+  wizLoad(0);
+}
+
+// Build (once) the sheet for image idx — decode + trace + analyze — then render.
+function wizLoad(idx) {
+  if (!wiz) return;
+  wiz.idx = idx;
+  var existing = wiz.sheets[idx];
+  if (existing) { wizRender(existing); return; }
+  var path = wiz.files[idx], nm = wizFileName(path);
+  wizStatus('Tracing ' + nm + ' …');
+  loadImageData(path).then(function (imgd) {
+    if (!wiz) return;
+    var sheet = {
+      name: nm, scope: null, imgd: imgd, dataURL: imgdToDataURL(imgd), _path: path,
+      traceOpts: Object.assign({}, IMG_TRACE_DEFAULTS), _showPts: true,
+      _vb: [0, 0, imgd.width, imgd.height],
+    };
+    wizTrace(sheet);
+    wiz.sheets[idx] = sheet;
+    wizRender(sheet);
+  }, function () { wizStatus('Could not load ' + nm, true); });
+}
+
+function wizTrace(sheet) {
+  try {
+    var contours = potrace.traceImageData(sheet.imgd, potrace.ilToOpts(sheet.traceOpts));
+    var a = imgglyphs.analyzeSheet(contours);
+    sheet._rawClusters = a.clusters;            // the classical trace (before AI refine)
+    sheet.clusters = a.clusters; sheet.category = a.category; sheet.mapping = a.mapping;
+  } catch (e) { sheet._rawClusters = sheet._rawClusters || []; sheet.clusters = sheet.clusters || []; sheet.mapping = sheet.mapping || []; }
+}
+
+// Apply the two refiner AIs (Smooth=jitter, Sharpen=quant) to the raw trace at the
+// sheet's 0..100 strengths, then redraw. Off by default; safe no-op if unavailable.
+async function wizApplyAI(sheet) {
+  var raw = sheet._rawClusters || sheet.clusters || [];
+  var on = !!sheet.aiOn, S = (sheet.aiStrength != null ? sheet.aiStrength : 60) / 100;
+  var clusters = raw;
+  if (on && S > 0) {
+    wizStatus('AI refining…');
+    // one strength drives both refiner models (jitter + quant) — see vecai.refine
+    try { await vecai.init(ROOT); clusters = await vecai.refine(raw, { smooth: S, sharpen: S }); }
+    catch (e) { clusters = raw; }
+  }
+  sheet.clusters = clusters;
+  wizDrawVectors(sheet);
+  var off = on && S > 0 && !vecai.isAvailable();
+  wizStatus(off ? ('AI refiner off — ' + (vecai.initError() || 'unavailable') + ' (clean trace)') : '', off);
+}
+
+function wizRender(sheet) {
+  $('wizStep').textContent = 'Image ' + (wiz.idx + 1) + ' of ' + wiz.files.length;
+  $('wizName').textContent = sheet.name;
+  if ($('wizBackBtn')) $('wizBackBtn').disabled = (wiz.idx === 0);
+  wizBuildControls(sheet, $('wizCtl'));
+  wizBuildPreview(sheet, $('wizPreview'));
+  wizBuildScope(sheet, $('wizScopeBtns'));
+  wizStatus('');
+}
+
+// TOP — vectorization sliders + Show-points toggle + Fit + a live glyph/point count.
+function wizBuildControls(sheet, host) {
+  host.innerHTML = '';
+  // Preset row — one click sets all 4 controls (+ supersample) for a style.
+  var pr = document.createElement('div'); pr.className = 'wiz-presets';
+  var plab = document.createElement('span'); plab.className = 'wiz-presets-lab'; plab.textContent = 'Preset:';
+  pr.appendChild(plab);
+  IMG_PRESETS.forEach(function (ps) {
+    var b = document.createElement('button'); b.className = 'rune-btn outline sm2'; b.textContent = ps.name; b.title = ps.tip;
+    if (sheet._preset === ps.id) b.classList.add('active');
+    b.addEventListener('click', function () {
+      sheet.traceOpts = Object.assign({}, ps.opts); sheet._preset = ps.id;
+      wizRetrace(sheet);
+      wizBuildControls(sheet, host);   // refresh slider positions + active state
+    });
+    pr.appendChild(b);
+  });
+  host.appendChild(pr);
+  // Illustrator Image Trace controls: Threshold / Paths / Corners / Noise.
+  var defs = [
+    ['threshold', 'Threshold', 0, 255, 1, '', 'Black/white cutoff — Less ↔ More ink'],
+    ['paths', 'Paths', 0, 100, 1, '%', 'Fit — High follows the pixels, Low is smoother'],
+    ['corners', 'Corners', 0, 100, 1, '%', 'More = sharper corners; Less smooths unnecessary corners'],
+    ['noise', 'Noise', 1, 200, 1, 'px', 'Ignore specks smaller than this'],
+  ];
+  var timer = null;
+  function sched() { if (timer) clearTimeout(timer); timer = setTimeout(function () { wizRetrace(sheet); }, 200); }
+  defs.forEach(function (d) {
+    var key = d[0], unit = d[5] || '';
+    var wrap = document.createElement('span'); wrap.className = 'img-tc'; wrap.title = d[6];
+    var lab = document.createElement('span'); lab.className = 'img-tc-lab'; lab.textContent = d[1];
+    var rng = document.createElement('input'); rng.type = 'range'; rng.className = 'gd-slider';
+    rng.min = d[2]; rng.max = d[3]; rng.step = d[4]; rng.value = sheet.traceOpts[key];
+    var val = document.createElement('span'); val.className = 'img-tc-val'; val.textContent = sheet.traceOpts[key] + unit;
+    rng.addEventListener('input', function () { sheet.traceOpts[key] = +rng.value; val.textContent = rng.value + unit; sheet._preset = null; sched(); });
+    wrap.appendChild(lab); wrap.appendChild(rng); wrap.appendChild(val);
+    host.appendChild(wrap);
+  });
+  // Neural refiner — ONE on/off toggle + ONE strength slider (sits on top of the
+  // clean trace, never re-traces). Off by default; the tracer is font-grade alone.
+  var aiTimer = null;
+  function aiSched() { if (aiTimer) clearTimeout(aiTimer); aiTimer = setTimeout(function () { wizApplyAI(sheet); }, 250); }
+  var aiWrap = document.createElement('span'); aiWrap.className = 'img-tc img-ai';
+  aiWrap.title = 'Neural refiner: melts residual pixel/AA roughness + optimises points. Off = clean tracer only.';
+  var aiTog = document.createElement('label'); aiTog.className = 'wiz-toggle';
+  var aiCb = document.createElement('input'); aiCb.type = 'checkbox'; aiCb.checked = !!sheet.aiOn;
+  aiTog.appendChild(aiCb); aiTog.appendChild(document.createTextNode(' AI Refine'));
+  var aiDef = sheet.aiStrength != null ? sheet.aiStrength : 60;
+  var aiRng = document.createElement('input'); aiRng.type = 'range'; aiRng.className = 'gd-slider';
+  aiRng.min = 0; aiRng.max = 100; aiRng.step = 5; aiRng.value = aiDef; aiRng.disabled = !sheet.aiOn;
+  var aiVal = document.createElement('span'); aiVal.className = 'img-tc-val'; aiVal.textContent = aiDef + '%';
+  aiCb.addEventListener('change', function () { sheet.aiOn = aiCb.checked; aiRng.disabled = !aiCb.checked; wizApplyAI(sheet); });
+  aiRng.addEventListener('input', function () { sheet.aiStrength = +aiRng.value; aiVal.textContent = aiRng.value + '%'; if (sheet.aiOn) aiSched(); });
+  aiWrap.appendChild(aiTog); aiWrap.appendChild(aiRng); aiWrap.appendChild(aiVal);
+  host.appendChild(aiWrap);
+  var tog = document.createElement('label'); tog.className = 'wiz-toggle'; tog.title = 'Show anchor + handle points';
+  var cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = sheet._showPts !== false;
+  cb.addEventListener('change', function () { sheet._showPts = cb.checked; wizDrawVectors(sheet); });
+  tog.appendChild(cb); tog.appendChild(document.createTextNode(' Points'));
+  host.appendChild(tog);
+  var fit = document.createElement('button'); fit.className = 'rune-btn outline sm2'; fit.textContent = 'Fit';
+  fit.title = 'Reset zoom'; fit.addEventListener('click', function () {
+    sheet._vb = [0, 0, sheet.imgd.width, sheet.imgd.height];
+    if (sheet._svg) { sheet._svg.setAttribute('viewBox', sheet._vb.join(' ')); wizScalePoints(sheet); }
+  });
+  host.appendChild(fit);
+  var cnt = document.createElement('span'); cnt.className = 'wiz-count'; sheet._cntEl = cnt;
+  host.appendChild(cnt);
+  wizUpdateCount(sheet);
+}
+
+function wizUpdateCount(sheet) {
+  if (!sheet._cntEl) return;
+  var n = 0, g = 0;
+  (sheet.clusters || []).forEach(function (cl) { g++; cl.contours.forEach(function (c) { n += (c.points || []).length; }); });
+  sheet._cntEl.textContent = g + ' glyphs · ' + n + ' points';
+}
+
+// MIDDLE — zoomable SVG preview. Faint original raster under crisp vector
+// outlines + anchor (corner/smooth) and handle dots. Wheel = zoom to cursor,
+// drag = pan, Fit = reset.
+function wizBuildPreview(sheet, host) {
+  host.innerHTML = '';
+  var W = sheet.imgd.width, H = sheet.imgd.height;
+  var svg = document.createElementNS(SVGNS, 'svg');
+  svg.setAttribute('class', 'wiz-svg');
+  svg.setAttribute('viewBox', (sheet._vb || [0, 0, W, H]).join(' '));
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+  var im = document.createElementNS(SVGNS, 'image');
+  im.setAttribute('href', sheet.dataURL);
+  im.setAttributeNS('http://www.w3.org/1999/xlink', 'href', sheet.dataURL);
+  im.setAttribute('x', 0); im.setAttribute('y', 0); im.setAttribute('width', W); im.setAttribute('height', H);
+  im.setAttribute('class', 'wiz-img');
+  svg.appendChild(im);
+  var vlayer = document.createElementNS(SVGNS, 'g'); vlayer.setAttribute('class', 'wiz-vec');
+  svg.appendChild(vlayer);
+  host.appendChild(svg);
+  sheet._svg = svg; sheet._vlayer = vlayer;
+  wizDrawVectors(sheet);
+  wizPanZoom(sheet, svg);
+}
+
+function wizPathData(pts) {
+  function f(n) { return Math.round(n * 100) / 100; }
+  var d = 'M' + f(pts[0].x) + ' ' + f(pts[0].y);
+  for (var i = 1; i <= pts.length; i++) {
+    var prev = pts[i - 1], cur = pts[i % pts.length];
+    if (prev.handleOut || cur.handleIn) {
+      var c1 = prev.handleOut || prev, c2 = cur.handleIn || cur;
+      d += 'C' + f(c1.x) + ' ' + f(c1.y) + ' ' + f(c2.x) + ' ' + f(c2.y) + ' ' + f(cur.x) + ' ' + f(cur.y);
+    } else { d += 'L' + f(cur.x) + ' ' + f(cur.y); }
+  }
+  return d + 'Z';
+}
+
+function wizDrawVectors(sheet) {
+  var g = sheet._vlayer; if (!g) return;
+  while (g.firstChild) g.removeChild(g.firstChild);
+  var clusters = sheet.clusters || [];
+  function C(tag) { return document.createElementNS(SVGNS, tag); }
+  // One path per GLYPH (all its contours as sub-paths) with even-odd fill so
+  // counters/holes (inside of O, A, e…) punch through instead of filling solid.
+  clusters.forEach(function (cl) {
+    var d = '';
+    cl.contours.forEach(function (c) { var pts = c.points; if (pts && pts.length >= 2) d += wizPathData(pts) + 'Z '; });
+    if (!d) return;
+    var path = C('path'); path.setAttribute('d', d); path.setAttribute('class', 'wiz-path');
+    path.setAttribute('fill-rule', 'evenodd');
+    g.appendChild(path);
+  });
+  if (sheet._showPts !== false) {
+    clusters.forEach(function (cl) {
+      cl.contours.forEach(function (c) {
+        var pts = c.points; if (!pts || pts.length < 2) return;
+        pts.forEach(function (p) {
+          [p.handleIn, p.handleOut].forEach(function (h) {
+            if (!h) return;
+            var ln = C('line'); ln.setAttribute('x1', p.x); ln.setAttribute('y1', p.y); ln.setAttribute('x2', h.x); ln.setAttribute('y2', h.y);
+            ln.setAttribute('class', 'wiz-handle'); g.appendChild(ln);
+            var hd = C('circle'); hd.setAttribute('cx', h.x); hd.setAttribute('cy', h.y); hd.setAttribute('class', 'wiz-hdot');
+            g.appendChild(hd);
+          });
+        });
+        pts.forEach(function (p) {
+          var a = C('circle'); a.setAttribute('cx', p.x); a.setAttribute('cy', p.y);
+          a.setAttribute('class', 'wiz-anchor ' + (p.type === 'smooth' ? 'sm' : 'cn')); g.appendChild(a);
+        });
+      });
+    });
+  }
+  wizScalePoints(sheet);   // size the dots to a CONSTANT screen size (not zoom-scaled)
+  wizUpdateCount(sheet);
+}
+
+// Keep anchor/handle dots a fixed on-screen size at any zoom — radius in user
+// units = screen px × (viewBox width / svg pixel width). Without this, dots
+// balloon as you zoom in.
+function wizScalePoints(sheet) {
+  if (!sheet._svg || !sheet._vlayer) return;
+  var rect = sheet._svg.getBoundingClientRect();
+  var w = rect.width || sheet.imgd.width;
+  var scale = sheet._vb[2] / w;
+  var rA = (3.6 * scale).toFixed(2), rH = (2.3 * scale).toFixed(2);
+  var anchors = sheet._vlayer.querySelectorAll('.wiz-anchor');
+  for (var i = 0; i < anchors.length; i++) anchors[i].setAttribute('r', rA);
+  var dots = sheet._vlayer.querySelectorAll('.wiz-hdot');
+  for (var j = 0; j < dots.length; j++) dots[j].setAttribute('r', rH);
+}
+
+function wizPanZoom(sheet, svg) {
+  function apply() { svg.setAttribute('viewBox', sheet._vb.join(' ')); wizScalePoints(sheet); }
+  svg.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    var rect = svg.getBoundingClientRect(); if (!rect.width) return;
+    var vb = sheet._vb, W = sheet.imgd.width;
+    var cx = vb[0] + (e.clientX - rect.left) / rect.width * vb[2];
+    var cy = vb[1] + (e.clientY - rect.top) / rect.height * vb[3];
+    var f = e.deltaY < 0 ? 1 / 1.18 : 1.18;
+    var nw = vb[2] * f;
+    if (nw > W * 2) f = (W * 2) / vb[2]; else if (nw < W / 50) f = (W / 50) / vb[2];
+    nw = vb[2] * f; var nh = vb[3] * f;
+    sheet._vb = [cx - (cx - vb[0]) * f, cy - (cy - vb[1]) * f, nw, nh];
+    apply();
+  }, { passive: false });
+  var drag = null;
+  svg.addEventListener('pointerdown', function (e) {
+    drag = { x: e.clientX, y: e.clientY, vb: sheet._vb.slice() };
+    try { svg.setPointerCapture(e.pointerId); } catch (x) {}
+    svg.classList.add('grabbing');
+  });
+  svg.addEventListener('pointermove', function (e) {
+    if (!drag) return; var rect = svg.getBoundingClientRect(); if (!rect.width) return;
+    var dx = (e.clientX - drag.x) / rect.width * drag.vb[2];
+    var dy = (e.clientY - drag.y) / rect.height * drag.vb[3];
+    sheet._vb = [drag.vb[0] - dx, drag.vb[1] - dy, drag.vb[2], drag.vb[3]]; apply();
+  });
+  function end(e) { if (drag) { drag = null; try { svg.releasePointerCapture(e.pointerId); } catch (x) {} svg.classList.remove('grabbing'); } }
+  svg.addEventListener('pointerup', end);
+  svg.addEventListener('pointercancel', end);
+}
+
+function wizRetrace(sheet) { wizTrace(sheet); wizApplyAI(sheet); }
+
+// BOTTOM — which SCRIPT this image holds. Clicking one stores it and advances.
+function wizBuildScope(sheet, host) {
+  host.innerHTML = '';
+  IMG_SCOPES.forEach(function (sc) {
+    var b = document.createElement('button');
+    b.className = 'wiz-scope-btn' + (sheet.scope === sc.id ? ' on' : '');
+    b.textContent = sc.label; b.title = 'This image is ' + sc.label + ' — click to continue';
+    b.addEventListener('click', function () { wizPickScope(sc.id); });
+    host.appendChild(b);
+  });
+}
+
+function wizPickScope(scope) {
+  if (!wiz) return;
+  var sheet = wiz.sheets[wiz.idx]; if (!sheet) return;
+  sheet.scope = scope;
+  if (wiz.idx < wiz.files.length - 1) wizLoad(wiz.idx + 1);
+  else wizFinish();
+}
+
+function wizBack() { if (wiz && wiz.idx > 0) wizLoad(wiz.idx - 1); }
+function wizCancel() { var m = $('imgWizModal'); if (m) m.classList.add('hidden'); wiz = null; setStatus(''); }
+
+// All images scoped → assemble imgSheets, recognize each within its script, open
+// the review/fill grid.
+function wizFinish() {
+  $('imgWizModal').classList.add('hidden');
+  imgSheets = [];
+  (wiz ? wiz.sheets : []).forEach(function (sheet) {
+    if (!sheet || !sheet.clusters || !sheet.clusters.length) return;
+    var seqKey = imgScopeSeq(sheet.scope);
+    var mapping = seqKey ? imgglyphs.mapClusters(sheet.clusters, seqKey)
+      : sheet.clusters.map(function (_, i) { return { clusterIndex: i, char: null, unicode: null }; });
+    imgSheets.push({
+      name: sheet.name, scope: sheet.scope, imgd: sheet.imgd, traceOpts: sheet.traceOpts,
+      category: sheet.category, clusters: sheet.clusters, mapping: mapping, _gen: 0,
+    });
+  });
+  wiz = null;
+  if (!imgSheets.length) { setStatus('No glyphs found in those images.', 'err'); return; }
+  recognizeSheets().then(openImgModal, openImgModal);
+}
+
+// SVG silhouette of one traced cluster (pixel space, Y-down, like SVG — no flip).
+function clusterSvg(cl) {
+  var b = cl.bbox, pad = 2;
+  var bw = Math.max(1, b[2] - b[0]), bh = Math.max(1, b[3] - b[1]);
+  function f(n) { return Math.round(n * 10) / 10; }
+  var d = '';
+  cl.contours.forEach(function (c) {
+    var pts = c.points; if (!pts || pts.length < 2) return;
+    var x0 = b[0] - pad, y0 = b[1] - pad;
+    d += 'M' + f(pts[0].x - x0) + ' ' + f(pts[0].y - y0);
+    for (var i = 1; i <= pts.length; i++) {
+      var prev = pts[i - 1], cur = pts[i % pts.length];
+      if (prev.handleOut || cur.handleIn) {
+        var c1 = prev.handleOut || prev, c2 = cur.handleIn || cur;
+        d += 'C' + f(c1.x - x0) + ' ' + f(c1.y - y0) + ' ' + f(c2.x - x0) + ' ' + f(c2.y - y0) + ' ' + f(cur.x - x0) + ' ' + f(cur.y - y0);
+      } else {
+        d += 'L' + f(cur.x - x0) + ' ' + f(cur.y - y0);
+      }
+    }
+    d += 'Z';
+  });
+  return '<svg viewBox="0 0 ' + f(bw + pad * 2) + ' ' + f(bh + pad * 2) + '" preserveAspectRatio="xMidYMid meet">' +
+    '<path d="' + d + '" fill="#141414" fill-rule="evenodd"/></svg>';
+}
+
+function updateMergeBtn(sheet) {
+  if (!sheet._mergeBtn) return;
+  var n = sheet._sel ? Object.keys(sheet._sel).length : 0;
+  sheet._mergeBtn.disabled = n < 2;
+  sheet._mergeBtn.textContent = n >= 2 ? 'Merge (' + n + ')' : 'Merge';
+}
+
+function renderImgThumbs(sheet, box) {
+  box.innerHTML = '';
+  if (!sheet._sel) sheet._sel = {};
+  sheet.clusters.forEach(function (cl, i) {
+    var cell = document.createElement('div'); cell.className = 'img-thumb';
+    cell.innerHTML = clusterSvg(cl);
+    if (sheet._sel[i]) cell.classList.add('sel');
+    var inp = document.createElement('input');
+    inp.className = 'img-char'; inp.maxLength = 2; inp.spellcheck = false;
+    var m = sheet.mapping[i];
+    inp.value = (m && m.char != null) ? m.char : '';
+    inp.title = (m && m.candidates && m.candidates.length > 1)
+      ? 'AI guesses: ' + m.candidates.map(function (c) { return c.char; }).join('  ') + '  — type to override, clear to skip'
+      : 'Character for this glyph — clear to skip it';
+    if (m && m.source === 'ai') cell.classList.add('ai');
+    if (!inp.value) cell.classList.add('unset');
+    inp.addEventListener('input', function () {
+      var ch = inp.value ? Array.from(inp.value)[0] : null;
+      sheet.mapping[i] = { clusterIndex: i, char: ch, unicode: ch ? ch.codePointAt(0) : null, source: 'manual' };
+      cell.classList.toggle('unset', !ch);
+      cell.classList.remove('ai');
+    });
+    // click the TILE (not the char box) to select it for merging
+    cell.addEventListener('click', function (ev) {
+      if (ev.target === inp) return;
+      if (sheet._sel[i]) delete sheet._sel[i]; else sheet._sel[i] = true;
+      cell.classList.toggle('sel', !!sheet._sel[i]);
+      updateMergeBtn(sheet);
+    });
+    cell.appendChild(inp);
+    box.appendChild(cell);
+  });
+  updateMergeBtn(sheet);
+}
+
+// Merge the selected tiles into ONE glyph (e.g. the two marks of a quote the
+// recognizer split). Combines their contours + bbox, replaces them at the first
+// selected slot, then re-recognizes just the merged glyph within the scope.
+function mergeSelected(sheet, thumbs) {
+  var sel = Object.keys(sheet._sel || {}).map(Number).sort(function (a, b) { return a - b; });
+  if (sel.length < 2) return;
+  var selSet = {}; sel.forEach(function (i) { selSet[i] = true; });
+  var contours = [], x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, row = Infinity;
+  sel.forEach(function (i) {
+    var cl = sheet.clusters[i];
+    cl.contours.forEach(function (c) { contours.push(c); });
+    x0 = Math.min(x0, cl.bbox[0]); y0 = Math.min(y0, cl.bbox[1]);
+    x1 = Math.max(x1, cl.bbox[2]); y1 = Math.max(y1, cl.bbox[3]); row = Math.min(row, cl.row);
+  });
+  var merged = { contours: contours, bbox: [x0, y0, x1, y1], row: row };
+  var newClusters = [], newMapping = [];
+  for (var i = 0; i < sheet.clusters.length; i++) {
+    if (i === sel[0]) { newClusters.push(merged); newMapping.push({ clusterIndex: newClusters.length - 1, char: null, unicode: null }); }
+    if (selSet[i]) continue;
+    newClusters.push(sheet.clusters[i]);
+    var m = sheet.mapping[i] || {};
+    newMapping.push({ clusterIndex: newClusters.length - 1, char: (m.char != null ? m.char : null), unicode: (m.unicode != null ? m.unicode : null), source: m.source, conf: m.conf, candidates: m.candidates });
+  }
+  sheet.clusters = newClusters; sheet.mapping = newMapping; sheet._sel = {};
+  updateSheetName(sheet);
+  renderImgThumbs(sheet, thumbs);
+  if (glyphreco.isAvailable()) {
+    var mi = newClusters.indexOf(merged);
+    glyphreco.recognizeSheet([merged], imgAllowedCps(sheet.scope)).then(function (preds) {
+      var p = preds && preds[0];
+      if (p && p.char != null && sheet.clusters[mi] === merged) {
+        sheet.mapping[mi] = { clusterIndex: mi, char: p.char, unicode: p.cp, conf: p.conf, source: 'ai', candidates: p.candidates || null };
+        renderImgThumbs(sheet, thumbs);
+      }
+    });
+  }
+}
+
+function updateSheetName(sheet) {
+  if (sheet._nameEl) sheet._nameEl.textContent = sheet.name + ' · ' + sheet.clusters.length + ' glyphs';
+}
+
+// Script changed in the review grid: clear non-manual guesses and re-detect
+// within the new script (manual edits are kept).
+async function reRecognizeSheet(sheet, thumbs) {
+  sheet._gen = (sheet._gen || 0) + 1;
+  var seqKey = imgScopeSeq(sheet.scope);
+  var base = seqKey ? imgglyphs.mapClusters(sheet.clusters, seqKey)
+    : sheet.clusters.map(function (_, i) { return { clusterIndex: i, char: null, unicode: null }; });
+  sheet.mapping = sheet.mapping.map(function (m, i) { return (m && m.source === 'manual') ? m : base[i]; });
+  renderImgThumbs(sheet, thumbs);
+  var ok = await recognizeSheetEntry(sheet, sheet.name);
+  renderImgThumbs(sheet, thumbs);
+  if (!ok) setStatus('Model off — using positional guess for this script.');
+}
+
+function openImgModal() {
+  var host = $('imgSheets'); if (!host) return;
+  host.innerHTML = '';
+  imgSheets.forEach(function (sheet) {
+    sheet._sel = {};
+    var sec = document.createElement('div'); sec.className = 'img-sheet';
+    var head = document.createElement('div'); head.className = 'img-sheet-head';
+    var name = document.createElement('span'); name.className = 'img-sheet-name';
+    sheet._nameEl = name; updateSheetName(sheet);
+    var thumbs = document.createElement('div'); thumbs.className = 'img-thumbs';
+    // merge: select 2+ tiles, combine into one glyph
+    var mergeBtn = document.createElement('button'); mergeBtn.className = 'rune-btn outline sm2 img-merge';
+    mergeBtn.textContent = 'Merge'; mergeBtn.disabled = true;
+    mergeBtn.title = 'Click 2+ tiles to select them, then Merge into one glyph (e.g. the two marks of a quote).';
+    mergeBtn.addEventListener('click', function () { mergeSelected(sheet, thumbs); });
+    sheet._mergeBtn = mergeBtn;
+    // script scope
+    var catWrap = document.createElement('label'); catWrap.className = 'img-catwrap';
+    var catLbl = document.createElement('span'); catLbl.className = 'img-catlbl'; catLbl.textContent = 'script';
+    var sel = document.createElement('select'); sel.className = 'img-cat';
+    sel.title = 'Which script this image is — change it to re-detect the glyphs within a different script.';
+    IMG_SCOPES.forEach(function (opt) {
+      var o = document.createElement('option'); o.value = opt.id; o.textContent = opt.label;
+      if (opt.id === sheet.scope) o.selected = true; sel.appendChild(o);
+    });
+    sel.addEventListener('change', function () { sheet.scope = sel.value; reRecognizeSheet(sheet, thumbs); });
+    catWrap.appendChild(catLbl); catWrap.appendChild(sel);
+    var right = document.createElement('div'); right.className = 'img-head-right';
+    right.appendChild(mergeBtn); right.appendChild(catWrap);
+    head.appendChild(name); head.appendChild(right);
+    sec.appendChild(head);
+    sec.appendChild(thumbs);
+    renderImgThumbs(sheet, thumbs);
+    host.appendChild(sec);
+  });
+  $('imgModal').classList.remove('hidden');
+}
+
+function closeImgModal() { var m = $('imgModal'); if (m) m.classList.add('hidden'); imgSheets = []; }
+
+function onImgFill() {
+  var f = curFont(); if (!f) { closeImgModal(); return; }
+  var mid = curMasterId();
+  // Seat each sheet by its glyphs' RECOGNIZED characters (mixed sheets size right);
+  // collect candidates per target slot and resolve same-char collisions by keeping
+  // the most confident (a hand-typed char always wins).
+  var byUnicode = {}; var missing = [], collisions = 0;
+  imgSheets.forEach(function (sheet) {
+    var chars = sheet.mapping.map(function (m) { return (m && m.char != null) ? m.char : null; });
+    var seated = imgglyphs.seatByChar(sheet.clusters, chars, f.metrics, { fallbackCategory: sheet.category });
+    sheet.mapping.forEach(function (m, i) {
+      if (!m || m.char == null || m.unicode == null) return;
+      var gi = f.glyphs.findIndex(function (g) { return g.unicode === m.unicode; });
+      if (gi < 0) { missing.push(m.char); return; }
+      var s = seated[i]; if (!s) return;
+      var conf = (m.source === 'manual') ? 2 : (typeof m.conf === 'number' ? m.conf : 1);
+      var prev = byUnicode[m.unicode];
+      if (prev) { collisions++; if (conf <= prev.conf) return; }
+      byUnicode[m.unicode] = { gi: gi, contours: s.contours, advance: s.advanceWidth, conf: conf };
+    });
+  });
+  var filled = 0;
+  Object.keys(byUnicode).forEach(function (u) {
+    var e = byUnicode[u];
+    if (glyphset.setGlyphContours(f, e.gi, mid, e.contours, e.advance)) filled++;
+  });
+  // refresh the currently-open Illustrator glyph if it got filled
+  if (typeof openGlyphIndex === 'number' && openGlyphIndex >= 0) {
+    var og = f.glyphs[openGlyphIndex];
+    if (og && isFilled(og)) syncOpenGlyph(og);
+  }
+  closeImgModal();
+  flatCache = {}; kernCache = {};
+  renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
+  var msg = 'Image import: filled ' + filled + ' glyph' + (filled === 1 ? '' : 's') + '.';
+  if (collisions) msg += ' (' + collisions + ' duplicate guess' + (collisions === 1 ? '' : 'es') + ' — kept the most confident.)';
+  if (missing.length) {
+    var uniq = missing.filter(function (c, i) { return missing.indexOf(c) === i; });
+    msg += ' Skipped ' + uniq.length + ' not in this font’s sets (' + uniq.slice(0, 10).join(' ') + (uniq.length > 10 ? '…' : '') + ').';
+  }
+  setStatus(msg, filled ? 'ok' : 'err');
 }
 
 // ---- modification. — only the glyphs that have outlines ----
@@ -1783,21 +2547,65 @@ function ctxDeleteGlyph(slot) {
   setStatus('Deleted glyph "' + label + '".', 'ok');
 }
 
-// Auto-compose accented glyphs (é = e + acute …) from base letters + drawn
-// marks. Innovation: a multilingual font stops needing every accent drawn by
-// hand once the base + the few marks exist.
+// Auto-compose accented glyphs (é = e + acute …) from base letters. Marks that the
+// user hasn't drawn are SYNTHESIZED from the font's own shapes (apostrophe→´/`,
+// period→¨, hyphen→¯ + bent ^/ˇ, O→˚, comma→¸) so a multilingual font no longer
+// needs every accent — or even every mark — drawn by hand. Drawn marks still win.
 function onComposeAccents() {
   if (!FEAT.accents) return;
   var f = curFont(), mid = curMasterId();
-  var r = accentCompose.composeAll(f, mid);
+  var r = accentCompose.composeAll(f, mid, { deriveMarks: true });
   r.composed.forEach(function (ch) { var g = f.glyphs.find(function (x) { return x.char === ch; }); if (g) syncOpenGlyph(g); });
   renderGrid(); renderModGrid(); scheduleTester(); autosave();
   if (!r.composed.length) {
-    var missing = {}; r.skipped.forEach(function (s) { missing[s.reason.split(':')[0]] = 1; });
-    setStatus('Composed 0 — draw the base letters and the mark glyphs (acute, grave, caron…) first.', 'err');
+    setStatus('Composed 0 — draw the base letters (A E I O U C N S Z…) first; the marks are auto-built from your shapes.', 'err');
   } else {
-    setStatus('Composed ' + r.composed.length + ' accented glyph(s)' + (r.skipped.length ? ' (' + r.skipped.length + ' skipped — base or mark not drawn)' : '') + '.', 'ok');
+    setStatus('Composed ' + r.composed.length + ' accented glyph(s)' + (r.withDerived ? ' · marks auto-built from your shapes' : '') + (r.skipped.length ? ' (' + r.skipped.length + ' skipped — base not drawn)' : '') + '.', 'ok');
   }
+}
+
+// Make the standalone diacritic MARK glyphs once, derived from the font's existing
+// shapes (apostrophe→´/`, period→¨, hyphen→¯, comma→¸, O→˚, weight-matched ^ ˇ ~ ˘).
+// They become real editable glyphs (the user can refine); +Accents then uses them
+// (a drawn mark always wins, so this never overwrites marks you've already made).
+function shiftContours(cs, dx, dy) {
+  cs.forEach(function (c) { c.points.forEach(function (p) { p.x += dx; p.y += dy; if (p.handleIn) { p.handleIn.x += dx; p.handleIn.y += dy; } if (p.handleOut) { p.handleOut.x += dx; p.handleOut.y += dy; } }); });
+  return cs;
+}
+var MARK_GLYPHS = [
+  { k: 'acute', name: 'acute', cp: 0x00B4, pos: 'above' }, { k: 'grave', name: 'grave', cp: 0x0060, pos: 'above' },
+  { k: 'circumflex', name: 'circumflex', cp: 0x02C6, pos: 'above' }, { k: 'tilde', name: 'tilde', cp: 0x02DC, pos: 'above' },
+  { k: 'dieresis', name: 'dieresis', cp: 0x00A8, pos: 'above' }, { k: 'macron', name: 'macron', cp: 0x00AF, pos: 'above' },
+  { k: 'breve', name: 'breve', cp: 0x02D8, pos: 'above' }, { k: 'dotaccent', name: 'dotaccent', cp: 0x02D9, pos: 'above' },
+  { k: 'ring', name: 'ring', cp: 0x02DA, pos: 'above' }, { k: 'caron', name: 'caron', cp: 0x02C7, pos: 'above' },
+  { k: 'doubleacute', name: 'hungarumlaut', cp: 0x02DD, pos: 'above' }, { k: 'cedilla', name: 'cedilla', cp: 0x00B8, pos: 'below' },
+  { k: 'ogonek', name: 'ogonek', cp: 0x02DB, pos: 'below' },
+];
+function onGenerateMarks() {
+  if (!FEAT.accents) return;
+  var f = curFont(); if (!f) return;
+  var mid = curMasterId(), M = f.metrics || {}, em = f.unitsPerEm || 1000, cap = M.capHeight || 0.7 * em;
+  var made = 0, kept = 0;
+  MARK_GLYPHS.forEach(function (mk) {
+    var ch = String.fromCodePoint(mk.cp), g = null;
+    for (var i = 0; i < f.glyphs.length; i++) { if (f.glyphs[i].name === mk.name || f.glyphs[i].char === ch) { g = f.glyphs[i]; break; } }
+    if (g && g.layers[mid] && g.layers[mid].contours && g.layers[mid].contours.length) { kept++; return; } // keep a user-drawn mark
+    var d = markgen.deriveMark(f, mk.k, mid); if (!d || !d.contours.length) return;
+    var cs = d.contours, b = glyphset.contoursBounds(cs); if (!b) return;
+    var bearing = Math.round(0.08 * em), adv = Math.round(b.w + 2 * bearing);
+    var dx = bearing - b.minX, dy = mk.pos === 'above' ? Math.round(cap * 0.64) - b.minY : Math.round(-0.03 * em) - b.maxY;
+    shiftContours(cs, dx, dy);
+    if (!g) {
+      var layers = {}; (f.masters || []).forEach(function (m) { layers[m.id] = { contours: [] }; });
+      g = { name: mk.name, char: ch, unicode: mk.cp, alphabet: 'custom', advanceWidth: adv, layers: layers };
+      f.glyphs.push(g);
+    }
+    g.layers[mid] = { contours: cs }; g.advanceWidth = adv; g.lsbLineX = 0;
+    made++;
+  });
+  renderGrid(); renderModGrid(); scheduleTester(); autosave();
+  setStatus(made ? ('Made ' + made + ' mark glyph(s) from your shapes' + (kept ? ' (' + kept + ' kept — already drawn)' : '') + ' — refine them in the grid, then + Accents.')
+    : (kept ? 'All marks already drawn — nothing to make.' : 'Could not make marks — draw an apostrophe, period, hyphen or O first.'), (made || kept) ? 'ok' : 'err');
 }
 
 function updateAssign() {
@@ -1839,8 +2647,15 @@ function onAlt() {
   if (ch) {
     f.glyphs.forEach(function (g, i) { if (base < 0 && g.char === ch) base = i; });
     if (base < 0) { setStatus('No glyph "' + ch + '" in this font.', 'err'); return; }
-  } else if (selectedSlot >= 0) base = selectedSlot;
-  else { setStatus('Type a letter (or select a glyph) to alternate.', 'err'); return; }
+  } else if (selectedSlot >= 0) {
+    // if the selected slot is ITSELF an alternate, make a sibling alternate of its
+    // BASE (not an alternate-of-an-alternate) — the new alt is auto-selected, so a
+    // second +Alternate would otherwise nest on the previous one.
+    var sg = f.glyphs[selectedSlot];
+    if (sg && sg.kind === 'alternate' && sg.baseName) {
+      base = selectedSlot; f.glyphs.forEach(function (g, i) { if (g.name === sg.baseName) base = i; });
+    } else base = selectedSlot;
+  } else { setStatus('Type a letter (or select a glyph) to alternate.', 'err'); return; }
   var idx = glyphset.createAlternate(curFont(), base);
   if (idx < 0) { setStatus('Could not create alternate.', 'err'); return; }
   selectedSlot = idx; renderGrid(); updateAssign(); renderRight();
@@ -1970,8 +2785,9 @@ function onExportGo() {
       var folder = dir + '/' + fam.replace(/[^\w\- ]+/g, '').trim();
       if (!fs.existsSync(folder)) fs.mkdirSync(folder);   // exports land in a folder
       var n = 0, errs = 0, notes = [];
-      // Variable: align compatible masters then export each as a named style
-      // (a working family). A single-file .ttf with fvar/gvar is the follow-up.
+      // Multi-master variable: align compatible masters, export each as a named style
+      // (a working family) + a compatibility report. (Single-file fvar/gvar writer
+      // lives in core/ttfWriter.js — kept for the future AI-trained variable axes.)
       if (wantVar && f.masters.length > 1) {
         varCompat.matchPoints(f);
         var rep = varCompat.report(f);
@@ -2332,14 +3148,28 @@ function syncSpaceSliders() {                            // reflect the font's s
   ['t-space', 'm-space'].forEach(function (id) { var el = $(id); if (el) el.value = pct; });
   if ($('mSpaceVal')) $('mSpaceVal').textContent = pct + '%';
 }
+// Image-imported fonts have NO space glyph (the sheet sequences carry no blank),
+// so the Space slider had nowhere to persist its value → syncSpaceSliders read back
+// the 25% default and snapped the slider back mid-drag (looked un-draggable). Create
+// the glyph on demand — the exported font then actually HAS a space character too.
+function ensureSpaceGlyph(f) {
+  f = f || curFont(); if (!f) return null;
+  var g = spaceGlyph(f); if (g) return g;
+  var layers = {}; (f.masters || []).forEach(function (m) { layers[m.id] = { contours: [] }; });
+  g = { name: 'space', char: ' ', unicode: 32, alphabet: 'custom',
+        advanceWidth: Math.round(0.25 * (f.unitsPerEm || 1000)), layers: layers };
+  f.glyphs.push(g);
+  return g;
+}
 function setSpaceWidth(pct, commit) {                    // % of em → space glyph advance (saved into the font)
   var f = curFont(); if (!f) return;
   if (isNaN(pct)) pct = 25;
-  var g = spaceGlyph(f); if (g) g.advanceWidth = Math.round(pct / 100 * (f.unitsPerEm || 1000));
+  var g = ensureSpaceGlyph(f); if (g) g.advanceWidth = Math.round(pct / 100 * (f.unitsPerEm || 1000));
   syncSpaceSliders();
   renderTesterText(); renderFloatTester();
   if (commit) autosave();
 }
+
 // Rebuild the line as spans: each gap = track + the pair's kern (Optical live /
 // Metric from the table), scaled to the current size. Caret is preserved.
 // per-occurrence alternate picks in the tester: text-position index -> glyph index
@@ -2593,7 +3423,7 @@ function applyEdition() {
   lockCtl('nf-opentpl', FEAT.template, PRO); lockCtl('nf-importtpl', FEAT.template, PRO);
   lockCtl('altBtn', FEAT.alternates, PRO); lockCtl('altChip', FEAT.alternates, PRO);
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
-  lockCtl('accentBtn', FEAT.accents, PRO);
+  lockCtl('accentBtn', FEAT.accents, PRO); lockCtl('genMarksBtn', FEAT.accents, PRO);
   lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
   lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('optical', FEAT.optimize, PRO);
   lockCtl('expProfile', FEAT.optimize, PRO); lockCtl('aiAnalyze', FEAT.optimize, PRO);
@@ -2612,6 +3442,11 @@ function boot() {
   $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
   $('nf-family').addEventListener('input', renderProfile);
+  if ($('nf-imgimport')) $('nf-imgimport').addEventListener('click', onImgImportPage1);
+  // Image Import parked as a demo — hide both entry buttons (New Font dialog + workspace).
+  if (!IMG_IMPORT_ENABLED) {
+    ['nf-imgimport', 'imgImportBtn'].forEach(function (id) { var el = $(id); if (el) el.style.display = 'none'; });
+  }
   $('nf-opentpl').addEventListener('click', onOpenTemplate);
   $('nf-importtpl').addEventListener('click', onImportTemplate);
   $('nf-import').addEventListener('click', onImport);
@@ -2643,6 +3478,8 @@ function boot() {
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
   $('ligInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLig(); });
+  if ($('altLigTplBtn')) $('altLigTplBtn').addEventListener('click', onOpenAltLigTemplate);
+  if ($('altLigImportBtn')) $('altLigImportBtn').addEventListener('click', onImportAltLigTemplate);
 
   var secTabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var st = 0; st < secTabs.length; st++) (function (t) {
@@ -2672,6 +3509,12 @@ function boot() {
     $('m-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
   }
   $('accentBtn').addEventListener('click', onComposeAccents);
+  if ($('genMarksBtn')) $('genMarksBtn').addEventListener('click', onGenerateMarks);
+  if ($('imgImportBtn')) $('imgImportBtn').addEventListener('click', onImgImportClick);
+  if ($('imgFillBtn')) $('imgFillBtn').addEventListener('click', onImgFill);
+  if ($('imgCancelBtn')) $('imgCancelBtn').addEventListener('click', closeImgModal);
+  if ($('wizBackBtn')) $('wizBackBtn').addEventListener('click', wizBack);
+  if ($('wizCancelBtn')) $('wizCancelBtn').addEventListener('click', wizCancel);
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);

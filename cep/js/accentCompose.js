@@ -7,6 +7,7 @@
 // out of NFD naturally and are never guessed.
 
 const glyphset = require('./glyphset.js');
+const markgen = require('./markgen.js');   // synthesize a mark from existing shapes when none is drawn
 
 // combining codepoint -> mark name; also drives the NFD derivation
 const COMBINING_TO_NAME = {
@@ -120,12 +121,19 @@ function composeAccent(project, targetChar, masterId, opts) {
   const baseIsUpper = dec.base >= 0x41 && dec.base <= 0x5A;
   const gap = Math.round((M.unitsPerEm || project.unitsPerEm || 1000) * 0.06);
 
+  const derived = [];
   for (const markName of dec.marks) {
-    const markG = findMarkGlyph(project, markName, masterId);
-    if (!markG) return { ok: false, reason: 'mark-not-drawn:' + markName };
-    const mk = cloneContours(layerOf(project, markG, masterId).contours);
-    const markLx = markG.lsbLineX || 0;
-    if (markLx) translateContours(mk, -markLx, 0);
+    let mk = null;
+    const markG = findMarkGlyph(project, markName, masterId);   // a user-drawn mark always wins
+    if (markG) {
+      mk = cloneContours(layerOf(project, markG, masterId).contours);
+      const markLx = markG.lsbLineX || 0;
+      if (markLx) translateContours(mk, -markLx, 0);
+    } else if (opts.deriveMarks !== false) {                    // else synthesize it from existing shapes
+      const d = markgen.deriveMark(project, markName, masterId);
+      if (d && d.contours && d.contours.length) { mk = d.contours; derived.push(markName); }
+    }
+    if (!mk) return { ok: false, reason: 'mark-not-drawn:' + markName };
     const markB = glyphset.contoursBounds(mk);
     if (!markB) return { ok: false, reason: 'mark-empty:' + markName };
     // horizontal: center the mark on the base
@@ -149,20 +157,22 @@ function composeAccent(project, targetChar, masterId, opts) {
   target.lsbLineX = 0;   // the composed outline is already baked to the origin
   target.composedFrom = baseChar;
   if (!target.kind) target.kind = 'composed';
-  return { ok: true, base: baseChar, marks: dec.marks };
+  return { ok: true, base: baseChar, marks: dec.marks, derived: derived };
 }
 
 // Compose every decomposable target whose base + marks are drawn. Returns
 // { composed, skipped:[{char,reason}] }.
-function composeAll(project, masterId) {
+function composeAll(project, masterId, opts) {
   masterId = masterId || (project.masters && project.masters[0] && project.masters[0].id);
   const composed = [], skipped = [];
+  let withDerived = 0;
   for (const cpStr of Object.keys(DECOMPOSE)) {
     const cp = +cpStr, ch = String.fromCodePoint(cp);
-    const r = composeAccent(project, ch, masterId);
-    if (r.ok) composed.push(ch); else if (r.reason !== 'no-target-slot') skipped.push({ char: ch, reason: r.reason });
+    const r = composeAccent(project, ch, masterId, opts);
+    if (r.ok) { composed.push(ch); if (r.derived && r.derived.length) withDerived++; }
+    else if (r.reason !== 'no-target-slot') skipped.push({ char: ch, reason: r.reason });
   }
-  return { composed, skipped };
+  return { composed, skipped, withDerived };
 }
 
 module.exports = { DECOMPOSE, COMBINING_TO_NAME, MARK_NAME_CANDIDATES, composeAccent, composeAll, deriveDecompose };

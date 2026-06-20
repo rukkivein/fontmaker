@@ -23,6 +23,40 @@
     </div>
   </div>
 
+  <!-- IMAGE IMPORT — review & confirm the auto-traced glyphs before filling -->
+  <div id="imgModal" class="rt-modal hidden">
+    <div class="rt-modal-box img-modal-box">
+      <div class="rt-modal-h">Image Import — review &amp; confirm</div>
+      <div class="rt-modal-t">Traced your sheet(s) and recognized each glyph. Tune <b>smoothness / corners / cleanup</b> and Re-trace if a shape looks off, and fix any wrong <b>character</b> (clear a box to skip it). The <b>filter</b> is optional — leave it on “All” to recognize letters &amp; symbols freely. Then fill the grid.</div>
+      <div id="imgSheets" class="img-sheets"></div>
+      <div class="rt-modal-btns img-modal-btns">
+        <button id="imgFillBtn" class="rune-btn blue sm2">Fill grid</button>
+        <button id="imgCancelBtn" class="rune-btn outline sm2">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- per-image IMPORT WIZARD: tune vectorization with a zoomable point preview, pick the script, advance -->
+  <div id="imgWizModal" class="rt-modal hidden">
+    <div class="rt-modal-box wiz-box">
+      <div class="wiz-head">
+        <div class="wiz-title">Image Import — <span id="wizStep"></span></div>
+        <div class="wiz-name" id="wizName"></div>
+      </div>
+      <div class="wiz-ctl" id="wizCtl"></div>
+      <div class="wiz-preview" id="wizPreview"></div>
+      <div class="wiz-scope">
+        <div class="wiz-scope-lbl">What's in this image? <span class="wiz-scope-hint">— pick one to continue</span></div>
+        <div class="wiz-scope-btns" id="wizScopeBtns"></div>
+      </div>
+      <div class="rt-modal-btns wiz-btns">
+        <span id="wizStatus" class="wiz-status"></span>
+        <button id="wizBackBtn" class="rune-btn outline sm2">Back</button>
+        <button id="wizCancelBtn" class="rune-btn outline sm2">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <!-- floating LIVE TEST window — stays on top while you edit spacing; updates live -->
   <div id="floatTester" class="ft-win hidden">
     <div id="ft-head" class="ft-head"><span>Live Test</span><button id="ft-close" class="ft-close" title="Close">×</button></div>
@@ -78,6 +112,7 @@
         <div id="profile" class="prof-body"></div>
 
         <div class="rune-actions">
+          <button id="nf-imgimport" class="rune-btn outline nf-imgimport" title="Import 1–4 reference sheets (numbers / letters / symbols) — auto-trace each glyph and auto-fill the font">⊕ Image Import — build from sheets</button>
           <button id="nf-opentpl" class="rune-btn outline">Open Template</button>
           <button id="nf-importtpl" class="rune-btn outline">Import from Template</button>
           <button id="nf-import" class="rune-btn outline">Import Your Project</button>
@@ -127,6 +162,7 @@
           <button id="openInAi" class="w-import" disabled>Import Glyph to Illustrator</button>
           <input id="glyphSearch" class="w-search" type="text" placeholder="Search Glyph" spellcheck="false" />
         </div>
+        <button id="imgImportBtn" class="w-import w-imgimport" title="Import 1–4 reference sheets (numbers / letters / symbols) — Illustrator Image Trace + auto-fill the grid">⊕ Image Import — trace sheets &amp; auto-fill</button>
         <div class="w-gridwrap"><div id="grid" class="grid"></div></div>
         <div class="w-modrow">
           <button id="altBtn" class="rune-btn outline sm2">+ Alternate</button>
@@ -134,6 +170,9 @@
           <button id="ligBtn" class="rune-btn outline sm2">+ Ligature</button>
           <input id="ligInput" class="w-chip w-chip-in" type="text" placeholder="fi" maxlength="4" />
           <button id="accentBtn" class="rune-btn outline sm2" title="Auto-compose accented glyphs (é, č, ñ…) from base letters + drawn marks">+ Accents</button>
+          <button id="genMarksBtn" class="rune-btn outline sm2" title="Make the diacritic mark glyphs (´ ` ¨ ˜ ˚ ˆ ˇ ¯ ¸…) ONCE from your existing shapes (apostrophe / period / hyphen / comma / O) — editable glyphs you can refine; +Accents then uses them. Won't overwrite marks you've drawn.">✦ Make Marks</button>
+          <button id="altLigTplBtn" class="rune-btn outline sm2" title="Open an Illustrator template with a box for every alternate &amp; ligature (same cell height as the main template; ligatures get wider boxes) — draw them, then Import Alt/Lig">⊞ Alt/Lig Template</button>
+          <button id="altLigImportBtn" class="rune-btn outline sm2" title="Read the drawn alternates &amp; ligatures back from the open template into their glyphs">Import Alt/Lig</button>
         </div>
         <div id="assignWrap" class="w-assign">
           <span id="assignChip" class="w-assignchip"></span>

@@ -78,18 +78,103 @@ Writer.prototype.bytes = function (arr) { for (var i = 0; i < arr.length; i++) t
 Writer.prototype.pad4 = function () { while (this.b.length % 4) this.b.push(0); return this; };
 function strUTF16BE(s) { var a = []; for (var i = 0; i < s.length; i++) { var c = s.charCodeAt(i); a.push((c >> 8) & 0xff, c & 0xff); } return a; }
 
+// ---- variable-font helpers (fvar / gvar / STAT) ----
+function f2dot14(v) { var n = Math.round(v * 16384); if (n < -32768) n = -32768; if (n > 32767) n = 32767; return n; } // F2Dot14 as i16
+function fixed(v) { return Math.round(v * 65536) | 0; }                                                              // 16.16 Fixed
+function peakVec(n, idx, val) { var a = []; for (var i = 0; i < n; i++) a.push(i === idx ? val : 0); return a; }
+// gvar packed deltas: zero-runs (0x80|n), byte-runs (0x00|n), word-runs (0x40|n).
+function packDeltas(deltas) {
+  var out = [], i = 0, n = deltas.length;
+  function zeros(c) { while (c > 0) { var k = c > 64 ? 64 : c; out.push(0x80 | (k - 1)); c -= k; } }
+  function asBytes(arr) { var p = 0; while (p < arr.length) { var k = (arr.length - p) > 64 ? 64 : (arr.length - p); out.push((k - 1) & 0x3f); for (var j = 0; j < k; j++) out.push(arr[p + j] & 0xff); p += k; } }
+  function asWords(arr) { var p = 0; while (p < arr.length) { var k = (arr.length - p) > 64 ? 64 : (arr.length - p); out.push(0x40 | ((k - 1) & 0x3f)); for (var j = 0; j < k; j++) { var d = arr[p + j]; if (d < 0) d += 0x10000; out.push((d >> 8) & 0xff, d & 0xff); } p += k; } }
+  while (i < n) {
+    var d = deltas[i];
+    if (d === 0) { var j = i; while (j < n && deltas[j] === 0) j++; zeros(j - i); i = j; }
+    else { var isW = (d < -128 || d > 127), run = [], j2 = i; while (j2 < n && deltas[j2] !== 0 && ((deltas[j2] < -128 || deltas[j2] > 127) === isW)) { run.push(deltas[j2]); j2++; } if (isW) asWords(run); else asBytes(run); i = j2; }
+  }
+  return out;
+}
+// Build gvar from per-glyph TT points + per-glyph advance. tuples = [{peak:[..axisCount..], dim:'x'|'y', factor}].
+// Synthetic scaling ⇒ delta = (factor-1)*coord per point + the advance phantom (pp2) for x-scaling.
+function buildGvar(perGlyphPoints, advances, axisCount, tuples) {
+  var numGlyphs = perGlyphPoints.length, T = tuples.length;
+  var glyphTables = [];
+  for (var gi = 0; gi < numGlyphs; gi++) {
+    var pts = perGlyphPoints[gi], nOut = pts.length;
+    if (nOut === 0) { glyphTables.push([]); continue; } // empty outline ⇒ no variation (advance stays)
+    var serialized = [0x00]; // shared point numbers: 0x00 = ALL points (incl. 4 phantom points)
+    var headers = [];
+    for (var ti = 0; ti < T; ti++) {
+      var tup = tuples[ti], f1 = tup.factor - 1, dxs = [], dys = [];
+      for (var pi = 0; pi < nOut; pi++) { dxs.push(tup.dim === 'x' ? Math.round(pts[pi].x * f1) : 0); dys.push(tup.dim === 'y' ? Math.round(pts[pi].y * f1) : 0); }
+      // 4 phantom points: [leftOrigin, advance, topOrigin, bottomAdvance] — only the advance (pp2) moves, for x-scaling
+      var advDelta = tup.dim === 'x' ? Math.round(advances[gi] * f1) : 0;
+      dxs.push(0, advDelta, 0, 0); dys.push(0, 0, 0, 0);
+      var packed = packDeltas(dxs).concat(packDeltas(dys));
+      headers.push({ size: packed.length, index: ti });
+      serialized = serialized.concat(packed);
+    }
+    var w = new Writer();
+    w.u16(0x8000 | (T & 0x0fff));   // tupleVariationCount: bit15 = shared point numbers
+    w.u16(4 + T * 4);               // dataOffset = header(4) + T tupleVariationHeaders(4 each)
+    for (var h = 0; h < T; h++) { w.u16(headers[h].size); w.u16(headers[h].index & 0x0fff); } // size + shared-tuple index
+    var gt = w.b.concat(serialized);
+    while (gt.length % 2) gt.push(0);
+    glyphTables.push(gt);
+  }
+  var headerLen = 20, offsetsLen = (numGlyphs + 1) * 4;
+  var sharedTuplesOffset = headerLen + offsetsLen, sharedTuplesLen = T * axisCount * 2;
+  var dataArrayOffset = sharedTuplesOffset + sharedTuplesLen;
+  var dataOffsets = [0]; for (var g2 = 0; g2 < numGlyphs; g2++) dataOffsets.push(dataOffsets[dataOffsets.length - 1] + glyphTables[g2].length);
+  var W = new Writer();
+  W.u16(1).u16(0).u16(axisCount).u16(T);
+  W.u32(sharedTuplesOffset);
+  W.u16(numGlyphs).u16(1);          // glyphCount, flags=1 (u32 offsets)
+  W.u32(dataArrayOffset);
+  for (var oi = 0; oi < dataOffsets.length; oi++) W.u32(dataOffsets[oi]);
+  for (var t2 = 0; t2 < T; t2++) { var pk = tuples[t2].peak; for (var ax = 0; ax < axisCount; ax++) W.i16(f2dot14(pk[ax])); }
+  for (var g3 = 0; g3 < numGlyphs; g3++) W.bytes(glyphTables[g3]);
+  return W.b;
+}
+// fvar: axes (min/def/max + name id), no named instances (apps expose the axes directly).
+function buildFvar(axes) {
+  var w = new Writer();
+  w.u16(1).u16(0);                  // version 1.0
+  w.u16(16).u16(2);                 // axesArrayOffset=16, reserved=2
+  w.u16(axes.length).u16(20);       // axisCount, axisSize=20
+  w.u16(0).u16(4 + axes.length * 4);// instanceCount=0, instanceSize (unused)
+  for (var i = 0; i < axes.length; i++) {
+    var a = axes[i];
+    w.tag(a.tag).u32(fixed(a.min) >>> 0).u32(fixed(a.def) >>> 0).u32(fixed(a.max) >>> 0);
+    w.u16(0).u16(a.nameID);         // flags, axisNameID
+  }
+  return w.b;
+}
+// STAT v1.2 — minimal: the design axes only (no axis-value records), elided fallback = Regular.
+function buildSTAT(axes, elidedNameID) {
+  var w = new Writer();
+  w.u16(1).u16(2);                  // version 1.2
+  w.u16(8).u16(axes.length);        // designAxisSize=8, designAxisCount
+  w.u32(20);                        // designAxesOffset (after the 20-byte header)
+  w.u16(0).u32(0);                  // axisValueCount=0, offsetToAxisValueOffsets=null
+  w.u16(elidedNameID || 2);         // elidedFallbackNameID
+  for (var i = 0; i < axes.length; i++) { w.tag(axes[i].tag).u16(axes[i].nameID).u16(i); } // tag, nameID, ordering
+  return w.b;
+}
+
 function buildGlyf(glyphTT) {
   // glyphTT: [{contours:[[{x,y,on}]], adv, name, unicode}] (index 0 = .notdef)
   var glyfParts = [], loca = [0], maxPts = 0, maxCtrs = 0;
   var gXMin = 32767, gYMin = 32767, gXMax = -32768, gYMax = -32768;
-  var perGlyphBounds = [];
+  var perGlyphBounds = [], perGlyphPoints = [];   // perGlyphPoints feeds gvar (variable fonts)
   for (var gi = 0; gi < glyphTT.length; gi++) {
     var ctrs = glyphTT[gi].contours.filter(function (c) { return c.length > 0; });
-    if (!ctrs.length) { perGlyphBounds.push({ xMin: 0, yMin: 0, xMax: 0, yMax: 0 }); loca.push(loca[loca.length - 1]); continue; }
+    if (!ctrs.length) { perGlyphBounds.push({ xMin: 0, yMin: 0, xMax: 0, yMax: 0 }); perGlyphPoints.push([]); loca.push(loca[loca.length - 1]); continue; }
     var all = [], ends = [], xMin = 32767, yMin = 32767, xMax = -32768, yMax = -32768;
     for (var ci = 0; ci < ctrs.length; ci++) { for (var pi = 0; pi < ctrs[ci].length; pi++) { var pt = ctrs[ci][pi]; all.push(pt); if (pt.x < xMin) xMin = pt.x; if (pt.x > xMax) xMax = pt.x; if (pt.y < yMin) yMin = pt.y; if (pt.y > yMax) yMax = pt.y; } ends.push(all.length - 1); }
     if (all.length > maxPts) maxPts = all.length; if (ctrs.length > maxCtrs) maxCtrs = ctrs.length;
-    perGlyphBounds.push({ xMin: xMin, yMin: yMin, xMax: xMax, yMax: yMax });
+    perGlyphBounds.push({ xMin: xMin, yMin: yMin, xMax: xMax, yMax: yMax }); perGlyphPoints.push(all);
     if (xMin < gXMin) gXMin = xMin; if (yMin < gYMin) gYMin = yMin; if (xMax > gXMax) gXMax = xMax; if (yMax > gYMax) gYMax = yMax;
     var w = new Writer();
     w.i16(ctrs.length).i16(xMin).i16(yMin).i16(xMax).i16(yMax);
@@ -112,7 +197,7 @@ function buildGlyf(glyphTT) {
   }
   var glyf = []; for (var g = 0; g < glyfParts.length; g++) glyf = glyf.concat(glyfParts[g]);
   if (gXMin > gXMax) { gXMin = gYMin = gXMax = gYMax = 0; }
-  return { glyf: glyf, loca: loca, maxPts: maxPts, maxCtrs: maxCtrs, bounds: { xMin: gXMin, yMin: gYMin, xMax: gXMax, yMax: gYMax }, perGlyph: perGlyphBounds };
+  return { glyf: glyf, loca: loca, maxPts: maxPts, maxCtrs: maxCtrs, bounds: { xMin: gXMin, yMin: gYMin, xMax: gXMax, yMax: gYMax }, perGlyph: perGlyphBounds, perGlyphPoints: perGlyphPoints };
 }
 
 function table(tag, bytes) { return { tag: tag, data: bytes }; }
@@ -134,6 +219,27 @@ function buildGlyfFont(project, metadata, masterId) {
 
   var built = buildGlyf(list);
   var numGlyphs = list.length;
+
+  // ---- variable font (synthetic width/height axes): fvar + gvar + STAT ----
+  // metadata.variable = { axes: [{ tag, min, def, max, name, dim:'x'|'y' }] }. Each
+  // axis scales the default (Regular) outlines linearly along one dim; gvar deltas =
+  // (factor-1)*coord, so interpolation is exact. Advance scales via the gvar phantom.
+  var vAxes = null, fvarBytes = null, gvarBytes = null, statBytes = null;
+  if (metadata.variable && metadata.variable.axes && metadata.variable.axes.length) {
+    vAxes = metadata.variable.axes.map(function (a, i) { return { tag: a.tag, min: a.min, def: a.def, max: a.max, name: a.name, dim: a.dim, nameID: 256 + i }; });
+    var vAxisCount = vAxes.length, vTuples = [];
+    for (var vai = 0; vai < vAxes.length; vai++) {
+      var vA = vAxes[vai];
+      if (vA.max > vA.def) vTuples.push({ peak: peakVec(vAxisCount, vai, 1), dim: vA.dim, factor: vA.max / vA.def });
+      if (vA.min < vA.def) vTuples.push({ peak: peakVec(vAxisCount, vai, -1), dim: vA.dim, factor: vA.min / vA.def });
+    }
+    if (vTuples.length) {
+      var vAdv = []; for (var va = 0; va < list.length; va++) vAdv.push(list[va].adv);
+      fvarBytes = buildFvar(vAxes);
+      gvarBytes = buildGvar(built.perGlyphPoints, vAdv, vAxisCount, vTuples);
+      statBytes = buildSTAT(vAxes, 2);
+    } else vAxes = null;
+  }
 
   // ---- cmap (format 4, BMP) ----
   var cmapEntries = []; for (var ci = 0; ci < list.length; ci++) if (list[ci].unicode > 0 && list[ci].unicode <= 0xFFFF) cmapEntries.push({ cp: list[ci].unicode, gid: ci });
@@ -235,6 +341,7 @@ function buildGlyfFont(project, metadata, masterId) {
   if (metadata.copyright) records.push([0, metadata.copyright]);
   if (metadata.license) records.push([13, metadata.license]);
   if (metadata.manufacturer) records.push([8, metadata.manufacturer]);
+  if (vAxes) for (var vni = 0; vni < vAxes.length; vni++) records.push([vAxes[vni].nameID, vAxes[vni].name]); // axis names for fvar/STAT
   records.sort(function (a, b) { return a[0] - b[0]; });
   var nameHdr = new Writer(); nameHdr.u16(0).u16(records.length).u16(6 + 12 * records.length);
   var storage = [], off = 0, recs = new Writer();
@@ -256,6 +363,7 @@ function buildGlyfFont(project, metadata, masterId) {
     table('hmtx', hmtxBytes), table('loca', locaBytes), table('maxp', maxpBytes),
     table('name', nameBytes), table('post', postBytes),
   ];
+  if (vAxes) { tables.push(table('fvar', fvarBytes)); tables.push(table('gvar', gvarBytes)); tables.push(table('STAT', statBytes)); }
   tables.sort(function (a, b) { return a.tag < b.tag ? -1 : a.tag > b.tag ? 1 : 0; });
 
   function checksum(bytes) { var sum = 0; for (var i = 0; i < bytes.length; i += 4) { var v = ((bytes[i] || 0) << 24) | ((bytes[i + 1] || 0) << 16) | ((bytes[i + 2] || 0) << 8) | (bytes[i + 3] || 0); sum = (sum + (v >>> 0)) >>> 0; } return sum >>> 0; }

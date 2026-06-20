@@ -124,6 +124,39 @@ Major additions on top of the state above:
 - **Misc:** grid thumbnails scale to the em (`.` small, `H` cap-height); punctuation reorganised
   (one "Basic Punctuation" set + a separate "Punctuation Extended"); **EDITION flipped to `'pro'`**.
 
+### Image Import (auto-trace reference sheets → auto-fill the grid)
+**glyphs.** page has an **⊕ Image Import** button (in the alt/lig/accent row). Pick 1–4 raster
+sheets (numbers / uppercase+accents / lowercase+accents / punctuation — in ANY order); the panel
+traces each, splits it into glyphs, guesses each character, shows a **review dialog**, and on
+confirm seats the chosen glyphs into the active master. The dialog is the safety net: per-sheet
+**set** dropdown (overrides auto-detect) + an editable **character box** under every traced glyph
+(clear a box to skip it). Filling reuses `glyphset.setGlyphContours` so it behaves like any other
+assignment; matches existing glyph slots by unicode and reports any chars not in the font's sets.
+
+Pipeline (clustering/detection/mapping/seating are pure JS, unit-tested in `test/imgimport.test.js`):
+- **Vectorize = Illustrator's own Image Trace** (jsx `fmTraceImage` → `PlacedItem.trace()` +
+  `tracing.expandTracing()` in a throwaway doc): `fmPickImages` shows a native multi-select dialog,
+  then each sheet is traced B/W and expanded to paths; `fmCollectTrace` drops light/background
+  fills (robust even where v28+ `ignoreWhite` is a no-op) so counters (o a 0 8…) stay as real
+  compound-path HOLES. `imgglyphs.contoursFromTracePaths(paths, bounds)` converts Illustrator's
+  Y-UP path points to pixel space (Y-down, flipped against the traced group's bounds). **Replaced
+  the old JS tracer** — imagetracerjs filled counters and was glitchy on decorative faces. (Legacy
+  `shared/imagetrace.js` + imagetracerjs stay bundled but unused; remove later if desired.)
+- `shared/imgglyphs.js` — the geometry brain: `clusterGlyphs` (rows by Y-whitespace, then columns
+  by X-overlap, so i=stem+dot, ==two bars, accent=base+mark each merge into ONE glyph while
+  neighbours stay separate), `detectCategory` (digits/upper/lower/symbols from glyph count, height
+  uniformity, x-height ratio, baseline scatter), `SEQ` (canonical char order transcribed from the 4
+  reference sheets), `mapClusters`, and `seatClusters` (per-sheet scale from the dominant ascent =
+  cap/x-height line via `modeApprox`, each glyph on its row baseline → accents float up, descenders
+  drop below; outputs font-unit contours for `setGlyphContours`).
+- Panel side (`cep/js/main.js`, search "IMAGE IMPORT"): file decode via Chromium `<canvas>`
+  (downscales to ≤1500px, flattens alpha to white — no PNG-decoder dep), the review modal, and
+  commit. `scripts/sync-cep.js` bundles both modules + the tracer; `cepsync.test.js` guards drift.
+- **Not edition-gated yet** — if Image Import should be a pro feature, add a `FEATURES.imageImport`
+  gate in `shared/features.js` and early-return in `onImgImportClick` (mirror the accents/optimize
+  pattern). Tuning knobs live in `imagetrace.DEFAULT_TRACE` (pathomit/ltres/qtres) and the
+  `clusterGlyphs` rowTol/xTol if real sheets cluster wrong.
+
 ## Variable fonts (READ THIS — the second-AI target area)
 
 - **Masters exist** as data: `project.masters[]` (`{id,name,type}`) + per-glyph

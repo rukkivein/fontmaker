@@ -5,7 +5,7 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { transformFontEngine } = require('../scripts/sync-cep.js');
+const { transformFontEngine, transformImageTrace } = require('../scripts/sync-cep.js');
 
 function ok(cond, msg) { assert.ok(cond, msg); console.log('✓ ' + msg); }
 const ROOT = path.join(__dirname, '..');
@@ -33,5 +33,17 @@ ok(read('cep/js/refspace.js') === read('shared/refspace.js'),
    'cep/js/refspace.js matches shared/refspace.js (Arial+Times X spacing)');
 ok(read('cep/js/lib/opentype.js') === read('node_modules/opentype.js/dist/opentype.js'),
    'cep/js/lib/opentype.js matches the installed opentype.js dist');
+ok(read('cep/js/imgglyphs.js') === read('shared/imgglyphs.js'),
+   'cep/js/imgglyphs.js matches shared/imgglyphs.js (image-import geometry)');
+ok(read('cep/js/imagetrace.js') === transformImageTrace(read('shared/imagetrace.js')),
+   'cep/js/imagetrace.js is in sync with shared/imagetrace.js');
+ok(read('cep/js/potrace.js') === read('shared/potrace.js'),
+   'cep/js/potrace.js matches shared/potrace.js (clean-room tracer)');
+ok(read('cep/js/markgen.js') === read('shared/markgen.js'),
+   'cep/js/markgen.js matches shared/markgen.js (diacritic mark synthesis)');
+ok(read('cep/js/imagetrace.js').indexOf("require('./lib/imagetracer.js')") !== -1,
+   'bundled imagetrace requires imagetracerjs via sibling relative path');
+ok(read('cep/js/lib/imagetracer.js') === read('node_modules/imagetracerjs/imagetracer_v1.2.6.js'),
+   'cep/js/lib/imagetracer.js matches the installed imagetracerjs');
 
 console.log('\nCEP sync OK');

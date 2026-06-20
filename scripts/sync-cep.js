@@ -17,6 +17,11 @@ function transformFontEngine(src) {
   return src.replace("require('opentype.js')", "require('./opentype.js')");
 }
 
+// imagetrace.js sits in cep/js/, the bundled tracer in cep/js/lib/.
+function transformImageTrace(src) {
+  return src.replace("require('imagetracerjs')", "require('./lib/imagetracer.js')");
+}
+
 function read(p) { return fs.readFileSync(path.join(ROOT, p), 'utf8'); }
 function write(rel, content) {
   const abs = path.join(ROOT, rel);
@@ -37,14 +42,19 @@ function sync() {
   out.fontEngine = write('cep/js/lib/fontEngine.js', transformFontEngine(read('core/fontEngine.js')));
   out.ttfWriter = write('cep/js/lib/ttfWriter.js', read('core/ttfWriter.js'));
   out.accentCompose = write('cep/js/accentCompose.js', read('shared/accentCompose.js'));
+  out.markgen = write('cep/js/markgen.js', read('shared/markgen.js'));
   out.optimizer = write('cep/js/optimizer.js', read('shared/optimizer.js'));
   out.refspace = write('cep/js/refspace.js', read('shared/refspace.js'));
   out.varCompat = write('cep/js/varCompat.js', read('shared/varCompat.js'));
+  out.imgglyphs = write('cep/js/imgglyphs.js', read('shared/imgglyphs.js'));
+  out.imagetrace = write('cep/js/imagetrace.js', transformImageTrace(read('shared/imagetrace.js')));
+  out.potrace = write('cep/js/potrace.js', read('shared/potrace.js'));
   out.opentype = write('cep/js/lib/opentype.js', read('node_modules/opentype.js/dist/opentype.js'));
+  out.imagetracer = write('cep/js/lib/imagetracer.js', read('node_modules/imagetracerjs/imagetracer_v1.2.6.js'));
   return out;
 }
 
-module.exports = { transformFontEngine, sync };
+module.exports = { transformFontEngine, transformImageTrace, sync };
 
 if (require.main === module) {
   const r = sync();
