@@ -28,7 +28,7 @@ function glyphName(ch) {
   return 'uni' + ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0');
 }
 
-const DEFAULT_ALPHABETS = ['latinUpper', 'latinLower', 'numbers', 'punct'];
+const DEFAULT_ALPHABETS = ['latinUpper', 'latinLower', 'coreText'];
 
 function emptyLayers(masters) {
   const o = {};
@@ -214,6 +214,14 @@ function setGlyphContours(project, glyphIndex, masterId, contours, advanceWidth)
   glyph.layers[masterId] = { contours: cloneContours(contours) };
   if (advanceWidth != null) glyph.advanceWidth = Math.round(advanceWidth);
   else { const b = contoursBounds(contours); if (b) glyph.advanceWidth = Math.round(b.maxX + LSB); }
+  // Fresh artwork is no longer an auto-composition: drop the composedFrom marker (and the
+  // 'composed' kind) so composeAll's refresh pass never overwrites the user's own drawing
+  // and the AI bake stops skipping it. (accentCompose writes layers directly, so a genuine
+  // re-composition keeps its marker.)
+  if (glyph.composedFrom) {
+    delete glyph.composedFrom;
+    if (glyph.kind === 'composed') delete glyph.kind;
+  }
   return true;
 }
 
@@ -234,16 +242,32 @@ function baseLetter(ch) {
   try { return (ch || '').normalize('NFD').replace(/[̀-ͯ]/g, ''); }
   catch (e) { return ch || ''; }
 }
-// Does a glyph match a search query? Matches the exact char, the same base
-// letter (accents stripped), or the glyph name containing the query.
+// Does ONE typed letter relate to this glyph? The letter itself, its accented
+// forms (à matches a), its alternates (a.ss01), and ligatures / composed accents
+// that contain it.
+function matchesLetter(glyph, c) {
+  if (!c) return false;
+  const cb = baseLetter(c).toLowerCase();
+  if (glyph.char === c) return true;
+  const gb = baseLetter(glyph.char).toLowerCase();
+  if (gb && gb === cb) return true;                                              // accented forms
+  if (glyph.kind === 'alternate' && glyph.ghost && baseLetter(glyph.ghost).toLowerCase() === cb) return true; // alternates
+  if (glyph.composedFrom && baseLetter(glyph.composedFrom).toLowerCase() === cb) return true;                 // composed accents
+  if (glyph.kind === 'ligature' && Array.isArray(glyph.components) &&
+      glyph.components.some(function (comp) { return baseLetter(comp).toLowerCase() === cb; })) return true;  // ligatures
+  return false;
+}
+// Search match: a query of one OR MORE letters matches a glyph if it relates to
+// ANY typed letter (incl. that letter's alternates / accents / ligatures), or the
+// glyph name contains the whole query.
 function glyphMatches(glyph, query) {
   const q = (query || '').trim();
   if (!q) return true;
-  if (glyph.char === q) return true;
-  const gb = baseLetter(glyph.char).toLowerCase();
-  const qb = baseLetter(q).toLowerCase();
-  if (gb && gb === qb) return true;
-  if ((glyph.name || '').toLowerCase().indexOf(q.toLowerCase()) >= 0) return true;
+  const chars = Array.from(q);
+  for (let i = 0; i < chars.length; i++) if (matchesLetter(glyph, chars[i])) return true;
+  // name-fragment match only for 2+ chars (so a single "a" doesn't match every glyph
+  // whose name contains an "a", e.g. "grave"/"acute").
+  if (q.length >= 2 && (glyph.name || '').toLowerCase().indexOf(q.toLowerCase()) >= 0) return true;
   return false;
 }
 

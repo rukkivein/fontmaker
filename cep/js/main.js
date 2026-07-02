@@ -8,11 +8,28 @@
 
 var cs = new CSInterface();
 var ROOT = cs.getSystemPath(SystemPath.EXTENSION);
+// Build stamp — install-cep.js stamps a ?v=<build> on this script's url to defeat CEF's
+// stale-JS cache. Log it (and put it on the <body> as data-build) so a reload can be VERIFIED:
+// if the panel still runs old code, this build id won't change. See scripts/install-cep.js.
+try {
+  var _bm = (document.currentScript && document.currentScript.src || '').match(/[?&]v=([^&]+)/);
+  var _build = _bm ? _bm[1] : 'dev';
+  console.log('[RuneType] panel build ' + _build);
+  var _stampBuild = function () {
+    document.body.setAttribute('data-build', _build);
+    var t = document.getElementById('buildTag');
+    if (t) { t.textContent = 'build ' + _build; t.title = 'Loaded panel build (' + _build + '). It changes on every install — if it does NOT change after you reopen the panel, the panel is still running cached code; close Illustrator fully and reopen.'; }
+  };
+  if (document.body) _stampBuild();
+  else document.addEventListener('DOMContentLoaded', _stampBuild);
+} catch (e) {}
 var ilbridge = require(ROOT + '/js/ilbridge.js');
 var glyphset = require(ROOT + '/js/glyphset.js');
 var charsets = require(ROOT + '/js/charsets.js');
 var dna = require(ROOT + '/js/dna.js');
 var optimizer = require(ROOT + '/js/optimizer.js');
+var kernvision = require(ROOT + '/js/kernvision.js');   // Visual Kern (Track A): white-area optical pair kerning → f.kernOverride
+var kernai = require(ROOT + '/js/kernai.js');           // Visual Kern (Track B): offline pair-kern model → seeds (fail-soft)
 var refspace = require(ROOT + '/js/refspace.js');
 var accentCompose = require(ROOT + '/js/accentCompose.js');
 var markgen = require(ROOT + '/js/markgen.js');   // synthesize diacritic marks from existing shapes
@@ -22,6 +39,9 @@ var potrace = require(ROOT + '/js/potrace.js');         // clean-room pixel-fait
 var imgglyphs = require(ROOT + '/js/imgglyphs.js');     // cluster/detect/map/seat traced glyphs
 var glyphreco = require(ROOT + '/js/glyphreco.js');     // offline onnxruntime-web glyph recognizer (first-guess)
 var vecai = require(ROOT + '/js/vecai.js');             // offline onnxruntime-web vector refiner (smooth/sharpen AIs)
+var kerninject = require(ROOT + '/js/kerninject.js');   // splice f.kerning into the exported sfnt as a real 'kern' table
+var spacingai = require(ROOT + '/js/spacingai.js');     // offline sidebearing model → per-glyph optical recession for the bake
+var unite = require(ROOT + '/js/unite.js');             // containment-tree contour union (preserves counters/holes)
 // CEP is a Node-integrated Chromium. onnxruntime-web's wasm glue otherwise detects
 // "Node" (process.versions.node && process.type != 'renderer') and tries to
 // import('worker_threads') — which fails here, breaking BOTH the recognizer and the
@@ -66,7 +86,13 @@ var activeSection = 'glyphs'; // glyphs | mod | test
 var faceSeq = 0;         // unique @font-face family per rebuild
 
 function $(id) { return document.getElementById(id); }
-function show(v) { $('view-new').classList.toggle('hidden', v !== 'new'); $('view-work').classList.toggle('hidden', v !== 'work'); }
+function show(v) {
+  $('view-new').classList.toggle('hidden', v !== 'new');
+  $('view-work').classList.toggle('hidden', v !== 'work');
+  // The reset rescue button lives in the workspace's top-right; on the home page
+  // the masters picker owns that corner, so hide it there to avoid the overlap.
+  if ($('resetBtn')) $('resetBtn').classList.toggle('hidden', v !== 'work');
+}
 function evalScript(code) { return new Promise(function (r) { cs.evalScript(code, function (x) { r(x); }); }); }
 
 // ============ PAGE 1 — New Font (RuneType Glyphmaker) ============
@@ -75,12 +101,19 @@ var draft = null;
 function newDraft() {
   // Pre-select the most common Latin basics. The grid starts as a blank canvas
   // the user designs on (circles / dashed lines / square grid / baselines).
+  // Basic mode tracks the picked LANGUAGES (langSel) and derives `lang` (the set
+  // selection) from them; Advanced mode toggles `lang` directly via the cards.
+  var dflt = (charsets.COUNTRIES || []).filter(function (c) { return c.name === 'United States'; })[0];
+  var langSel = dflt ? [{ label: dflt.lang, sets: dflt.sets.slice() }] : [];
+  var lang = {};
+  langSel.forEach(function (L) { L.sets.forEach(function (k) {
+    if (FEAT.charsets && FEAT.charsets.indexOf(k) < 0) return; lang[k] = true; }); });
+  if (FEAT.charsets && !Object.keys(lang).length) FEAT.charsets.forEach(function (k) { lang[k] = true; });
   return {
     masters: [{ name: 'Regular' }],
     // alpha restricts the offered sets (FEAT.charsets); pro pre-selects the basics
-    lang: FEAT.charsets
-      ? FEAT.charsets.reduce(function (o, k) { o[k] = true; return o; }, {})
-      : { latinUpper: true, latinLower: true, numbers: true },
+    lang: lang,
+    langSel: langSel,
     gridDesign: (function () {
       var pv = gdPresetItems('copyvector');
       return { items: pv.items.map(function (it) { it.symX = !!it.symX; it.symY = !!it.symY; return it; }),
@@ -103,13 +136,40 @@ function buildCountries() {
   charsets.COUNTRIES.forEach(function (c) {
     var it = document.createElement('div'); it.className = 'country-item'; it.textContent = c.name;
     it.addEventListener('click', function () {
-      draft.lang = {};                       // replace — don't stack countries
-      c.sets.forEach(function (k) { draft.lang[k] = true; });
+      if (appMode === 'basic') {
+        addLanguage(c);                      // Basic — stack languages (✕ to remove)
+      } else {
+        draft.lang = {};                     // Advanced — replace the set selection
+        c.sets.forEach(function (k) { draft.lang[k] = true; });
+      }
       $('countryList').classList.add('hidden');
       setToggle('lang'); renderProfile();
     });
     list.appendChild(it);
   });
+}
+
+// --- Basic-mode language list: draft.langSel (picked languages) drives draft.lang ---
+function deriveLangSets() {
+  var o = {};
+  (draft.langSel || []).forEach(function (L) {
+    (L.sets || []).forEach(function (k) {
+      if (FEAT.charsets && FEAT.charsets.indexOf(k) < 0) return;   // edition lock
+      o[k] = true;
+    });
+  });
+  draft.lang = o;
+}
+function addLanguage(c) {
+  if (!draft.langSel) draft.langSel = [];
+  if (draft.langSel.some(function (L) { return L.label === c.lang; })) return;  // dedupe by language
+  draft.langSel.push({ label: c.lang, sets: c.sets.slice() });
+  deriveLangSets();
+}
+function removeLanguage(i) {
+  if (!draft.langSel) return;
+  draft.langSel.splice(i, 1);
+  deriveLangSets();
 }
 
 // The + is disabled until a non-empty, non-duplicate master name is typed
@@ -159,8 +219,11 @@ function setToggle(which) {
 function renderRightList() {
   var box = $('rune-list'); box.innerHTML = '';
   box.classList.toggle('gd-mode', draft.toggle === 'preset'); // designer fills the panel, no scroll
+  box.classList.toggle('lang-mode', draft.toggle === 'lang' && appMode === 'basic');
   if (draft.toggle === 'preset') return renderGridDesigner(box, draft.gridDesign, function () { updatePillLabels(); renderProfile(); });
-  // Language Support — multi-select character sets. The edition may LOCK some
+  // BASIC — show the picked LANGUAGES as removable chips (the country picker adds them).
+  if (appMode === 'basic') return renderLangChips(box);
+  // ADVANCED — multi-select character sets. The edition may LOCK some
   // sets: they stay visible but greyed/non-toggleable (an upsell, not hidden).
   charsets.ALPHABETS.forEach(function (it) {
     var locked = !!FEAT.charsets && FEAT.charsets.indexOf(it.key) < 0;
@@ -174,6 +237,31 @@ function renderRightList() {
     var btn = document.createElement('div'); btn.className = 'ri-btn ' + (locked ? 'is-lock' : (on ? 'is-x' : 'is-plus'));
     row.appendChild(txt); row.appendChild(btn);
     if (!locked) row.addEventListener('click', function () { draft.lang[it.key] = !draft.lang[it.key]; renderRightList(); updatePillLabels(); renderProfile(); });
+    box.appendChild(row);
+  });
+}
+// Basic mode: the selected-languages list. Pick a country above to add one; the
+// ✕ removes it. The underlying character sets are derived in deriveLangSets().
+function renderLangChips(box) {
+  if (!draft.langSel || !draft.langSel.length) {
+    var empty = document.createElement('div'); empty.className = 'lang-empty';
+    empty.textContent = 'Pick a country above to add a language.';
+    box.appendChild(empty); return;
+  }
+  draft.langSel.forEach(function (L, i) {
+    var row = document.createElement('div'); row.className = 'lang-chip';
+    var txt = document.createElement('div'); txt.className = 'lang-txt';
+    var nm = document.createElement('div'); nm.className = 'lang-name'; nm.textContent = L.label;
+    var sub = document.createElement('div'); sub.className = 'lang-sub';
+    var nSets = (L.sets || []).filter(function (k) { return !FEAT.charsets || FEAT.charsets.indexOf(k) >= 0; }).length;
+    sub.textContent = nSets + ' character sets';
+    txt.appendChild(nm); txt.appendChild(sub);
+    var x = document.createElement('button'); x.className = 'lang-x'; x.type = 'button';
+    x.title = 'Remove ' + L.label; x.textContent = '✕';
+    x.addEventListener('click', function () {
+      removeLanguage(i); renderRightList(); updatePillLabels(); renderProfile();
+    });
+    row.appendChild(txt); row.appendChild(x);
     box.appendChild(row);
   });
 }
@@ -946,7 +1034,11 @@ function onImportTemplate() {
       if (idx == null) return;
       var contours = ilbridge.contoursFromArtboard(cell.paths, cell.rect, r.scale, desc);
       if (!contours.length) return;
-      glyphset.setGlyphContours(proj, idx, mid, contours, null); // auto advance from the drawn ink
+      // RAW BOX: advance = the TEMPLATE CELL width, glyph kept where it was drawn inside the box — NO
+      // auto sidebearing. So every imported letter starts at its box size (I and W both box-wide); the
+      // AI does all narrowing/optical work later when you press Optimize. (Was: ink.maxX + 60 auto-fit.)
+      var boxW = (cell.rect[2] - cell.rect[0]) / r.scale;
+      glyphset.setGlyphContours(proj, idx, mid, contours, boxW);
       placed++;
     });
     if (!placed) { setStatus('No letters could be imported — draw inside the boxes first.', 'err'); return; }
@@ -954,6 +1046,95 @@ function onImportTemplate() {
     selectedSlot = -1; openGlyphIndex = -1; searchQuery = ''; alphaFilters = []; activeMaster = 0; lastSig = {}; flatCache = {}; kernCache = {};
     show('work'); renderWorkspace();
     setStatus('Imported ' + placed + ' letter(s) from the template.', 'ok');
+  });
+}
+
+// ---- Open Template (workspace) — the CURRENT font as an editable Illustrator
+// sheet: every glyph in a box, each pre-filled with its current drawing (not a
+// blank sheet). Edit in Illustrator, then re-import. ----------------------------
+function onOpenCurrentTemplate() {
+  if (!FEAT.template) return;
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  var mid = curMasterId(), em = f.unitsPerEm || 1000;
+  function setLabel(key) {
+    var a = (charsets.ALPHABETS || []).filter(function (it) { return it.key === key; })[0];
+    if (a && a.label) return a.label;
+    return key === 'alternate' ? 'Alternates' : key === 'ligature' ? 'Ligatures' : key === 'composed' ? 'Accented' : (key || 'Glyphs');
+  }
+  // group glyphs by source set (caption), keeping first-seen order
+  var order = [], byKey = {}, art = {};
+  f.glyphs.forEach(function (g) {
+    if (g.char === ' ') return;                               // skip the space
+    var key = g.alphabet || g.kind || 'glyphs';
+    if (!byKey[key]) { byKey[key] = []; order.push(key); }
+    var ghost = g.ghost || (g.char != null ? g.char : (g.components ? g.components.join('') : g.name));
+    var ly = g.layers && g.layers[mid];
+    var hasArt = !!(ly && ly.contours && ly.contours.length);
+    // box WIDTH = the glyph's ADVANCE so a symmetric-spaced glyph sits CENTRED in its
+    // box (the box is its spacing slot). Fall back to the ink width when there's no
+    // advance yet; ligatures get at least their component count.
+    var w = 1;
+    if (g.advanceWidth > 0) w = Math.max(1, g.advanceWidth / em);
+    else if (hasArt) { var b = glyphset.contoursBounds(ly.contours); if (b) w = Math.max(1, (Math.max(b.maxX, 0) - Math.min(b.minX, 0)) / em); }
+    if (g.kind === 'ligature') w = Math.max(w, 1.6, Math.min(3, (g.components || []).length || 2));
+    w = Math.min(w, 3.5);
+    byKey[key].push({ ghost: ghost, id: g.name, w: w });
+    if (hasArt) art[g.name] = ly.contours;                    // pre-fill the box with the drawing
+  });
+  var sets = order.map(function (key) { return { name: setLabel(key), chars: byKey[key] }; })
+    .filter(function (s) { return s.chars.length; });
+  if (!sets.length) { setStatus('No glyphs to template yet.', 'err'); return; }
+  var cfg = { sets: sets, art: art, metrics: f.metrics, unitsPerEm: f.unitsPerEm,
+    grids: [{ kind: 'metrics' }, { kind: 'sidebearings' }], ybounds: arialGhostBounds(f) || {} };
+  var nArt = Object.keys(art).length;
+  setStatus('Opening the current font as a template…');
+  // PERF: the whole font's contours can be multiple MB. Don't marshal that across the
+  // evalScript boundary as one giant string — write it to a temp file and pass the path.
+  var tmpPath = null;
+  try {
+    var tdir = cs.getSystemPath(SystemPath.USER_DATA) + '/RuneType';
+    if (!fs.existsSync(tdir)) fs.mkdirSync(tdir);
+    tmpPath = tdir + '/_template.json';
+    fs.writeFileSync(tmpPath, JSON.stringify(cfg));
+  } catch (e) { tmpPath = null; }
+  var call = tmpPath ? ('fmOpenTemplateFile(' + JSON.stringify(tmpPath) + ')')
+                     : ('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')');
+  evalScript(call).then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (r && r.ok) setStatus('Template opened — ' + r.cells + ' glyph box(es), ' + nArt + ' pre-filled with your drawing. Edit in Illustrator, then Import.', 'ok');
+    else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
+  });
+}
+// Read an Open-Template sheet back into the CURRENT font — every box matched to its
+// glyph by NAME, contours mapped at the template scale. The whole font round-trips.
+function onImportCurrentTemplate() {
+  if (!FEAT.template) return;
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  setStatus('Reading template…');
+  evalScript('fmReadTemplate()').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!r || !r.ok) { setStatus('Could not read template: ' + ((r && r.error) || 'open a template first'), 'err'); return; }
+    if (!r.cells || !r.cells.length) { setStatus('No drawn glyphs found in the boxes.', 'err'); return; }
+    var mid = curMasterId(), desc = f.metrics.descender, placed = 0;
+    var byName = {}; f.glyphs.forEach(function (g, i) { byName[g.name] = i; });
+    r.cells.forEach(function (cell) {
+      var idx = byName[cell.id]; if (idx == null) return;            // match boxes back to glyphs by NAME
+      var contours = ilbridge.contoursFromArtboard(cell.paths, cell.rect, r.scale, desc);
+      if (!contours.length) return;
+      // A round-trip re-import must NOT reset spacing: this template pre-fills EVERY glyph's
+      // box with its current art, so every box reads back — resetting each advance to the
+      // auto ink-fit (maxX+60) wiped raw-box advances and AI-baked spacing on untouched
+      // glyphs. A glyph that already had art keeps its advance (the template's CLAMPED box
+      // width is not the advance either); only a previously empty slot gets the auto fit.
+      var g = f.glyphs[idx];
+      var hadArt = !!(g.layers && g.layers[mid] && g.layers[mid].contours && g.layers[mid].contours.length);
+      glyphset.setGlyphContours(f, idx, mid, contours, hadArt ? (g.advanceWidth || null) : null);
+      placed++;
+    });
+    if (!placed) { setStatus('No glyphs imported — draw inside the boxes first.', 'err'); return; }
+    lastSig = {}; flatCache = {};
+    renderGrid(); updateAssign(); renderRight(); scheduleTester(); autosave();
+    setStatus('Imported ' + placed + ' glyph(s) from the template into the font.', 'ok');
   });
 }
 
@@ -1015,6 +1196,8 @@ function createFontFromDraft() {
   var opts = {
     familyName: ($('nf-family').value.trim() || 'Untitled'),
     masterName: m0.name, masterType: m0.name, alphabets: alphabets,
+    // "Only Uppercase" (Basic) restricts the whole project to caps.
+    upperOnly: !!($('onlyUpper') && $('onlyUpper').checked),
   };
   var gd = draft.gridDesign;
   opts.gridDesign = { items: gd.items, gridOn: gd.gridOn, gridCell: gd.gridCell, gridMul: gd.gridMul || 1, symX: gd.symX, symY: gd.symY };
@@ -1043,6 +1226,9 @@ var FM_SCALE_PANEL = 0.25; // must match jsx FM_SCALE
 function curFont() { return fonts[activeFont]; }
 function curMasterId() { return curFont().masters[activeMaster].id; }
 function isFilled(g) { var l = g.layers[curMasterId()]; return !!(l && l.contours && l.contours.length); }
+// master-explicit twin — isFilled is passed as a callback (some/filter) so it can't take a
+// second positional arg (the array index would leak in as `mid`).
+function isFilledIn(g, mid) { var l = g.layers[mid]; return !!(l && l.contours && l.contours.length); }
 var _toastTimer = null;
 function setStatus(m, k) {
   var el = $('status'); if (!el) return;
@@ -1074,6 +1260,31 @@ function renderMasterSelect() {
   });
   sel.value = activeMaster;
 }
+// ---- Basic / Advanced mode (default Basic; toggle sits right of "settings.") ----
+var appMode = 'basic';
+try { var _sm = window.localStorage && localStorage.getItem('rt-appmode'); if (_sm === 'advanced' || _sm === 'basic') appMode = _sm; } catch (e) {}
+function setMode(mode) {
+  appMode = (mode === 'advanced') ? 'advanced' : 'basic';
+  try { if (window.localStorage) localStorage.setItem('rt-appmode', appMode); } catch (e) {}
+  applyMode();
+}
+function applyMode() {
+  var basic = appMode === 'basic';
+  document.body.classList.toggle('basic-mode', basic);   // CSS hides .adv-only in Basic
+  if ($('modeBasic')) $('modeBasic').classList.toggle('active', basic);
+  if ($('modeAdv')) $('modeAdv').classList.toggle('active', !basic);
+  // PAGE 1 — Basic keeps the Language Support picker (now a list of languages the
+  // country dropdown adds) but drops the Grid/Style preset; Only-Uppercase shows beside it.
+  if ($('tg-lang')) $('tg-lang').style.display = '';            // Language Support always visible
+  if ($('tg-grid')) $('tg-grid').style.display = basic ? 'none' : '';
+  if ($('onlyUpperWrap')) $('onlyUpperWrap').classList.toggle('hidden', !basic);
+  if (basic && draft) { draft.toggle = 'lang'; if (draft.langSel) deriveLangSets(); }
+  if (draft && typeof setToggle === 'function' && $('tg-lang')) setToggle(draft.toggle);
+  // PAGE 2 — accents/alternates are an advanced feature.
+  if ($('accentTplBtn')) $('accentTplBtn').disabled = basic;
+  if ($('accentImportBtn')) $('accentImportBtn').disabled = basic;
+}
+
 function setSection(sec) {
   activeSection = sec;
   $('sec-glyphs').classList.toggle('hidden', sec !== 'glyphs');
@@ -1081,7 +1292,7 @@ function setSection(sec) {
   $('sec-test').classList.toggle('hidden', sec !== 'test');
   $('sec-save').classList.toggle('hidden', sec !== 'save');
   // the right pane (designer / metrics) shows everywhere except the full-width
-  // save page; testing. keeps the metrics editor on the right
+  // save + accent pages; testing. keeps the metrics editor on the right
   $('w-rightPane').classList.toggle('hidden', sec === 'save');
   var tabs = document.querySelectorAll('#w-tabsec .w-stab');
   for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-sec') === sec);
@@ -1218,49 +1429,64 @@ function glyphDisplayOrder(f) {
   return order;
 }
 
+// PERF: the glyph grid is the hottest DOM surface. It is rebuilt only on a real
+// structural change (filter/search/master/font); the live poll and selection
+// clicks update a SINGLE cell via refreshGlyphCell / selectGlyph instead. Handlers
+// are delegated ONCE to #grid (not 6 closures per cell), and a DocumentFragment
+// batches the layout into one reflow. cellByIndex maps glyph index -> its cell.
+var cellByIndex = {};
+function glyphCellClass(g, i) {
+  var c = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
+  if (g.char == null) c += ' named';
+  if (g.kind === 'alternate' || g.kind === 'ligature' || g.kind === 'composed') c += ' altcell';
+  return c;
+}
+function glyphCellHTML(g) {
+  return isFilled(g) ? ((glyphThumb(g) || '') + '<span class="lab">' + glyphLabelHtml(g) + '</span>')
+                     : glyphLabelHtml(g);
+}
+function gridCellOf(ev) { var c = ev.target && ev.target.closest ? ev.target.closest('.cell') : null; return c; }
+function gridIdxOf(ev) { var c = gridCellOf(ev); return c ? parseInt(c.getAttribute('data-i'), 10) : -1; }
+function wireGridDelegation(grid) {
+  grid.addEventListener('click', function (ev) { var i = gridIdxOf(ev); if (i >= 0) selectGlyph(i); });
+  grid.addEventListener('dblclick', function (ev) { var i = gridIdxOf(ev); if (i < 0) return; ev.preventDefault(); selectGlyph(i); onAssign(); });
+  grid.addEventListener('contextmenu', function (ev) { var i = gridIdxOf(ev); if (i >= 0) showGlyphMenu(ev, i); });
+  grid.addEventListener('dragover', function (ev) { var c = gridCellOf(ev); if (!c) return; ev.preventDefault(); c.classList.add('drop'); ev.dataTransfer.dropEffect = 'copy'; });
+  grid.addEventListener('dragleave', function (ev) { var c = gridCellOf(ev); if (c) c.classList.remove('drop'); });
+  grid.addEventListener('drop', function (ev) { var c = gridCellOf(ev); if (!c) return; ev.preventDefault(); c.classList.remove('drop'); var i = parseInt(c.getAttribute('data-i'), 10); selectGlyph(i); onAssign(); });
+}
+function selectGlyph(i) {
+  // move the .selected class without rebuilding the whole grid
+  if (cellByIndex[selectedSlot]) cellByIndex[selectedSlot].classList.remove('selected');
+  selectedSlot = i;
+  if (cellByIndex[i]) cellByIndex[i].classList.add('selected');
+  updateAssign(); renderRight();
+}
+function refreshGlyphCell(i) {       // update ONE cell after a live edit (O(1), no full rebuild)
+  var cell = cellByIndex[i]; if (!cell) { renderGrid(); return; }   // not shown → structural rebuild
+  var g = curFont().glyphs[i];
+  cell.className = glyphCellClass(g, i);
+  cell.innerHTML = glyphCellHTML(g);
+}
 function renderGrid() {
   var grid = $('grid'); if (!grid) return;
-  grid.innerHTML = '';
+  if (!grid._fmWired) { wireGridDelegation(grid); grid._fmWired = true; }   // delegate handlers once
+  cellByIndex = {};
   var f = curFont();
+  var frag = document.createDocumentFragment();
   glyphDisplayOrder(f).forEach(function (i) {
     var g = f.glyphs[i];
     if (!glyphVisible(g)) return;
     var cell = document.createElement('div');
-    cell.className = 'cell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '');
-    var label = glyphLabelHtml(g);
-    if (g.char == null) cell.className += ' named';
-    if (isFilled(g)) {
-      // preview thumbnail + the letter itself stays visible, dark, top-right
-      cell.innerHTML = (glyphThumb(g) || '') + '<span class="lab">' + label + '</span>';
-    } else {
-      // empty slots keep showing their character; the bosharf placeholder only
-      // appears in the EXPORTED font (free edition), never here in the grid.
-      cell.innerHTML = label;
-    }
+    cell.className = glyphCellClass(g, i);
+    cell.setAttribute('data-i', i);
     cell.title = g.name + ' — double-click to assign the selection · right-click for options · drop a shape';
-    cell.addEventListener('click', function () {
-      selectedSlot = i;
-      updateAssign(); renderGrid(); renderRight();
-    });
-    // double-click a cell = assign the CURRENT Illustrator selection straight to
-    // it (the fastest, button-free path the user wanted)
-    cell.addEventListener('dblclick', function (ev) {
-      ev.preventDefault();
-      selectedSlot = i; updateAssign(); renderGrid();
-      onAssign();
-    });
-    // right-click = options menu (delete shape / delete glyph / open in Illustrator)
-    cell.addEventListener('contextmenu', function (ev) { showGlyphMenu(ev, i); });
-    // drag-drop: drop the Assign-Shape handle on a letter to assign the current
-    // Illustrator selection straight to it
-    cell.addEventListener('dragover', function (ev) { ev.preventDefault(); cell.classList.add('drop'); ev.dataTransfer.dropEffect = 'copy'; });
-    cell.addEventListener('dragleave', function () { cell.classList.remove('drop'); });
-    cell.addEventListener('drop', function (ev) {
-      ev.preventDefault(); cell.classList.remove('drop');
-      selectedSlot = i; updateAssign(); renderGrid(); onAssign();
-    });
-    grid.appendChild(cell);
+    cell.innerHTML = glyphCellHTML(g);
+    cellByIndex[i] = cell;
+    frag.appendChild(cell);
   });
+  grid.innerHTML = '';
+  grid.appendChild(frag);
 }
 
 // ============ IMAGE IMPORT — trace reference sheets, auto-fill the grid ======
@@ -1999,16 +2225,18 @@ function syncOpenGlyph(g) {
 // The embedded optimizer ("mini AI"): class-aware sidebearings/advance for the
 // whole font + optical pair kerning, in one pass. ONLY moves the blue (LSB) and
 // red (advance) spacing lines + kern table — it never scales/resizes a glyph.
+// One-click Optimize = Analyze → apply its recommended Standard/Optical + run the
+// class-aware optimiser + bake optical pair kerning (Auto Kern is merged in here).
 function onOptimize() {
   if (!FEAT.optimize) return;
   var f = curFont();
   if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
-  bakeAllOrigins(f);   // normalise any blue-line offsets before re-spacing
-  var r = optimizer.optimizeAll(f, curMasterId());
-  f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
-  flatCache = {}; kernCache = {};
-  renderGrid(); renderModGrid(); renderRight(); renderTesterText(); scheduleTester(); autosave();
-  setStatus('Optimized: re-spaced ' + r.spaced + ' glyph(s), ' + r.kernPairs + ' optical kern pair(s).', 'ok');
+  aiAnalyze();                                  // fills the overlay
+  // The old Metric⟷Optical dials (moBlend/moBearingAI/moKern/moKernAI/refSpace) were removed
+  // in the UI overhaul — baking through ensureAISpacing here read them all as 0 and silently
+  // RESET the font to the metric baseline while the aiOptic/aiAvg sliders still showed 100%.
+  // Optimize now drives the current 3-slider pipeline (AI bearing + AI kern + tracking).
+  onAIOptimize();
 }
 
 // ===== Reference spacing ("X value"): per-letter side bearings averaged from the
@@ -2073,54 +2301,470 @@ function arialGhostBounds(proj) {
   } catch (e) { return null; }
 }
 function sliderVal(id, dflt) { var el = $(id); var v = el ? parseInt(el.value, 10) : dflt; return isNaN(v) ? dflt : v; }
-// Apply BOTH corrections, stacked: STANDARD (Arial+Times X spacing at refSpace%) sets
-// the advance box; OPTICAL (optical%) nudges each glyph horizontally toward its ink
-// density within those bearings, leaving the box (red/blue lines) put. Neither
-// resizes. commit=false → panel-only live preview (cheap, for dragging); commit=true
-// → also push to open glyph docs + autosave.
-function applyCorrections(commit) {
+// (Removed the legacy Arial/Times applyCorrections + scheduleCorrections — superseded by the
+// Metric⟷Optical bake. They referenced sliders that no longer exist.)
+var _refRAF = 0;   // shared RAF token for scheduleMetricOptical's coalesced live drags
+// ===== Metric ⟷ Optical bake: the primary spacing dial. Re-seats every glyph's
+// sidebearings from metric (0%) toward optical comfort (100%) + bakes the residual
+// optical pair kern. Deterministic (recomputed from the ink each apply) + symmetric.
+function applyMetricOptical(commit) {
   if (!FEAT.optimize) return;
   var f = curFont(); if (!f) return;
   if (!f.glyphs.some(isFilled)) { if (commit) setStatus('Draw and assign some glyphs first.', 'err'); return; }
-  var frac = refFracTable();
-  if (!frac) { setStatus('Could not read Arial / Times New Roman — the spacing reference needs them.', 'err'); return; }
-  var P = sliderVal('refSpace', 100), O = sliderVal('optical', 0), E = sliderVal('expProfile', 0);
-  f.refSpace = P; f.optical = O; f.expProfile = E;
-  if ($('refSpaceVal')) $('refSpaceVal').textContent = P + '%';
-  if ($('opticalVal')) $('opticalVal').textContent = O + '%';
-  if ($('expProfileVal')) $('expProfileVal').textContent = E + '%';
+  // LEGACY pipeline guard: its dial sliders were removed from the DOM in the UI overhaul, so
+  // sliderVal reads them all as 0 — baking that would be a destructive "reset to metric".
+  // Only the optical-bearings mode (which needs just moTrack) still legitimately runs here.
+  if (!f.optBearings && !$('moBlend') && !$('moBearingAI') && !$('moKern') && !$('moKernAI')) return;
+  function setTxt(id, t) { if ($(id)) $(id).textContent = t; }
+  var tB = sliderVal('moBlend', 0), aB = sliderVal('moBearingAI', 0);
+  var tK = sliderVal('moKern', 0), aK = sliderVal('moKernAI', 0);
+  var std = sliderVal('refSpace', 100), trk = sliderVal('moTrack', 0);
+  f.moBlend = tB; f.moBearingAI = aB; f.moKern = tK; f.moKernAI = aK; f.refSpace = std; f.moTrack = trk;
+  setTxt('moBlendVal', tB + '%'); setTxt('moBearingAIVal', aB + '%');
+  setTxt('moKernVal', tK + '%'); setTxt('moKernAIVal', aK + '%');
+  setTxt('refSpaceVal', std + '%'); setTxt('moTrackVal', (trk > 0 ? '+' : '') + trk + '%');
+  // OPTICAL BEARINGS mode owns the sidebearings: the Metric⟷Optical/AI bearing dials are
+  // overridden; only Tracking acts here (it re-seats every glyph's optical lines proportionally).
+  // Kerning still ships live from opticalKern at export, so testing == export holds.
+  if (f.optBearings) {
+    applyOpticalBearings(f, curMasterId());
+    renderRight(); scheduleTester(); if (commit) autosave();
+    return true;
+  }
   bakeAllOrigins(f);                                   // fold blue-line offsets first
-  var targets = refspace.spacingTargets(frac, f.unitsPerEm, P);
-  var minA = Math.round((f.unitsPerEm || 1000) * 0.03);
-  var n = refspace.applyRefSpacing(f, curMasterId(), targets, minA, O / 100, E / 100);
+  captureBaseline(f, curMasterId());                   // preserve drawn/hand-edited spacing as the base
+  var opts = {
+    tBearing: tB / 100, aiBearing: aB / 100, tKern: tK / 100, aiKern: aK / 100,
+    track: Math.round(trk / 100 * (f.unitsPerEm || 1000)),   // static tracking, applied LAST + independent
+    stdMul: std / 100,
+    metricBase: f.spaceBase,                            // dials layer on top of THIS, not the class baseline
+  };
+  // The model's per-glyph recession feeds BOTH AI sliders. Use the cache when an AI dial is
+  // up AND it still matches the current shapes (sbSig is bake-invariant). If it's missing/
+  // stale we bake without it now and return aiStale so the caller can refresh it async.
+  var aiStale = false;
+  if (aB > 0 || aK > 0) {
+    if (f._optBearings && f._sbSig === sbSig(f, curMasterId())) opts.optBearings = f._optBearings;
+    else aiStale = true;
+  }
+  var r = optimizer.bakeMetricOptical(f, curMasterId(), opts);
+  f.kerning = r.table;
+  recordBaked(f, curMasterId());                        // remember what we produced (to detect later hand-edits)
   flatCache = {}; kernCache = {};
-  // Live drag (commit=false) does the CHEAP render only — the metrics editor, which
-  // is where spacing actually shows, plus the floating Live Test window if it's open.
-  // The heavy grid + tester rebuilds (and host sync) wait for release so dragging
-  // stays smooth on low-RAM machines.
+  renderRight(); renderFloatTester();                  // cheap live render on drag
+  if (commit) {
+    f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
+    renderGrid(); renderModGrid(); renderTesterText(); scheduleTester(); autosave();
+    var bits = [];
+    if (tB) bits.push('bearings ' + tB + '%' + (opts.optBearings && aB ? ' (AI ' + aB + '%)' : ''));
+    if (tK) bits.push((r.kernPairs || 0) + ' kern pair' + (r.kernPairs === 1 ? '' : 's') + (opts.optBearings && aK ? ' (AI ' + aK + '%)' : ''));
+    if (trk) bits.push('track ' + (trk > 0 ? '+' : '') + trk + '%');
+    setStatus(bits.length ? 'Spacing — ' + bits.join(' · ') + '.' : 'Spacing reset to metric.', 'ok');
+  }
+  return aiStale;
+}
+// === 3-SLIDER SPACING — the modification panel is just Space + Tracking + AI Optic Optimization.
+// AI Optic Optimization (t = aiOptic/100): blends each glyph from its RAW template-box position
+// (f.spaceBase, captured by captureBaseline) toward the PARAGRAPH MODEL's per-letter optical bearing
+// (f._aiOpt.bearings, from the model's analysis of that letter's combinations) + the residual
+// exception kern. 0 = where the shape sits in the template box; 100 = full optimization. Tracking
+// adds uniform letterspacing on top. Idempotent — every glyph re-seated to an ABSOLUTE target each
+// call. The advances + f.kernOverride it writes are EXACTLY what exports (testing == export).
+function seatRaw(f, mid) {
+  if (!f.spaceBase) return;
+  f.glyphs.forEach(function (g) {
+    if (!isFilled(g)) return;
+    var base = f.spaceBase[g.name]; if (!base) return;
+    var L = g.layers[mid]; var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+    L.contours = shiftContoursXY(L.contours, Math.round(base.lsb) - b.xMin, 0);
+    g.advanceWidth = Math.round(base.lsb + (b.xMax - b.xMin) + base.rsb);
+  });
+}
+// === TWO-ENGINE optical optimizer (modification pipeline) =============================
+// ensureAIOpt computes, per filled glyph, TWO absolute target bearings (cached by shape signature),
+// then RESTORES the glyphs to their box baseline so the cache build never corrupts f.spaceBase:
+//   PF — PER-FONT optical ("AI Optimization"): seat every glyph to a UNIFORM optHalf baseline so its
+//        bad imported bearing is ignored, then measure THIS font's own optical white-area gaps and
+//        derive each letter's optical LSB/RSB from its own shape + ink density. Normalizes imports.
+//   AV — TRAINED average ("AI Average"): the sidebearing model (shape-optical bearing) + the paragraph
+//        kern model's per-letter average — how the foundry corpus on AVERAGE spaces these letters.
+// Plus `residual` = the per-font pair exceptions (AV/To…). applyAIOptic blends box → PF → AV → tracking.
+function ensureAIOpt(f) {
+  if (!f) return Promise.resolve();
+  if (f._aiOptPending) return f._aiOptPending;  // in-flight guard: re-entry joins the running analysis
+  var mid = curMasterId(); var sig = sbSig(f, mid);
+  if (f._aiOpt && f._aiOptSig === sig) return Promise.resolve();
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilled(g) && g.char && g.unicode >= 0x21) filled.push(g); });
+  bakeAllOrigins(f); captureBaseline(f, mid);   // lock in the box baseline BEFORE any scratch seating
+  // leave the glyphs exactly where the box baseline says + record it, so applyAIOptic's own
+  // captureBaseline sees no change and never mistakes a scratch seating for the user's spacing.
+  function done(opt) {
+    seatRaw(f, mid); recordBaked(f, mid); flatCache = {}; kernCache = {};
+    f._aiOptPending = null;
+    // a SHAPE edit that landed mid-predict makes this analysis stale — never stamp it fresh
+    if (sbSig(f, mid) === sig) { f._aiOpt = opt; f._aiOptSig = sig; }
+  }
+  if (filled.length < 2) { done({ bearing: {}, residual: {} }); return Promise.resolve(); }
+  var names = filled.map(function (g) { return g.name; });
+  var upm = f.unitsPerEm || 1000, floor = Math.round(0.012 * upm);
+  var optHalf = Math.round(optimizer.fontAirTargetUnits(f, mid) / 2);
+  var weight = (f.meta && (f.meta.weightClass || f.meta.weight)) || 400;
+  function seatTo(map) {
+    filled.forEach(function (g) {
+      var s = map[g.name]; if (!s) return;
+      var L = g.layers[mid]; var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+      L.contours = shiftContoursXY(L.contours, Math.round(s.lsb) - b.xMin, 0);
+      g.advanceWidth = Math.round(s.lsb + (b.xMax - b.xMin) + s.rsb);
+    });
+    flatCache = {}; kernCache = {};
+    // record the scratch seating so a concurrent captureBaseline (slider drag during the
+    // multi-second ONNX predict) sees cur == last and never adopts it as the user's baseline
+    recordBaked(f, mid);
+  }
+  // geometric fallback air = the air you gave your WIDEST glyphs (~20th pct of box bearings), so a
+  // box-filling W stays put while a thin I loses its slack — used only if the model is unavailable.
+  var base = f.spaceBase || {}, boxAirs = [];
+  filled.forEach(function (g) { var bb = base[g.name]; if (bb) { boxAirs.push(bb.lsb); boxAirs.push(bb.rsb); } });
+  boxAirs.sort(function (a, b) { return a - b; });
+  var airTarget = boxAirs.length ? Math.max(floor, boxAirs[Math.floor(0.2 * (boxAirs.length - 1))]) : optHalf;
+  // ENGINE 1 — AI Optimizasyon (bearing): the trained sidebearing model reads THIS font's glyph SHAPES
+  // and gives each letter its optical bearing — width-aware (a narrow letter like I gets a small advance,
+  // a wide W a large one; round/open letters less air). Font-specific, learned from real fonts. Falls
+  // back to a uniform geometric air-fit (box → airTarget) only if the model isn't available.
+  var pending = Promise.resolve().then(function () { return spacingai.predict(f, mid, { weight: weight, root: ROOT }); })
+    .catch(function () { return {}; }).then(function (rec) {
+      rec = rec || {};
+      var keys = 0; for (var rk in rec) { if (rec[rk]) keys++; }
+      var bearing = {};
+      if (keys >= Math.max(2, Math.floor(filled.length * 0.5))) {
+        filled.forEach(function (g) { var r = rec[g.name] || {}; bearing[g.name] = { lsb: Math.max(floor, optHalf - Math.round(r.recL || 0)), rsb: Math.max(floor, optHalf - Math.round(r.recR || 0)) }; });
+      } else {
+        filled.forEach(function (g) { bearing[g.name] = { lsb: airTarget, rsb: airTarget }; });
+      }
+      // ENGINE 2 — AI Optik (kern): seat to those AI bearings, then the paragraph/optical model finds the
+      // remaining PAIRWISE optical corrections (A-V, T-o…) — the genuine kern, decided per THIS font.
+      seatTo(bearing);
+      return kernai.predict(f, mid, filled, { root: ROOT }).then(function (seeds) {
+        var resKV = kernvision.buildKernVision(f, mid, { aggr: 0.8, seeds: seeds || {} });
+        var residual = {};
+        for (var i = 0; i < filled.length; i++) for (var j = 0; j < filled.length; j++) {
+          if (i === j) continue; var key = names[i] + ',' + names[j]; var v = resKV.table[key]; if (v) residual[key] = v;
+        }
+        done({ bearing: bearing, residual: residual });
+      }).catch(function () { done({ bearing: bearing, residual: {} }); });
+    }).catch(function () { done({ bearing: {}, residual: {} }); });
+  f._aiOptPending = pending;
+  return pending;
+}
+// The "Optik analiz et" button: read this font's shapes (model) for the OPTIC slider, then turn both the
+// width-fit and the optical refinement on so the full optimum is visible.
+function onAIOptimize() {
+  if (!FEAT.optimize) { setStatus('Optimize is off for this build.', 'err'); return; }
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  if (!f.glyphs.some(isFilled)) { setStatus('Draw some glyphs first.', 'err'); return; }
+  setStatus('AI Optimize — bu fontun şekillerini okuyor (bearing + optik kern)…');
+  f._aiOpt = null; f._aiOptSig = null;                                       // force a fresh per-font analysis
+  if ($('aiOptic') && (+($('aiOptic').value) || 0) === 0) { $('aiOptic').value = 100; }   // width fit on
+  if ($('aiAvg') && (+($('aiAvg').value) || 0) === 0) { $('aiAvg').value = 100; }          // optical on
+  setTimeout(function () { ensureAIOpt(f).then(function () { if (curFont() === f) applyAIOptic(true); }); }, 24);
+}
+// Apply: box → AI Optimizasyon (sB: each letter's AI optical bearing — narrow letters narrow a lot, wide
+// ones little) → AI Optik (sO: leftover pairwise kern) → Tracking (LAST, equal both sides).
+function applyAIOptic(commit) {
+  if (!FEAT.optimize) return;
+  var f = curFont(); if (!f) return;
+  if (!f.glyphs.some(isFilled)) return;
+  var mid = curMasterId();
+  var sB = sliderVal('aiOptic', 0) / 100, sO = sliderVal('aiAvg', 0) / 100, trk = sliderVal('moTrack', 0);
+  f.aiOptic = sliderVal('aiOptic', 0); f.aiAvg = sliderVal('aiAvg', 0); f.moTrack = trk;
+  if ($('aiOpticVal')) $('aiOpticVal').textContent = f.aiOptic + '%';
+  if ($('aiAvgVal')) $('aiAvgVal').textContent = f.aiAvg + '%';
+  if ($('moTrackVal')) $('moTrackVal').textContent = (trk > 0 ? '+' : '') + trk + '%';
+  // An AI analysis is measuring the SCRATCH-seated glyphs right now — don't fight it (and
+  // don't corrupt its measurement) by re-seating mid-predict. The pending run's continuation
+  // calls applyAIOptic again with the then-current slider values, so this drag isn't lost.
+  if (f._aiOptPending) return;
+  // After a .runetype reload the sliders persist but the analysis cache (_aiOpt) is gone —
+  // re-analyze first instead of silently re-seating to the box and wiping the saved AI kern.
+  if (!f._aiOpt && (sB > 0 || sO > 0)) {
+    ensureAIOpt(f).then(function () { if (curFont() === f) applyAIOptic(commit); });
+    return;
+  }
+  bakeAllOrigins(f); captureBaseline(f, mid);
+  var ai = f._aiOpt || { bearing: {}, residual: {} };
+  var bm = ai.bearing || {};
+  var upm = f.unitsPerEm || 1000;
+  var half = Math.round(trk / 100 * upm / 2);                            // tracking → equal both sides, LAST
+  f.glyphs.forEach(function (g) {
+    if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+    if (!isFilled(g)) return;
+    var base = f.spaceBase && f.spaceBase[g.name]; if (!base) return;
+    var L = g.layers[mid]; var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+    var bg = bm[g.name];
+    // BEARING (sB): box → the AI's optical bearing. A thin letter (I) drops from its wide box advance to a
+    // small optical one (narrows a lot); a wide letter (W) is already near its bearing → it barely moves.
+    var lsb = bg ? (base.lsb + sB * (bg.lsb - base.lsb)) : base.lsb;
+    var rsb = bg ? (base.rsb + sB * (bg.rsb - base.rsb)) : base.rsb;
+    lsb = Math.round(lsb) + half; rsb = Math.round(rsb) + half;          // tracking added LAST
+    L.contours = shiftContoursXY(L.contours, lsb - b.xMin, 0);
+    g.advanceWidth = Math.max(1, Math.round(lsb + (b.xMax - b.xMin) + rsb));   // floor so it never collapses
+  });
+  recordBaked(f, mid);
+  // Kern = the pairwise exceptions left over after the optical bearings (A-V / T-o class). Tied to the
+  // OPTIC slider (kerning is an optical refinement); drop sub-visual nudges, keep a generous cap.
+  var kt = Math.min(sO, 1), ov = {};
+  if (ai.residual && kt > 0) {
+    var DEAD = Math.round(0.008 * upm);                       // ignore < ~0.8% em (sub-visual)
+    var nFilled = 0; f.glyphs.forEach(function (g) { if (isFilled(g) && g.char && g.unicode >= 0x21) nFilled++; });
+    var CAP = Math.max(80, Math.min(500, 4 * nFilled));       // generous — only a runaway guard
+    var cand = [];
+    for (var k in ai.residual) { var v = Math.round(kt * ai.residual[k]); if (Math.abs(v) >= DEAD) cand.push([k, v]); }
+    cand.sort(function (a, b) { return Math.abs(b[1]) - Math.abs(a[1]); });   // keep the biggest exceptions
+    if (cand.length > CAP) cand.length = CAP;
+    for (var ci = 0; ci < cand.length; ci++) ov[cand[ci][0]] = cand[ci][1];
+  }
+  // KERN OWNERSHIP: only touch f.kernOverride when the AI-kern slider owns it. A Tracking
+  // nudge with Optik at 0 must not wipe a Visual-Kern table the user baked separately (or a
+  // table restored from a saved .runetype). aiKernOwned persists (non-underscore) so a reload
+  // still knows who wrote the table.
+  if (kt > 0) { f.kernOverride = ov; f.aiKernOwned = true; }
+  else if (f.aiKernOwned) { f.kernOverride = {}; f.aiKernOwned = false; }
+  flatCache = {}; kernCache = {};
+  // Composed accents are skipped by the bake loop above (kind==='composed'), so their metrics
+  // stayed frozen at compose time — é/ç/ş drifted apart from their re-baked base e/c/s. On
+  // commit, re-derive each self-composed glyph from its RE-BAKED base (composeAccent clones
+  // the base's current contours + advance, so it inherits the new spacing; hand-drawn accents
+  // are protected by the target-drawn guard because they carry no composedFrom marker).
+  if (commit) {
+    f.glyphs.forEach(function (g, gi) {
+      if (!g.composedFrom || !g.char) return;
+      try {
+        // refresh lastSig so the live-sync poll doesn't read the recomposition back as a hand edit
+        if (accentCompose.composeAccent(f, g.char, mid).ok) lastSig[gi] = glyphset.layerSignature(g, mid);
+      } catch (e) {}
+    });
+  }
   renderRight(); renderFloatTester();
   if (commit) {
-    renderModGrid(); renderTesterText();
     f.glyphs.forEach(function (g) { if (isFilled(g)) syncOpenGlyph(g); });
-    scheduleTester(); autosave();
-    setStatus('Spacing — standard ' + P + '%, optical ' + O + '%, profile ' + E + '% on ' + n + ' glyph(s).', 'ok');
+    renderGrid(); renderModGrid(); renderTesterText(); scheduleTester(); autosave();
+    var rk = 0; for (var kk in ov) rk++;
+    setStatus('AI Optimizasyon ' + f.aiOptic + '% · Optik ' + f.aiAvg + '%' + (trk ? ' · track ' + (trk > 0 ? '+' : '') + trk + '%' : '') + ' — ' + rk + ' istisna kern.', 'ok');
   }
 }
-var _refRAF = 0;
-function scheduleCorrections() {                       // coalesce live drags to one apply/frame
+// A bake-INVARIANT signature of the drawn outlines (shape only — width/height/point
+// count, NOT position or advance which the bake itself rewrites). Lets the cached AI
+// prediction survive slider re-bakes but invalidate when a glyph's SHAPE is edited.
+function sbSig(f, mid) {
+  var s = 2166136261 >>> 0, n = 0;
+  f.glyphs.forEach(function (g) {
+    var L = g.layers && g.layers[mid]; if (!L || !L.contours || !L.contours.length) return;
+    var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+    var pts = 0; for (var i = 0; i < L.contours.length; i++) pts += (L.contours[i].points ? L.contours[i].points.length : 0);
+    var h = (g.name ? g.name.charCodeAt(0) : 0) + pts * 131 + Math.round(b.w) * 7 + Math.round(b.h) * 17 + L.contours.length * 53;
+    s = (((s ^ h) >>> 0) * 16777619) >>> 0; n++;
+  });
+  return n + ':' + (s >>> 0);
+}
+// The METRIC baseline the spacing dials layer on top of = each glyph's DRAWN / hand-edited
+// spacing, captured (and persisted in f.spaceBase) the first time we see it. We re-capture a
+// glyph only when its spacing changed since OUR last bake (f._lastBaked) — i.e. the user
+// hand-tuned it in the metrics editor or re-drew it — so manual tweaks become the new base
+// instead of being wiped. After reload, _lastBaked is empty but spaceBase persists, so we
+// keep the saved base (don't re-capture from already-baked spacing).
+function captureBaseline(f, mid) {
+  f.spaceBase = f.spaceBase || {}; f._lastBaked = f._lastBaked || {};
+  f.glyphs.forEach(function (g) {
+    if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+    var L = g.layers && g.layers[mid]; if (!L || !L.contours || !L.contours.length) return;
+    var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+    var cur = { lsb: Math.round(b.xMin), rsb: Math.round((g.advanceWidth || 0) - b.xMax) };
+    var last = f._lastBaked[g.name];
+    if (!f.spaceBase[g.name] || (last && (Math.abs(cur.lsb - last.lsb) > 1 || Math.abs(cur.rsb - last.rsb) > 1))) {
+      f.spaceBase[g.name] = cur;
+    }
+  });
+}
+function recordBaked(f, mid) {
+  f._lastBaked = f._lastBaked || {};
+  f.glyphs.forEach(function (g) {
+    var L = g.layers && g.layers[mid]; if (!L || !L.contours || !L.contours.length) return;
+    var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return;
+    f._lastBaked[g.name] = { lsb: Math.round(b.xMin), rsb: Math.round((g.advanceWidth || 0) - b.xMax) };
+  });
+}
+
+// ===== OPTICAL BEARINGS — a symmetric, line-based per-glyph spacing mode (toggle f.optBearings).
+// Each glyph stores g.ob = { sym, optL, optR } in FONT UNITS at T-neutral (tracking = 0):
+//   sym  = the symmetric METRIC bearing — equal ink margin on BOTH sides, so the blue/red
+//          sidebearing lines sit symmetric around the advance centre (the green centre line).
+//   optL/optR = how far OUTSIDE its metric line each side's OPTICAL (dashed) line sits.
+// The OPTICAL (dashed) lines are what EXPORTS. Tracking (moTrack %) scales every distance
+// proportionally (−50% ⇒ ×0.5). Per glyph: LSB = (sym+optL)*T, RSB = (sym+optR)*T,
+// advance = LSB + inkW + RSB, and lsbLineX = inkL − LSB folds the origin so the rest of the
+// pipeline (bakeGlyphOrigin, export, opticalKern) is untouched → testing == export.
+// MODEL: g.ob = { ocOff, hw } in FONT UNITS.
+//   ocOff = the OPTICAL CENTRE offset from the ink's geometric middle — the GREEN line. The user
+//           drags green to centre the glyph optically (manual); ocOff does NOT scale with tracking.
+//   hw    = the symmetric HALF box-width — distance centre→blue and centre→red. Set by the AI
+//           narrow/widen pass (per letter) or by dragging blue/red; hw SCALES with tracking.
+// Per glyph: oc = inkCentre + ocOff; blue = oc − hw*T; red = oc + hw*T; advance = 2*hw*T;
+// lsbLineX = blue. So the box is symmetric around the (manually-placed) optical centre, the box
+// WIDTH is the AI/letter-driven part, and the rest of the pipeline (bakeGlyphOrigin, export,
+// opticalKern) is untouched → testing == export.
+function obTrack(f) { return Math.max(0.1, 1 + (f.moTrack || 0) / 100); }
+function obInk(g, mid) {
+  var L = g.layers && g.layers[mid]; if (!L || !L.contours || !L.contours.length) return null;
+  var b = refspace.bezBounds(L.contours); if (!isFinite(b.xMin)) return null;
+  return { L: b.xMin, R: b.xMax, W: b.xMax - b.xMin, C: (b.xMin + b.xMax) / 2 };
+}
+// Init (once) + return the glyph's optical-centre params with its live ink bounds.
+function obParams(g, mid, f) {
+  var ink = obInk(g, mid); if (!ink) return null;
+  if (!g.ob || g.ob.hw == null) {
+    var T = obTrack(f), lsbX = g.lsbLineX || 0, adv = g.advanceWidth || (ink.W + 80);
+    var boxC = lsbX + adv / 2;                 // current box centre
+    g.ob = { ocOff: Math.round(boxC - ink.C), hw: Math.round((adv / 2) / T) };   // no jump on enable
+  }
+  return { inkL: ink.L, inkR: ink.R, inkW: ink.W, inkC: ink.C, ocOff: g.ob.ocOff, hw: g.ob.hw };
+}
+// The three line x-positions (font units) at the current tracking: green centre, blue/red edges.
+function obLines(g, mid, f) {
+  var p = obParams(g, mid, f); if (!p) return null;
+  var T = obTrack(f), oc = p.inkC + p.ocOff;
+  return { center: oc, blue: oc - p.hw * T, red: oc + p.hw * T, T: T, p: p };
+}
+// Derive g.lsbLineX + g.advanceWidth from the box (centre ± half-width) at the current tracking.
+function obSeat(g, mid, f) {
+  var p = obParams(g, mid, f); if (!p) return;
+  var T = obTrack(f), oc = p.inkC + p.ocOff;
+  g.lsbLineX = Math.round(oc - p.hw * T);
+  g.advanceWidth = Math.max(20, Math.round(2 * p.hw * T));
+}
+// Re-seat EVERY drawn glyph from its optical params (toggle-on, tracking change, shape edit).
+function applyOpticalBearings(f, mid) {
+  if (!f) return;
+  f.glyphs.forEach(function (g) {
+    if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+    if (obInk(g, mid)) obSeat(g, mid, f);
+  });
+}
+// The Metric⟷Optical / AI BEARING dials belong to the Kerning tab; greyed while Optical-centre owns spacing.
+function lockBearingDialsForOptical(on) {
+  ['moBlend', 'moBearingAI', 'moKern', 'moKernAI'].forEach(function (id) { var e = $(id); if (e) { e.disabled = on; if (e.parentNode && e.parentNode.classList) e.parentNode.classList.toggle('dim', on); } });
+}
+// Modification sub-tab: 'kerning' (the slider stack) ↔ 'optical' (the green-centre line editor + AI
+// width). Selecting 'optical' turns the optical-centre spacing mode ON (f.optBearings); 'kerning'
+// turns it OFF. The previous kerning controls stay in the DOM but inactive on the optical tab.
+function setCorrTab(tab) {
+  var f = curFont(); if (!f) return;
+  f.corrTab = (tab === 'optical') ? 'optical' : 'kerning';
+  f.optBearings = (f.corrTab === 'optical');
+  if (f.optBearings) applyOpticalBearings(f, curMasterId());   // seed + seat every glyph now
+  syncCorrTab(f);
+  renderRight(); scheduleTester(); autosave();
+}
+function syncCorrTab(f) {
+  f = f || curFont(); var tab = (f && f.corrTab === 'optical') ? 'optical' : 'kerning';
+  var tabs = document.querySelectorAll('.w-ctab');
+  for (var i = 0; i < tabs.length; i++) tabs[i].classList.toggle('active', tabs[i].getAttribute('data-corr-tab') === tab);
+  var cc = document.querySelectorAll('.w-corr-content');
+  for (var j = 0; j < cc.length; j++) cc[j].classList.toggle('hidden', cc[j].getAttribute('data-corr-tab') !== tab);
+  lockBearingDialsForOptical(tab === 'optical');
+}
+// AI WIDTH (narrow/widen): the offline sidebearing model sets each letter's BOX WIDTH (g.ob.hw) from
+// its shape — tight/heavy glyphs recede (narrow), open ones widen — while the user keeps CENTRING by
+// hand with the green line (ocOff untouched). Safe-degrades if onnxruntime-web can't load the model.
+var _aiWidthRunning = false;
+function onAIOptWidth() {
+  var f = curFont(), mid = curMasterId(); if (!f || _aiWidthRunning) return;
+  if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  _aiWidthRunning = true; setStatus('AI: harfe göre daralt/genişlet hesaplanıyor…', '');
+  Promise.resolve().then(function () { return spacingai.predict(f, mid, { weight: masterWeight(f), root: ROOT }); })
+    .then(function (sb) {
+      if (curFont() !== f) return;
+      if (!sb || !Object.keys(sb).length) { setStatus('AI modeli yüklenemedi — genişlik değişmedi.', 'err'); return; }
+      var ref = optimizer.buildRef(f, mid);
+      var optHalf = Math.round((optimizer.fontAirTargetUnits ? optimizer.fontAirTargetUnits(f, mid, ref) : 0.085 * (f.unitsPerEm || 1000)) / 2);
+      var n = 0;
+      f.glyphs.forEach(function (g) {
+        if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+        var ink = obInk(g, mid); if (!ink) return;
+        obParams(g, mid, f);                                 // ensure g.ob (keeps the user's ocOff centre)
+        var rec = sb[g.name], recAvg = rec ? (((rec.recL || 0) + (rec.recR || 0)) / 2) : 0;
+        g.ob.hw = Math.max(10, Math.round(ink.W / 2 + optHalf - recAvg));   // ink half + optical bearing, AI-tightened
+        obSeat(g, mid, f); n++;
+      });
+      f._optBearings = sb; f._sbSig = sbSig(f, mid);
+      renderRight(); scheduleTester(); autosave();
+      setStatus('AI ' + n + ' harfin genişliğini ayarladı. Merkezlemeyi yeşil çizgiyle sen yap.', 'ok');
+    })
+    .catch(function (e) { setStatus('AI hata: ' + (e && e.message || e), 'err'); })
+    .then(function () { _aiWidthRunning = false; });
+}
+// Ensure the model's per-glyph recession is cached + fresh, then bake. Called when an AI
+// dial moves OR a plain dial commits while an AI dial is up but the cache went stale (shape
+// edit). Async (onnxruntime-web); safe-degrades to uniform optical if unavailable.
+var _aiPredicting = false;
+async function ensureAISpacing() {
+  if (!FEAT.optimize) return;
+  var f = curFont(); if (!f) return;
+  if (!f.glyphs.some(isFilled)) { setStatus('Draw and assign some glyphs first.', 'err'); return; }
+  var mid = curMasterId();
+  if (f._optBearings && f._sbSig === sbSig(f, mid)) { applyMetricOptical(true); return; }   // fresh → just bake
+  if (_aiPredicting) return;                                          // a prediction is already in flight
+  _aiPredicting = true;
+  setStatus('AI spacing — reading glyph shapes…', 'info');
+  try {
+    var sig0 = sbSig(f, mid);                                          // shape AT predict time
+    var sb = await spacingai.predict(f, mid, { weight: masterWeight(f), root: ROOT });
+    if (curFont() !== f || sbSig(f, mid) !== sig0) return;             // font switched OR shape edited mid-run → discard
+    if (!sb || !Object.keys(sb).length) {
+      f._optBearings = null;
+      setStatus('AI spacing unavailable (model could not load) — using uniform optical.', 'err');
+      applyMetricOptical(true); return;
+    }
+    f._optBearings = sb; f._sbSig = sig0;                              // stamp the signature predict actually used
+    applyMetricOptical(true);
+    setStatus('AI spacing ready — model recession on ' + Object.keys(sb).length + ' glyph(s).', 'ok');
+  } catch (e) {
+    f._optBearings = null;
+    setStatus('AI spacing failed: ' + (e && e.message || e), 'err');
+    applyMetricOptical(true);
+  } finally { _aiPredicting = false; }
+}
+// Context weight class for the model (the 8th-of feature). Map the master's style
+// name to a usWeightClass; default Regular(400).
+function masterWeight(f) {
+  var m = (f.masters || []).filter(function (x) { return x.id === curMasterId(); })[0];
+  var name = ((m && (m.type || m.name)) || 'regular').toLowerCase().replace(/[^a-z]/g, '');
+  var W = { thin: 100, extralight: 200, ultralight: 200, light: 300, regular: 400, normal: 400, book: 400, medium: 500, semibold: 600, demibold: 600, bold: 700, extrabold: 800, heavy: 900, black: 900 };
+  return W[name] || 400;
+}
+function scheduleMetricOptical() {
   if (_refRAF) return;
   var raf = (typeof window !== 'undefined' && window.requestAnimationFrame) ? window.requestAnimationFrame : function (cb) { return setTimeout(cb, 16); };
-  _refRAF = raf(function () { _refRAF = 0; applyCorrections(false); });
+  _refRAF = raf(function () { _refRAF = 0; applyMetricOptical(false); });
 }
 function syncRefSlider() {                             // reflect the saved %s when (re)entering the page
   var f = curFont();
-  var s = $('refSpace'); if (s) { s.value = (f && f.refSpace != null) ? f.refSpace : 100; if ($('refSpaceVal')) $('refSpaceVal').textContent = s.value + '%'; }
-  var o = $('optical'); if (o) { o.value = (f && f.optical != null) ? f.optical : 0; if ($('opticalVal')) $('opticalVal').textContent = o.value + '%'; }
-  var e = $('expProfile'); if (e) { e.value = (f && f.expProfile != null) ? f.expProfile : 0; if ($('expProfileVal')) $('expProfileVal').textContent = e.value + '%'; }
+  function set(id, vid, val, signed) { var s = $(id); if (s) { s.value = val; if ($(vid)) $(vid).textContent = (signed && val > 0 ? '+' : '') + val + '%'; } }
+  set('refSpace', 'refSpaceVal', (f && f.refSpace != null) ? f.refSpace : 100);
+  set('moBlend', 'moBlendVal', (f && f.moBlend != null) ? f.moBlend : 0);
+  set('moBearingAI', 'moBearingAIVal', (f && f.moBearingAI != null) ? f.moBearingAI : 0);
+  set('moKern', 'moKernVal', (f && f.moKern != null) ? f.moKern : 0);
+  set('moKernAI', 'moKernAIVal', (f && f.moKernAI != null) ? f.moKernAI : 0);
+  set('moTrack', 'moTrackVal', (f && f.moTrack != null) ? f.moTrack : 0, true);
+  set('aiOptic', 'aiOpticVal', (f && f.aiOptic != null) ? f.aiOptic : 0);   // AI Optimization (per-font)
+  set('aiAvg', 'aiAvgVal', (f && f.aiAvg != null) ? f.aiAvg : 0);           // AI Average (trained)
+  if (f) f.corrTab = f.optBearings ? 'optical' : (f.corrTab || 'kerning');
+  try { syncCorrTab(f); } catch (e) {}     // tabs removed in the 3-slider UI; tolerate missing nodes
 }
 // ===== mini, no-API "assistant": pure heuristics that scan the font and surface a
 // few plain-language observations + a suggested next move. It only reads stats
 // (spacing, heights, coverage) — no network, no model — and never changes anything.
+var analyzeRec = null;   // Analyze's recommended { standard, optical }, applied by Optimize
 function aiAnalyze() {
   var f = curFont(); var box = $('aiReport'); if (!box) return;
   if (!f) { box.innerHTML = ''; return; }
@@ -2173,6 +2817,8 @@ function aiAnalyze() {
       : 'Spacing looks even — a touch of Optical (≈ 25%) will refine the round/diagonal letters.');
   notes.push(['sug', '✦ Suggestion: ' + sug]);
   box.innerHTML = notes.map(function (nz) { return '<div class="ai-note ai-' + nz[0] + '">' + nz[1].replace(/</g, '&lt;') + '</div>'; }).join('');
+  // recommendation that Optimize applies to the Standard / Optical sliders
+  analyzeRec = { standard: tight.length > loose.length ? 120 : (loose.length ? 85 : 100), optical: (tight.length + loose.length) >= 2 ? 30 : 25 };
   setStatus('Assistant analysed ' + filled.length + ' glyph(s).', 'ok');
 }
 // ===== metrics & spacing editor (right pane of modification.) — ghost metric
@@ -2265,21 +2911,50 @@ function mxRedraw(svg) {
     // storage origin (x=0) — a faint dashed reference the ink may cross
     var ox0 = gdXs(0);
     s += '<line x1="' + ox0 + '" y1="' + vyT + '" x2="' + ox0 + '" y2="' + vyB + '" stroke="#d7d7d7" stroke-width="1" stroke-dasharray="3 4"/>';
-    // blue LSB line — independent + draggable
-    var lx = gdXs(lsbX);
-    s += '<line x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#1473e6" stroke-width="2.2"/>';
-    s += '<line data-mx="lsb" x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
-    // red advance line at the box right edge (lsbX + adv) — independent + draggable
-    var rx = gdXs(lsbX + adv);
-    s += '<line x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#c0271d" stroke-width="2.2"/>';
-    s += '<line data-mx="adv" x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
-    s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
+    // ===== OPTICAL-CENTRE mode: 3 lines. GREEN centre is the draggable master — drag it to place
+    // the optical centre; the BLUE/RED box edges (= the exported LSB/RSB) translate symmetrically
+    // with it. Drag blue or red to set the symmetric box WIDTH (the AI narrow/widen pass sets this
+    // per letter). Live drag values preview here.
+    if (f && f.optBearings && cs2 && obInk(g, curMasterId())) {
+      var _p = obParams(g, curMasterId(), f), _T = obTrack(f), _inkC = _p.inkC;
+      var _ocOff = (mxDrag && mxDrag.mode === 'obscen') ? mxDrag.ocOff : _p.ocOff;
+      var _hw = (mxDrag && mxDrag.mode === 'obhw') ? mxDrag.hw : _p.hw;
+      var _oc = _inkC + _ocOff, _blue = _oc - _hw * _T, _red = _oc + _hw * _T;
+      var VL = function (xu, col, w, dash, mxk, hit) {
+        var X = gdXs(xu);
+        s += '<line x1="' + X + '" y1="' + vyT + '" x2="' + X + '" y2="' + vyB + '" stroke="' + col + '" stroke-width="' + w + '"' + (dash ? ' stroke-dasharray="7 5"' : '') + '/>';
+        if (mxk) s += '<line data-mx="' + mxk + '" x1="' + X + '" y1="' + vyT + '" x2="' + X + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="' + (hit || 14) + '" pointer-events="stroke" style="cursor:ew-resize"/>';
+      };
+      // faint ink-middle tick so the user sees how far off-centre the optical centre sits
+      VL(_inkC, '#bfbfbf', 1, true, null, 0);
+      VL(_blue, '#1473e6', 2.2, false, 'obhw', 14);            // box LEFT edge = exported LSB
+      VL(_red, '#c0271d', 2.2, false, 'obhw', 14);             // box RIGHT edge = exported RSB
+      VL(_oc, '#11a36a', 2.6, false, 'obscen', 16);            // GREEN optical centre — the master
+      s += '<text x="' + (gdXs(_blue) + 3) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#1473e6">LSB ' + Math.round(_p.inkL - _blue) + '</text>';
+      s += '<text x="' + (gdXs(_red) - 56) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">RSB ' + Math.round(_red - _p.inkR) + '</text>';
+      s += '<text x="' + (gdXs(_oc) + 3) + '" y="' + (gdYs(-200) + 30) + '" font-size="9" fill="#11a36a">centre ' + (_ocOff > 0 ? '+' : '') + _ocOff + '</text>';
+    } else {
+      // blue LSB line — independent + draggable
+      var lx = gdXs(lsbX);
+      s += '<line x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#1473e6" stroke-width="2.2"/>';
+      s += '<line data-mx="lsb" x1="' + lx + '" y1="' + vyT + '" x2="' + lx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="16" pointer-events="stroke" style="cursor:ew-resize"/>';
+      // red advance line at the box right edge (lsbX + adv) — independent + draggable
+      var rx = gdXs(lsbX + adv);
+      s += '<line x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#c0271d" stroke-width="2.2"/>';
+      s += '<line data-mx="adv" x1="' + rx + '" y1="' + vyT + '" x2="' + rx + '" y2="' + vyB + '" stroke="#000" stroke-opacity="0" stroke-width="14" pointer-events="stroke" style="cursor:ew-resize"/>';
+      s += '<text x="' + (rx - 52) + '" y="' + (gdYs(-200) + 16) + '" font-size="10" fill="#c0271d">ADV ' + Math.round(adv) + '</text>';
+    }
   }
   s += '</g>';
   svg.innerHTML = s;
 }
 function mxCommit(g, contours, adv) {
-  glyphset.setGlyphContours(curFont(), selectedSlot, curMasterId(), contours, adv != null ? adv : g.advanceWidth);
+  var f = curFont();
+  glyphset.setGlyphContours(f, selectedSlot, curMasterId(), contours, adv != null ? adv : g.advanceWidth);
+  // OPTICAL BEARINGS: if the shape moved/scaled, re-derive the advance from the optical lines on
+  // the NEW ink so the symmetric/optical spacing stays true (obSeat writes g.advanceWidth +
+  // g.lsbLineX directly; line drags already passed the seated advance above).
+  if (f && f.optBearings) obSeat(g, curMasterId(), f);
   lastSig[selectedSlot] = glyphset.layerSignature(g, curMasterId());
   syncOpenGlyph(g);
   renderGrid(); renderModGrid(); scheduleTester(); autosave();
@@ -2351,6 +3026,13 @@ function renderMetricsEditor() {
     var mk = ev.target.closest ? ev.target.closest('[data-mx]') : null;
     if (mk) {
       var mkMode = mk.getAttribute('data-mx');
+      // OPTICAL-CENTRE handles: obscen = GREEN centre (move the optical centre, blue/red follow);
+      // obhw = blue/red box edge (symmetric half-width). Both change g.ob, then re-seat the advance.
+      if (mkMode === 'obscen' || mkMode === 'obhw') {
+        var _op = obParams(g, curMasterId(), curFont());
+        if (_op) mxDrag = { mode: mkMode, ocOff: _op.ocOff, hw: _op.hw, inkC: _op.inkC, T: obTrack(curFont()) };
+        return;
+      }
       var lsb0 = g.lsbLineX || 0, adv0 = g.advanceWidth || 600;
       // lsb drag moves only the blue line and holds the red line fixed (redX0);
       // adv drag moves only the red line and holds the blue line fixed (lsbX)
@@ -2382,6 +3064,13 @@ function renderMetricsEditor() {
     } else if (mxDrag.mode === 'adv') {
       mxDrag.adv = Math.max(20, Math.round(mxDrag.adv0 + (pq.fx - mxDrag.sx)));
       mxRedraw(svg);
+    } else if (mxDrag.mode === 'obscen') {        // GREEN centre → move the optical centre (blue/red follow)
+      mxDrag.ocOff = Math.round(pq.fx - mxDrag.inkC);
+      mxRedraw(svg);
+    } else if (mxDrag.mode === 'obhw') {          // blue/red edge → symmetric half box-width
+      var _oc = mxDrag.inkC + mxDrag.ocOff;
+      mxDrag.hw = Math.max(10, Math.round(Math.abs(pq.fx - _oc) / mxDrag.T));
+      mxRedraw(svg);
     } else if (mxDrag.mode === 'scale') {
       var b = mxDrag.b, h = mxDrag.h;
       var ax = h.indexOf('w') >= 0 ? b.maxX : (h.indexOf('e') >= 0 ? b.minX : (b.minX + b.maxX) / 2);
@@ -2406,6 +3095,11 @@ function renderMetricsEditor() {
       if (mxDrag.mode === 'shape' && cs2 && (mxDrag.dx || mxDrag.dy)) mxCommit(g, shiftContoursXY(cs2, mxDrag.dx, mxDrag.dy));
       else if (mxDrag.mode === 'lsb') { g.lsbLineX = mxDrag.lsbX; mxCommit(g, cs2 || [], mxDrag.adv); } // move only the blue line
       else if (mxDrag.mode === 'adv') mxCommit(g, cs2 || [], mxDrag.adv);
+      else if (mxDrag.mode === 'obscen' || mxDrag.mode === 'obhw') {
+        g.ob = g.ob || {}; if (mxDrag.mode === 'obscen') g.ob.ocOff = mxDrag.ocOff; else g.ob.hw = mxDrag.hw;
+        obSeat(g, curMasterId(), curFont());   // re-derive lsbLineX + advance from centre ± half-width
+        mxCommit(g, cs2 || [], g.advanceWidth);
+      }
       else if (mxDrag.mode === 'scale' && mxDrag.live) mxCommit(g, mxDrag.live);
     }
     mxDrag = null;
@@ -2450,6 +3144,7 @@ function renderFilters() {
 // ---- open a glyph: ALWAYS its own Illustrator project (never an artboard) ----
 function openGlyph(i) {
   openGlyphIndex = i;
+  pollMs = POLL_MS; pollSelMs = POLL_SEL_MS; pollIdle = 0; templateUntil = 0;   // entering a glyph edit → resume live-sync at once
   var f = curFont(), g = f.glyphs[i];
   var layer = g.layers[curMasterId()];
   var gd = glyphGD(g);
@@ -2603,15 +3298,84 @@ function onGenerateMarks() {
     g.layers[mid] = { contours: cs }; g.advanceWidth = adv; g.lsbLineX = 0;
     made++;
   });
+  var comp = accentCompose.composeAll(f, mid, { deriveMarks: true });  // also compose the accented letters (base + marks)
   renderGrid(); renderModGrid(); scheduleTester(); autosave();
-  setStatus(made ? ('Made ' + made + ' mark glyph(s) from your shapes' + (kept ? ' (' + kept + ' kept — already drawn)' : '') + ' — refine them in the grid, then + Accents.')
-    : (kept ? 'All marks already drawn — nothing to make.' : 'Could not make marks — draw an apostrophe, period, hyphen or O first.'), (made || kept) ? 'ok' : 'err');
+  renderAccGrid();
+  setStatus(made ? ('Made ' + made + ' mark glyph(s) + composed ' + comp.composed.length + ' accented letter(s) from your shapes.')
+    : (comp.composed.length ? ('Composed ' + comp.composed.length + ' accented letter(s).') : (kept ? 'All marks already drawn — nothing new.' : 'Draw an apostrophe, period, hyphen or O (and the base letters) first.')),
+    (made || comp.composed.length || kept) ? 'ok' : 'err');
+}
+
+// ---- accent. tab: marks + accented-letter grid, and the labeled marks template ----
+function isAccentGlyph(g) {
+  if (g.kind === 'composed') return true;
+  for (var i = 0; i < MARK_GLYPHS.length; i++) if (MARK_GLYPHS[i].name === g.name) return true;
+  return false;
+}
+function renderAccGrid() {
+  var box = $('accGrid'); if (!box) return;
+  var f = curFont(); box.innerHTML = '';
+  if (!f) return;
+  var any = 0;
+  f.glyphs.forEach(function (g, i) {
+    if (!isAccentGlyph(g)) return;
+    any++;
+    var cell = document.createElement('div');
+    cell.className = 'cell altcell' + (isFilled(g) ? ' filled' : '') + (i === selectedSlot ? ' selected' : '') + (g.char == null ? ' named' : '');
+    cell.innerHTML = (isFilled(g) ? (glyphThumb(g) || '') : '') + '<span class="lab">' + glyphLabelHtml(g) + '</span>';
+    cell.addEventListener('click', function () { selectedSlot = i; renderAccGrid(); updateAssign(); renderRight(); });
+    box.appendChild(cell);
+  });
+  if (!any) box.innerHTML = '<div class="ai-note">No marks or accented letters yet — Create a marks template (or Auto Marks), draw them, then Compose.</div>';
+}
+// Open a LABELED Illustrator template with a box per diacritic mark (ghosted with
+// the mark glyph). The user draws each; Import reads them back by cell name.
+function onMakeMarksTemplate() {
+  if (!FEAT.accents) return;
+  var f = curFont(); if (!f) { setStatus('Open a font first.', 'err'); return; }
+  var chars = MARK_GLYPHS.map(function (mk) { return { ghost: String.fromCodePoint(mk.cp), id: mk.name, w: 1 }; });
+  var cfg = { sets: [{ name: 'Accent marks', chars: chars }], metrics: f.metrics, unitsPerEm: f.unitsPerEm, grids: [{ kind: 'metrics' }], ybounds: {} };
+  setStatus('Opening marks template in Illustrator…');
+  evalScript('fmOpenTemplate(' + JSON.stringify(JSON.stringify(cfg)) + ')').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (r && r.ok) setStatus('Marks template opened (' + r.cells + ' marks) — draw each in its box, then Import.', 'ok');
+    else setStatus('Could not open template: ' + ((r && r.error) || '?'), 'err');
+  });
+}
+function onImportMarksTemplate() {
+  if (!FEAT.accents) return;
+  var f = curFont(); if (!f) return;
+  setStatus('Reading marks template…');
+  evalScript('fmReadTemplate()').then(function (raw) {
+    var r; try { r = JSON.parse(raw); } catch (e) { r = null; }
+    if (!r || !r.ok) { setStatus('Could not read template: ' + ((r && r.error) || 'open one first'), 'err'); return; }
+    if (!r.cells || !r.cells.length) { setStatus('No drawn marks found in the boxes.', 'err'); return; }
+    var mid = curMasterId(), desc = f.metrics.descender, em = f.unitsPerEm || 1000, placed = 0;
+    var byName = {}; MARK_GLYPHS.forEach(function (mk) { byName[mk.name] = mk; });
+    r.cells.forEach(function (cell) {
+      var mk = byName[cell.id]; if (!mk) return;
+      var contours = ilbridge.contoursFromArtboard(cell.paths, cell.rect, r.scale, desc);
+      if (!contours.length) return;
+      var ch = String.fromCodePoint(mk.cp), g = null;
+      for (var i = 0; i < f.glyphs.length; i++) { if (f.glyphs[i].name === mk.name || f.glyphs[i].char === ch) { g = f.glyphs[i]; break; } }
+      if (!g) { var layers = {}; (f.masters || []).forEach(function (m) { layers[m.id] = { contours: [] }; }); g = { name: mk.name, char: ch, unicode: mk.cp, alphabet: 'custom', advanceWidth: Math.round(0.3 * em), layers: layers }; f.glyphs.push(g); }
+      g.layers[mid] = { contours: contours }; g.lsbLineX = 0;
+      var b = glyphset.contoursBounds(contours); if (b) g.advanceWidth = Math.round(b.w + 2 * 0.08 * em);
+      placed++;
+    });
+    if (!placed) { setStatus('No marks imported — draw inside the boxes first.', 'err'); return; }
+    lastSig = {}; flatCache = {};
+    // Build the accented letters straight away (drawn marks win; any not drawn are
+    // auto-derived from your shapes), so Import is the whole accent workflow.
+    var comp = accentCompose.composeAll(f, mid, { deriveMarks: true });
+    renderGrid(); renderModGrid(); scheduleTester(); autosave();
+    setStatus('Imported ' + placed + ' mark(s) · composed ' + comp.composed.length + ' accented letter(s) (À Á Ç Ñ Š …).', 'ok');
+  });
 }
 
 function updateAssign() {
   var g = selGlyph();
   $('assignBtn').disabled = !g;
-  $('openInAi').disabled = !g;
   // the Assign chip shows the TARGET letter (consistent with the glyph cells) —
   // not the captured Illustrator shape, which would otherwise surface stray
   // artwork (e.g. the RuneType logo) in the handle. The live selection still
@@ -2662,6 +3426,18 @@ function onAlt() {
   setStatus('Created alternate "' + curFont().glyphs[idx].name + '" — open it from the grid when ready.', 'ok');
   autosave();
 }
+// Live preview of the two letters typed into the ligature box — their glyph thumbnails.
+function updateLigPrev() {
+  var el = $('ligPrev'); if (!el) return;
+  var f = curFont(), s = (($('ligInput') && $('ligInput').value) || '').slice(0, 2);
+  if (!f || !s) { el.innerHTML = ''; return; }
+  var html = '';
+  for (var i = 0; i < s.length; i++) {
+    var g = null; for (var k = 0; k < f.glyphs.length; k++) if (f.glyphs[k].char === s[i]) { g = f.glyphs[k]; break; }
+    html += (g && isFilled(g)) ? (glyphThumb(g) || '') : '<span class="lig-miss">' + s[i].replace(/</g, '&lt;').replace(/&/g, '&amp;') + '</span>';
+  }
+  el.innerHTML = html;
+}
 function onLig() {
   if (!FEAT.alternates) return;
   var str = $('ligInput').value.trim();
@@ -2671,7 +3447,7 @@ function onLig() {
   }
   var idx = glyphset.createLigature(curFont(), str);
   if (idx < 0) { setStatus('Could not create ligature.', 'err'); return; }
-  selectedSlot = idx; $('ligInput').value = ''; renderGrid(); updateAssign(); renderRight();
+  selectedSlot = idx; $('ligInput').value = ''; updateLigPrev(); renderGrid(); updateAssign(); renderRight();
   setStatus('Created ligature "' + curFont().glyphs[idx].name + '" — open it from the grid when ready.', 'ok');
   autosave();
 }
@@ -2709,6 +3485,7 @@ function buildSigFields() {
     row.appendChild(inp);
     box.appendChild(row);
   });
+  if ($('demoFont')) $('demoFont').checked = !!f.demoFont;   // reflect the per-font Demo flag
 }
 function commitSig() {
   var box = $('sigFields'); if (!box) return;
@@ -2726,12 +3503,21 @@ function serializeProject(f) {
     return v;
   });
 }
-function autosave() {
+// PERF: autosave is a BLOCKING full-document JSON.stringify + writeFileSync, and it
+// was called at the end of nearly every action (incl. the ~700ms live poll). Coalesce
+// the storm into at most one write per ~1.5s; it reads curFont() at fire time so the
+// latest state is always captured. _autosaveNow() flushes immediately on explicit save.
+var _asTimer = null;
+function _autosaveNow() {
   try {
     var dir = cs.getSystemPath(SystemPath.USER_DATA) + '/RuneType';
     if (!fs.existsSync(dir)) fs.mkdirSync(dir);
     if (fonts.length) fs.writeFileSync(dir + '/autosave.runetype', serializeProject(curFont()));
   } catch (e) { /* best-effort temp save */ }
+}
+function autosave() {
+  if (_asTimer) return;
+  _asTimer = setTimeout(function () { _asTimer = null; _autosaveNow(); }, 1500);
 }
 // Open File — pick a font/project/artwork file and open it with the OS default
 // app (font files land in the system font viewer for manual install).
@@ -2806,72 +3592,29 @@ function onExportGo() {
 
 // ===== outline cleanup — unite overlapping contours before any font build
 // (the same paper.js trick Fontself uses, so stacked shapes never punch holes)
-function contoursToPaper(P, contours) {
-  var kids = [];
-  contours.forEach(function (c) {
-    if (!c.closed || c.points.length < 3) return;
-    var segs = c.points.map(function (pt) {
-      var hIn = pt.handleIn ? new P.Point(pt.handleIn.x - pt.x, pt.handleIn.y - pt.y) : null;
-      var hOut = pt.handleOut ? new P.Point(pt.handleOut.x - pt.x, pt.handleOut.y - pt.y) : null;
-      return new P.Segment(new P.Point(pt.x, pt.y), hIn, hOut);
-    });
-    kids.push(new P.Path({ segments: segs, closed: true, insert: false }));
-  });
-  return kids;
-}
-function paperToContours(item) {
-  var paths = item.children && item.children.length ? item.children : [item];
-  var out = [];
-  paths.forEach(function (pp) {
-    if (!pp.segments || pp.segments.length < 2) return;
-    out.push({
-      closed: true,
-      points: pp.segments.map(function (sg) {
-        return {
-          x: Math.round(sg.point.x * 100) / 100, y: Math.round(sg.point.y * 100) / 100, type: 'corner',
-          handleIn: sg.handleIn.isZero() ? null : { x: sg.point.x + sg.handleIn.x, y: sg.point.y + sg.handleIn.y },
-          handleOut: sg.handleOut.isZero() ? null : { x: sg.point.x + sg.handleOut.x, y: sg.point.y + sg.handleOut.y },
-        };
-      }),
-    });
-  });
-  return out;
-}
-function uniteContours(contours) {
-  var P = getPaper();
-  if (!P || !contours || contours.length < 2) return contours;
-  try {
-    var kids = contoursToPaper(P, contours);
-    if (kids.length < 2) return contours;
-    var acc = kids[0];
-    for (var i = 1; i < kids.length; i++) {
-      var nx = kids[i];
-      // ONLY merge contours whose outlines actually CROSS (overlapping strokes).
-      // A contour fully inside another (no boundary crossing) is a COUNTER/hole —
-      // keep it separate so the engine's winding normalisation can punch it out
-      // (uniting it here was what filled O/0/8/D counters on export).
-      if (acc.intersects(nx)) {
-        var before = acc;
-        try { acc = acc.unite(nx, { insert: false }); } catch (e) { acc = before; }
-        if (!acc) acc = before;
-      } else {
-        var grp = new P.CompoundPath({ insert: false });
-        grp.addChildren(acc.children && acc.children.length ? acc.removeChildren() : [acc]);
-        grp.addChild(nx);
-        acc = grp;
-      }
-    }
-    var res = paperToContours(acc);
-    return res.length ? res : contours;
-  } catch (e) { return contours; }
-}
+// Contour union (containment-tree, counter-preserving) lives in unite.js so it can be
+// headlessly unit-tested (test/unite.test.js drives it with paper-jsdom). Thin wrapper
+// binds the panel's paper scope.
+function uniteContours(contours) { return unite.uniteContours(getPaper(), contours); }
 // A deep copy of the project with every filled layer's overlaps united.
-function cleanedProject(f) {
+function cleanedProject(f, masterId) {
   var copy = JSON.parse(serializeProject(f));
+  // OPTICAL BEARINGS: re-seat every glyph's advance/lsbLineX from its optical (dashed) lines on
+  // the CURRENT ink, so the exported sidebearings are exactly the dashed lines — even if a shape
+  // was edited after the last drag. (No-op unless the mode is on.) Seat ONLY the master being
+  // built: obSeat writes the glyph-GLOBAL lsbLineX/advance, so looping every master left the
+  // LAST master's seating in every exported file (Bold got the Regular's sidebearings).
+  if (copy.optBearings) {
+    try { applyOpticalBearings(copy, masterId || (copy.masters && copy.masters[0] && copy.masters[0].id)); } catch (e) {}
+  }
+  // NOTE: accented letters (À é ç ñ ö ü …) are composed on demand via the "+ Accents" button
+  // (onComposeAccents) — a deliberate click, NOT silently at export — so they become real glyphs
+  // in the project and the user sees them in the grid. Whatever accents exist at export time ride
+  // along here; any STILL-undrawn accent/symbol slot falls to the placeholder as before.
   copy.glyphs.forEach(function (g) {
     Object.keys(g.layers).forEach(function (mid) {
       var l = g.layers[mid];
-      if (l && l.contours && l.contours.length > 1) l.contours = uniteContours(l.contours);
+      if (l && l.contours && l.contours.length) l.contours = uniteContours(l.contours);   // also cleans single self-intersecting outlines (GDI-safe)
     });
     bakeGlyphOrigin(g);   // fold the blue-line (LSB) offset into the outline
   });
@@ -2902,15 +3645,33 @@ function applyNames(buffer, f, styleName) {
     set('license', m.license); set('licenseURL', m.licenseURL);
     set('description', m.description); set('trademark', m.trademark);
     set('copyright', m.copyright); set('sampleText', m.sampleText);
+    // Bold/Italic flagging (OTF): opentype.js merges font.tables.os2 overrides on
+    // toArrayBuffer — without this a Bold master exports as usWeightClass 400 + REGULAR.
+    // (head.macStyle is NOT honored by opentype.js's writer — verified — but modern apps
+    // read fsSelection/usWeightClass; the TTF writer stamps macStyle properly.)
+    try {
+      var bold = (m.weightClass ? m.weightClass >= 600 : /bold/i.test(style));
+      var ital = /italic|oblique/i.test(style);
+      font.tables.os2 = font.tables.os2 || {};
+      font.tables.os2.usWeightClass = m.weightClass || (bold ? 700 : 400);
+      font.tables.os2.fsSelection = ((ital ? 0x01 : 0) | (bold ? 0x20 : 0)) || 0x40;
+    } catch (e2) {}
     return font.toArrayBuffer();
   } catch (e) { return buffer; }
 }
 // Build one master's OTF: cleaned outlines + the full name table.
 function buildMeta(f, master) {
+  var style = master.type || master.name || 'Regular';
   return {
-    familyName: f.meta.familyName || 'Untitled', styleName: master.type || master.name,
+    familyName: f.meta.familyName || 'Untitled', styleName: style,
     designer: f.meta.designer || '', version: f.meta.version, masterId: master.id,
     manufacturer: f.meta.manufacturer || '', copyright: f.meta.copyright || '', license: f.meta.license || '',
+    // signature-panel fields — ttfWriter stamps these inline (the TTF path has no applyNames)
+    designerURL: f.meta.designerURL || '', vendorURL: f.meta.vendorURL || '',
+    trademark: f.meta.trademark || '', licenseURL: f.meta.licenseURL || '',
+    description: f.meta.description || '', sampleText: f.meta.sampleText || '',
+    // Bold masters must ship as weight 700 + BOLD flags in BOTH formats
+    weightClass: f.meta.weightClass || (/bold/i.test(style) ? 700 : 400),
   };
 }
 // Empty-glyph placeholder art (the "boş harf" mark) loaded once. Lazily required
@@ -2919,27 +3680,81 @@ var _phArt = undefined;
 function placeholderArt() {
   if (_phArt === undefined) {
     _phArt = null;
-    if (FEAT.emptyGlyphArt) { try { _phArt = require(ROOT + '/js/' + FEAT.emptyGlyphArt + '.json'); } catch (e) { _phArt = null; } }
+    // bosharf.json is bundled, so "Demo font" can use it in ANY edition (not just
+    // the free one whose FEAT.emptyGlyphArt forces it).
+    var artName = FEAT.emptyGlyphArt || 'bosharf';
+    try { _phArt = require(ROOT + '/js/' + artName + '.json'); } catch (e) { _phArt = null; }
   }
   return _phArt;
 }
-// Fill undrawn slots with the placeholder so the exported font is complete.
-function fillPlaceholders(cleaned, masterId) {
-  var art = placeholderArt();
-  if (art) placeholder.fillEmptyGlyphs(cleaned, masterId, art);
+// Fill undrawn slots with the placeholder so the exported font is complete. The
+// free edition always watermarks empties; any edition does when "Demo font" is on.
+var _cleanedArt = undefined;   // the placeholder logo, cleaned once (GDI-safe) + reused
+function fillPlaceholders(cleaned, masterId, demo) {
+  if (!demo && !FEAT.emptyGlyphArt) return;
+  if (_cleanedArt === undefined) {
+    // bosharf.json is now baked (scripts/bake-bosharf.js) as a BOOLEAN UNION of the SVG's
+    // top-level <path>s — each painted with its OWN fill-rule, exactly like a browser/Illustrator
+    // paints them — so it already arrives as clean, counter-correct non-zero geometry (outer CCW
+    // + holes CW): 0 self/mutual crossings at float precision, the p/e/R counters open just like
+    // the SVG the user sees. Do NOT run uniteContours here: its resolveCrossings re-traces the
+    // whole 187-contour compound and COLLAPSES it to ~16, FILLING those counters solid (the very
+    // bug the user reported on OTF export). The build's normalizeWinding alone keeps them — verified
+    // by rasterising raw-bake vs. normalizeWinding(bake): both show open counters, pixel-for-pixel.
+    _cleanedArt = placeholderArt() || null;
+  }
+  if (_cleanedArt) placeholder.fillEmptyGlyphs(cleaned, masterId, _cleanedArt);
+}
+// The kern table that SHIPS — built from the SAME per-pair function the tester previews
+// (opticalKern), over the SAME glyphs, so the export is BYTE-for-byte the live preview. We do NOT
+// reuse the stored f.kerning (it goes stale the instant the bake re-seats an advance: a kern
+// computed for the old width no longer fits → letters collide / float, the "export ≠ program"
+// bug) and we do NOT reuse optimizer.optimizeKerning (it scans at buildRef's DERIVED capHeight
+// while opticalKern uses f.metrics.capHeight → ~60% of pairs disagree). Keys are glyph NAMES, which
+// match the cleaned glyphs, so it applies correctly even though the font is built from the copy.
+function exportKernTable(f, mid) {
+  mid = mid || curMasterId();   // multi-master export passes the master being BUILT, not the UI's
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilledIn(g, mid) && g.char) filled.push(g); });
+  var table = {};
+  for (var i = 0; i < filled.length; i++) for (var j = 0; j < filled.length; j++) {
+    var v = opticalKern(f, filled[i], filled[j], mid);
+    if (v) table[filled[i].name + ',' + filled[j].name] = v;
+  }
+  return table;
+}
+// Undrawn ENCODED slots must not ship as invisible blank glyphs (pro edition / Demo off):
+// the tester deliberately hides contour-less glyphs (undrawn letters preview in a system
+// face), so a blank-but-encoded export types as invisible 0.6em holes — testing != export.
+// Drop them from the cleaned copy so undrawn letters fall through to the OS fallback font,
+// like the tester shows. Genuine whitespace (space, NBSP) keeps its slot + advance so the
+// Space slider still ships. Runs AFTER fillPlaceholders (Demo mode fills them instead).
+function stripBlankSlots(cleaned, masterId) {
+  cleaned.glyphs = cleaned.glyphs.filter(function (g) {
+    var l = g.layers && g.layers[masterId];
+    if (l && l.contours && l.contours.length) return true;
+    return g.unicode === 0x20 || g.unicode === 0xA0;
+  });
 }
 function buildCleanOtf(f, master) {
-  var cleaned = cleanedProject(f);
-  fillPlaceholders(cleaned, master.id);
+  var cleaned = cleanedProject(f, master.id);
+  fillPlaceholders(cleaned, master.id, !!f.demoFont);
+  stripBlankSlots(cleaned, master.id);
   var built = fontEngine.buildFont(cleaned, 'otf', buildMeta(f, master));
-  return applyNames(built.buffer, f, master.type || master.name);
+  var named = applyNames(built.buffer, f, master.type || master.name);
+  // opentype.js's writer drops GPOS/kern, so we splice a real 'kern' table onto the FINAL buffer.
+  try { return kerninject.injectKernTable(named, exportKernTable(f, master.id), cleaned.glyphs); } catch (e) { return named; }
 }
 // TTF: the dedicated glyf writer already stamps the name table, so no applyNames
 // (re-parsing+toArrayBuffer would convert it back to CFF).
 function buildCleanTtf(f, master) {
-  var cleaned = cleanedProject(f);
-  fillPlaceholders(cleaned, master.id);
-  return fontEngine.buildFont(cleaned, 'ttf', buildMeta(f, master)).buffer;
+  var cleaned = cleanedProject(f, master.id);
+  fillPlaceholders(cleaned, master.id, !!f.demoFont);
+  stripBlankSlots(cleaned, master.id);
+  var built = fontEngine.buildFont(cleaned, 'ttf', buildMeta(f, master)).buffer;
+  // Same kern splice as the OTF path — ttfWriter emits no kern/GPOS either, and the
+  // GID order is identical (.notdef = 0, then project.glyphs[i] = i+1).
+  try { return kerninject.injectKernTable(built, exportKernTable(f, master.id), cleaned.glyphs); } catch (e) { return built; }
 }
 
 function renderWorkspace() {
@@ -3004,12 +3819,13 @@ function flattenContours(contours) {
   });
   return segs;
 }
-function glyphFlat(g) {
-  var sig = glyphset.layerSignature(g, curMasterId());
+function glyphFlat(g, mid) {
+  mid = mid || curMasterId();
+  var sig = glyphset.layerSignature(g, mid);
   if (!sig) return null;
-  var key = g.name + '|' + sig;
+  var key = g.name + '|' + sig;   // sig is per-master geometry → collision-safe across masters
   if (!flatCache[key]) {
-    var l = g.layers[curMasterId()];
+    var l = g.layers[mid];
     if (!l || !l.contours) return null;
     flatCache[key] = flattenContours(l.contours);
   }
@@ -3028,50 +3844,58 @@ function profileAt(segs, y) {
   return min > max ? null : { min: min, max: max };
 }
 // optical pair value: even out the visual air between the two ink profiles
-function opticalKern(f, gL, gR) {
-  var fl = glyphFlat(gL), fr = glyphFlat(gR);
+function opticalKern(f, gL, gR, mid) {
+  mid = mid || curMasterId();
+  // Visual Kern (Track A) override wins, returned BEFORE the geometric path + cache, so the
+  // tester preview, exportKernTable and the shipped 'kern' table all honor it automatically —
+  // the whole feature rides the existing preview==export invariant through this one hook.
+  // Persisted (non-underscore key) so it survives a .runetype round-trip. (Per-FONT by design,
+  // master-agnostic.)
+  if (f.kernOverride) {
+    var ov = f.kernOverride[gL.name + ',' + gR.name];
+    if (ov != null) return ov;
+  }
+  var fl = glyphFlat(gL, mid), fr = glyphFlat(gR, mid);
   if (!fl || !fr) return 0;
-  var key = gL.name + '>' + gR.name + '|' + glyphset.layerSignature(gL, curMasterId()) + '|' + glyphset.layerSignature(gR, curMasterId());
+  var key = gL.name + '>' + gR.name + '|' + glyphset.layerSignature(gL, mid) + '|' + glyphset.layerSignature(gR, mid);
   if (kernCache[key] != null) return kernCache[key];
-  var M = f.metrics, minGap = 1e9;
+  var M = f.metrics, gaps = [];
   for (var k = 0; k <= 22; k++) {
     var y = 5 + (M.capHeight - 10) * k / 22;
     var pl = profileAt(fl, y), pr = profileAt(fr, y);
     if (!pl || !pr) continue;
-    var gap = (gL.advanceWidth - pl.max) + pr.min;  // RSB of left + LSB of right at this height
-    if (gap < minGap) minGap = gap;
+    gaps.push((gL.advanceWidth - pl.max) + pr.min);  // RSB of left + LSB of right at this height
   }
   var v = 0;
-  if (minGap < 1e9) {
-    // aim for the FONT'S own typical pair gap, so straight pairs stay at 0 and
-    // only pairs with extra (or missing) air get values; tiny values are noise
-    var target = fontAirTarget(f);
-    v = Math.round(Math.max(-0.12 * f.unitsPerEm, Math.min(0.06 * f.unitsPerEm, target - minGap)));
+  if (gaps.length) {
+    // ROBUST gap (p15, not the single tightest height) so one protruding terminal (C beak /
+    // B swash) doesn't read as a collision and over-separate the pair — IDENTICAL to the export
+    // bake (optimizer.robustGap + optimizer.kernTarget), so this live preview == the exported font.
+    var target = liveKernTarget(f, mid);
+    v = Math.round(Math.max(-0.12 * f.unitsPerEm, Math.min(0.06 * f.unitsPerEm, target - optimizer.robustGap(gaps))));
     if (Math.abs(v) < 12) v = 0;
   }
   kernCache[key] = v;
   return v;
 }
-// the typical RSB+LSB of this font's placed glyphs (median of each side)
-function fontAirTarget(f) {
-  var ls = [], rs = [];
-  f.glyphs.forEach(function (g) {
-    var l = g.layers[curMasterId()];
-    if (!l || !l.contours || !l.contours.length) return;
-    var b = glyphset.contoursBounds(l.contours);
-    if (!b) return;
-    ls.push(Math.max(0, b.minX));
-    rs.push(Math.max(0, g.advanceWidth - b.maxX));
-  });
-  function med(a) { if (!a.length) return 0; a = a.slice().sort(function (x, y) { return x - y; }); return a[Math.floor(a.length / 2)]; }
-  var t = med(ls) + med(rs);
-  return Math.max(60, Math.min(0.14 * f.unitsPerEm, t || 0.085 * f.unitsPerEm));
+// The optical kern TARGET, computed once over all filled pairs (optimizer.kernTarget) and cached
+// in kernCache (which is cleared on every glyph edit) so the per-pair tester loop stays cheap.
+// Keyed per MASTER: the multi-master export loop measures each master's own outlines, and an
+// unkeyed scalar leaked the first master's target into every other master's kern table.
+function liveKernTarget(f, mid) {
+  mid = mid || curMasterId();
+  var key = '__target__' + mid;
+  if (kernCache[key] == null) kernCache[key] = optimizer.kernTarget(f, mid);
+  return kernCache[key];
 }
 function pairKern(f, gL, gR, mode) {
   if (!gL || !gR) return 0;
-  if (mode === 'optical') return opticalKern(f, gL, gR);
-  var t = f.kerning || {};
-  return t[gL.name + ',' + gR.name] || 0;
+  // The export ships the LIVE optical kern (buildCleanOtf → optimizer.optimizeKerning, same math
+  // as opticalKern), so the tester must show THAT to stay WYSIWYG — the stored f.kerning table is
+  // no longer authoritative (it goes stale the moment an advance is re-baked). 'metric' is kept as
+  // an escape hatch to inspect the raw stored table, but the default ('optical') == the export.
+  if (mode === 'metric') { var t = f.kerning || {}; return t[gL.name + ',' + gR.name] || 0; }
+  return opticalKern(f, gL, gR);
 }
 // Auto Kern: bake the optical pass into the project's kern table (Metric mode
 // then shows the same quality without recomputing).
@@ -3094,19 +3918,130 @@ function onAutoKern() {
   setStatus('Auto-kerned ' + filled.length + ' glyphs — ' + n + ' pair(s) baked into the kern table.', 'ok');
 }
 
+// === Visual Kern (Track A) — the headline auto-kerner. Judges the WHITE AREA between every
+// pair (shared/kernvision.js) and seats a kern that makes the gaps optically EVEN, then writes
+// it to f.kernOverride. opticalKern returns that first, so the tester preview and the EXPORTED
+// kern table are byte-identical to it (preview==export, for free). Persisted in .runetype.
+function onVisualKern() {
+  if (!FEAT.optimize) return;
+  var f = curFont();
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilled(g) && g.char && g.unicode >= 0x21) filled.push(g); });
+  if (filled.length < 2) { setStatus('Need at least two placed glyphs to kern.', 'err'); return; }
+  var aggrEl = $('vkAggr');
+  var aggr = aggrEl ? ((+aggrEl.value || 0) / 100) : 0.6;
+  setStatus('Visual Kern — reading the gaps…');
+  bakeAllOrigins(f);                       // normalise blue-line offsets so pairs measure true bearings
+  flatCache = {}; kernCache = {};          // measure on the just-baked outlines/advances
+  setTimeout(async function () {           // let the status paint before the (blocking) pass
+    var t0 = Date.now(), res, seeds = {};
+    // Track B: the trained model PROPOSES a kern per pair; kernvision then verifies+refines each
+    // in a tight window and guarantees no collision. Fails soft to {} (no model bundled / error)
+    // → kernvision runs its full optical search, so the feature always works.
+    try { seeds = (await kernai.predict(f, curMasterId(), filled, { root: ROOT })) || {}; } catch (e) { seeds = {}; }
+    var usedAI = Object.keys(seeds).length > 0;
+    try { res = kernvision.buildKernVision(f, curMasterId(), { aggr: aggr, seeds: seeds }); }
+    catch (e) { setStatus('Visual Kern failed: ' + ((e && e.message) || e), 'err'); return; }
+    f.kernOverride = res.table; f.aiKernOwned = false;   // Visual Kern owns the table now
+    kernCache = {};                        // drop any geometric values cached before the override existed
+    renderTesterText(); refreshTester(); autosave();
+    setStatus('Visual Kern — ' + res.pairs + ' pair(s) evened across ' + res.glyphs + ' glyphs' +
+      (usedAI ? ', AI-seeded' : '') + ' (' + (Date.now() - t0) + 'ms).', 'ok');
+  }, 16);
+}
+function onVisualKernClear() {
+  var f = curFont(); if (!f) return;
+  f.kernOverride = {}; f.aiKernOwned = false;
+  kernCache = {};
+  renderTesterText(); refreshTester(); autosave();
+  setStatus('Visual Kern cleared — back to live optical kern.', 'ok');
+}
+// Kern → Bearings: the "space first, kern the exceptions" pass. Takes the AI's per-pair kerns
+// (f.kernOverride), bakes each letter's AVERAGE left/right kern into its sidebearings, and leaves
+// only the residual exceptions as kerning (shared/kernvision.js redistributeToBearings). Total
+// spacing is PRESERVED — the text looks identical — but the font becomes properly spaced with a
+// small, clean kern table (the professional way to build a font). Run AFTER Visual Kern.
+function onKernToBearings() {
+  if (!FEAT.optimize) return;
+  var f = curFont(); var mid = curMasterId();
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilled(g) && g.char && g.unicode >= 0x21) filled.push(g); });
+  if (filled.length < 2) { setStatus('En az iki yerleşmiş glyph gerekli.', 'err'); return; }
+  if (!f.kernOverride || !Object.keys(f.kernOverride).length) { setStatus('Önce "Visual Kern"i çalıştır.', 'err'); return; }
+  bakeAllOrigins(f);                                   // fold blue-line offsets so bearing edits are clean
+  var names = filled.map(function (g) { return g.name; });
+  var full = {};                                       // every ordered pair (absent = 0)
+  for (var i = 0; i < filled.length; i++) for (var j = 0; j < filled.length; j++) {
+    if (i === j) continue;
+    var key = filled[i].name + ',' + filled[j].name;
+    full[key] = f.kernOverride[key] || 0;
+  }
+  var rb = kernvision.redistributeToBearings(full, names);
+  var moved = 0;
+  filled.forEach(function (g) {
+    var b = rb.bearings[g.name]; if (!b) return;
+    var l = g.layers[mid]; if (!l || !l.contours || !l.contours.length) return;
+    if (b.dL) l.contours = shiftContoursXY(l.contours, b.dL, 0);   // add dL to LSB (move ink)
+    g.advanceWidth = Math.round((g.advanceWidth || 0) + b.dL + b.dR);  // dL keeps RSB, dR adds to it
+    if (b.dL || b.dR) moved++;
+  });
+  f.kernOverride = rb.residual; f.aiKernOwned = false; // full residual; exportKernTable drops the ~0s
+  flatCache = {}; kernCache = {};
+  renderTesterText(); refreshTester(); renderGrid(); autosave();
+  var rk = 0; for (var k in rb.residual) if (Math.abs(rb.residual[k]) >= 6) rk++;
+  setStatus('Kern ortalaması ' + moved + ' harfin bearing\'ine dağıtıldı — görsel korundu, kern istisnaları ' + rk + ' çift.', 'ok');
+}
+// AI Spacing — one click: the trained PARAGRAPH model proposes every pair kern, then its per-letter
+// AVERAGE is baked into each letter's BEARING (Kern→Bearings), leaving only the exceptions as kern.
+// So the second (paragraph) AI determines BOTH the kerning AND the bearings in a single pass. Composes
+// on top of whatever optical bearings the sidebearing AI already set (it shifts them by the kern average).
+function onAISpacing() {
+  if (!FEAT.optimize) return;
+  var f = curFont();
+  var filled = [];
+  f.glyphs.forEach(function (g) { if (isFilled(g) && g.char && g.unicode >= 0x21) filled.push(g); });
+  if (filled.length < 2) { setStatus('En az iki yerleşmiş glyph gerekli.', 'err'); return; }
+  var aggrEl = $('vkAggr'); var aggr = aggrEl ? ((+aggrEl.value || 0) / 100) : 0.6;
+  setStatus('AI Spacing — paragraf modeli analiz ediyor…');
+  bakeAllOrigins(f); flatCache = {}; kernCache = {};
+  setTimeout(async function () {
+    var t0 = Date.now(), seeds = {};
+    try { seeds = (await kernai.predict(f, curMasterId(), filled, { root: ROOT })) || {}; } catch (e) { seeds = {}; }
+    var usedAI = Object.keys(seeds).length > 0;
+    var res;
+    try { res = kernvision.buildKernVision(f, curMasterId(), { aggr: aggr, seeds: seeds }); }
+    catch (e) { setStatus('AI Spacing failed: ' + ((e && e.message) || e), 'err'); return; }
+    f.kernOverride = res.table; f.aiKernOwned = false; kernCache = {};
+    onKernToBearings();                               // bake the AI kern average into the bearings
+    var rk = 0; if (f.kernOverride) for (var k in f.kernOverride) if (Math.abs(f.kernOverride[k]) >= 6) rk++;
+    setStatus('AI Spacing — ' + res.glyphs + ' harf' + (usedAI ? ', AI (paragraf)' : '') +
+      ': bearing\'ler ayarlandı + ' + rk + ' istisna kern (' + (Date.now() - t0) + 'ms).', 'ok');
+  }, 16);
+}
+
 // ---- live font tester (@font-face from the built OTF) ----
+var testerDirty = false;
 function refreshTester() {
   var f = curFont(); if (!f) return;
+  // PERF: building the @font-face is a FULL font compile (opentype.js buildFont +
+  // serialize). Skip it entirely unless a tester is actually on screen — otherwise
+  // every draw/optimize/poll paid a whole-alphabet compile for nothing. Mark dirty
+  // and rebuild lazily when the tester is shown.
+  var ftWin = $('floatTester');
+  if (activeSection !== 'test' && !(ftWin && !ftWin.classList.contains('hidden'))) { testerDirty = true; return; }
+  testerDirty = false;
   syncSpaceSliders();   // reflect the font's saved space width
   var filled = f.glyphs.filter(isFilled).length;
   var styleEl = $('fm-faces') || (function () { var st = document.createElement('style'); st.id = 'fm-faces'; document.head.appendChild(st); return st; })();
   if (!filled) { styleEl.textContent = ''; $('t-text').style.fontFamily = 'inherit'; applyTesterCtl(); return; }
   try {
     // build from the FILLED glyphs only, so letters you haven't drawn fall back
-    // to a standard system face instead of vanishing
+    // to a standard system face instead of vanishing. The SPACE glyph rides along even
+    // though it has no contours — its advance is the Space slider's product and must
+    // preview exactly as it exports (testing == export for whitespace too).
     var sub = {}; for (var k in f) sub[k] = f[k];
     var tMid = curMasterId();
-    sub.glyphs = f.glyphs.filter(isFilled).map(function (g) {
+    sub.glyphs = f.glyphs.filter(function (g) { return isFilled(g) || g.unicode === 0x20 || g.unicode === 0xA0; }).map(function (g) {
       var lx = g.lsbLineX || 0; if (!lx) return g;          // fold the LSB offset in (non-mutating)
       var ng = {}; for (var kk in g) ng[kk] = g[kk];
       var nl = {}; for (var mm in g.layers) nl[mm] = g.layers[mm];
@@ -3116,17 +4051,21 @@ function refreshTester() {
       return ng;
     });
     var built = fontEngine.buildFont(sub, 'otf', { familyName: 'RTLive', styleName: 'Regular', masterId: curMasterId() });
+    // Bake the REAL kern table into the preview font → the browser renders kerning + ligatures
+    // NATIVELY (font-kerning:normal), exactly like Photoshop/Illustrator (no manual margin replica).
+    var buf = built.buffer;
+    try { buf = kerninject.injectKernTable(buf, exportKernTable(f), sub.glyphs); } catch (e) {}
     var fam;
     if (window.FontFace && document.fonts) {
       fam = 'RTLive_' + (++faceSeq);
-      var face = new FontFace(fam, built.buffer);
+      var face = new FontFace(fam, buf);
       document.fonts.add(face);
       if (!window.__rtFaces) window.__rtFaces = [];
       window.__rtFaces.push(face);
       while (window.__rtFaces.length > 2) document.fonts['delete'](window.__rtFaces.shift());
     } else {
       fam = 'RTLive_' + (++faceSeq);
-      var b64 = Buffer.from(new Uint8Array(built.buffer)).toString('base64');
+      var b64 = Buffer.from(new Uint8Array(buf)).toString('base64');
       styleEl.textContent = '@font-face{font-family:"' + fam + '";src:url(data:font/otf;base64,' + b64 + ') format("opentype");}';
     }
     // fallback chain: drawn glyphs use the font, the rest use a standard face
@@ -3137,7 +4076,9 @@ function refreshTester() {
 function applyTesterCtl() {
   var t = $('t-text');
   t.style.fontSize = $('t-size').value + 'px';
-  t.style.fontKerning = 'none';            // WE drive the pair spacing below
+  t.style.fontKerning = 'normal';          // native kern from the embedded kern table (PS/Illustrator-accurate)
+  t.style.letterSpacing = ((($('t-track') ? +$('t-track').value : 0)) / 1000).toFixed(4) + 'em';
+  t.style.fontFeatureSettings = testLiga ? '"liga" 1, "clig" 1' : '"liga" 0, "clig" 0';
   renderTesterText(); renderFloatTester();
 }
 // ---- space character width (the testing 'Space' slider) ----
@@ -3174,6 +4115,25 @@ function setSpaceWidth(pct, commit) {                    // % of em → space gl
 // Metric from the table), scaled to the current size. Caret is preserved.
 // per-occurrence alternate picks in the tester: text-position index -> glyph index
 var testerAlts = {};
+var testLiga = true;   // tester: substitute ligatures (the "Ligatures" toggle)
+// Pre-filter the drawn ligature glyphs ONCE per render (avoids an all-glyphs scan
+// per character). Longest match wins so e.g. 'ffi' beats 'fi'.
+function drawnLigatures(f, mid) {
+  return f.glyphs.filter(function (g) {
+    return g.kind === 'ligature' && g.components && g.components.length &&
+      g.layers && g.layers[mid] && g.layers[mid].contours && g.layers[mid].contours.length;
+  }).sort(function (a, b) { return b.components.length - a.components.length; });
+}
+function matchLigatureAt(ligs, text, i) {
+  for (var k = 0; k < ligs.length; k++) {                        // already longest-first
+    var comps = ligs[k].components, n = comps.length;
+    if (i + n > text.length) continue;
+    var ok = true;
+    for (var c = 0; c < n; c++) if (text[i + c] !== comps[c]) { ok = false; break; }
+    if (ok) return ligs[k];
+  }
+  return null;
+}
 function altsOfBase(f, base) {
   var out = [];
   for (var i = 0; i < f.glyphs.length; i++) { var g = f.glyphs[i]; if (g.kind === 'alternate' && g.baseName === base.name) out.push(i); }
@@ -3191,6 +4151,7 @@ function testerText() {
       if (n.nodeType === 3) out += n.nodeValue.replace(/ /g, ' ');
       else if (n.nodeType === 1) {
         if (n.hasAttribute && n.hasAttribute('data-altch')) out += n.getAttribute('data-altch');
+        else if (n.hasAttribute && n.hasAttribute('data-ligch')) out += n.getAttribute('data-ligch');
         else walk(n);
       }
     }
@@ -3220,6 +4181,24 @@ function setCaret(el, off) {
 }
 function renderTesterText() {
   var el = $('t-text'); if (!el) return;
+  var hasAlts = false; for (var ak in testerAlts) { if (testerAlts[ak] != null) { hasAlts = true; break; } }
+  if (!hasAlts) {
+    // NATIVE Photoshop/Illustrator rendering (DEFAULT): the contenteditable holds PLAIN text; the
+    // @font-face (built WITH the real kern table by refreshTester) + font-kerning:normal +
+    // font-feature-settings render ligatures + kerning natively — no per-char spans / manual margins,
+    // so both previews match and look exactly like the exported font in PS/AI. Click-to-edit still
+    // works: the click handler maps the POINT → char → glyph (testerCharIndex), no spans needed.
+    if (el.querySelector('span,svg')) { var off0 = caretOffset(el); el.textContent = testerText(); setCaret(el, off0); }
+    el.style.fontKerning = 'normal';
+    el.style.letterSpacing = ((($('t-track') ? +$('t-track').value : 0)) / 1000).toFixed(4) + 'em';
+    el.style.fontFeatureSettings = testLiga ? '"liga" 1, "clig" 1' : '"liga" 0, "clig" 0';
+    return;
+  }
+  // --- per-char renderer — ONLY while per-occurrence ALTERNATES are active (right-click a letter →
+  //     pick an alternate). Plain native text can't swap a single occurrence's glyph, so each position
+  //     renders as an inline glyph spaced by pairKern (== export). Native CSS spacing is cleared so the
+  //     manual per-span margins aren't doubled. Default view above stays fully native. ---
+  el.style.letterSpacing = ''; el.style.fontKerning = ''; el.style.fontFeatureSettings = '';
   var f = fonts.length ? curFont() : null;
   var text = testerText();
   var mode = $('t-kern').value;
@@ -3228,7 +4207,28 @@ function renderTesterText() {
   var mid = f ? curMasterId() : null, M = f ? f.metrics : null, upm = f ? (f.unitsPerEm || 1000) : 1000;
   var off = caretOffset(el);
   var html = '';
+  var ligs = (testLiga && f) ? drawnLigatures(f, mid) : [];
   for (var i = 0; i < text.length; i++) {
+    // LIGATURE: if the toggle is on and the upcoming letters match a drawn ligature's
+    // components, render the ligature glyph (inline SVG) and consume those letters.
+    if (ligs.length) {
+      var lig = matchLigatureAt(ligs, text, i);
+      if (lig) {
+        var lc = lig.layers[mid].contours, lw = lig.advanceWidth || Math.round(upm * 0.6);
+        var lW = lw / upm * fsPx, lH = (M.ascender - M.descender) / upm * fsPx, lVA = M.descender / upm * fsPx;
+        var afterCh = text[i + lig.components.length], lkern = 0;
+        if (afterCh != null) { var gAf = null; for (var ax = 0; ax < f.glyphs.length; ax++) { if (f.glyphs[ax].char === afterCh) { gAf = f.glyphs[ax]; break; } } lkern = pairKern(f, lig, gAf, mode) / upm * fsPx; }
+        var lmarg = (trackPx + lkern).toFixed(2), ligch = lig.components.join('').replace(/"/g, '&quot;');
+        var ligIdx = f.glyphs.indexOf(lig), ligSel = (ligIdx === selectedSlot) ? ' tsel' : '';
+        // contenteditable="false" makes the ligature an ATOMIC unit (delete it, type
+        // around it like a letter); data-gi makes a click select+open it on the right.
+        html += '<span contenteditable="false" data-ti="' + i + '" data-gi="' + ligIdx + '" data-ligch="' + ligch + '" class="tletter tlig' + ligSel + '" ' +
+                'style="display:inline-block;line-height:0;width:' + lW.toFixed(2) + 'px;height:' + lH.toFixed(2) + 'px;vertical-align:' + lVA.toFixed(2) + 'px;margin-right:' + lmarg + 'px;">' +
+                '<svg width="' + lW.toFixed(2) + '" height="' + lH.toFixed(2) + '" viewBox="0 ' + (-M.ascender) + ' ' + lw + ' ' + (M.ascender - M.descender) + '" preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible"><path d="' + contoursToSVG(lc) + '" fill="currentColor"/></svg></span>';
+        i += lig.components.length - 1;
+        continue;
+      }
+    }
     var ch = text[i], kernPx = 0, baseIdx = -1, gL = null;
     if (f) {
       for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; if (isFilled(gL)) baseIdx = gx; break; } }
@@ -3252,7 +4252,7 @@ function renderTesterText() {
       var asc = M.ascender, desc = M.descender;
       var W = aw / upm * fsPx, H = (asc - desc) / upm * fsPx, vAlign = desc / upm * fsPx;
       var chEsc = ch === ' ' ? ' ' : ch;
-      html += '<span' + idAttr + ' data-altch="' + chEsc.replace(/"/g, '&quot;') + '" class="' + cls + ' talt" ' +
+      html += '<span contenteditable="false"' + idAttr + ' data-altch="' + chEsc.replace(/"/g, '&quot;') + '" class="' + cls + ' talt" ' +
               'style="display:inline-block;line-height:0;width:' + W.toFixed(2) + 'px;height:' + H.toFixed(2) + 'px;vertical-align:' + vAlign.toFixed(2) + 'px;margin-right:' + marg + 'px;">' +
               '<svg width="' + W.toFixed(2) + '" height="' + H.toFixed(2) + '" viewBox="0 ' + (-asc) + ' ' + aw + ' ' + (asc - desc) + '" preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible"><path d="' + contoursToSVG(ac) + '" fill="currentColor"/></svg></span>';
     } else if (ch === ' ') {
@@ -3268,6 +4268,35 @@ function renderTesterText() {
   el.innerHTML = html || '';
   setCaret(el, off);
 }
+// Native preview holds PLAIN text (no per-char spans, so kerning/ligatures render natively). To keep
+// click-to-edit working, map a click POINT back to the character index under it via the caret API +
+// per-char client rects — then we can select/open that glyph exactly like the old span did.
+function testerCharIndex(el, x, y) {
+  if (!el) return -1;
+  var node = el.firstChild;
+  if (!node || node.nodeType !== 3) return -1;                 // single plain text node
+  var text = node.nodeValue || ''; if (!text.length) return -1;
+  function rectOf(i) { var r = document.createRange(); r.setStart(node, i); r.setEnd(node, i + 1);
+    var rs = r.getClientRects(); return rs.length ? rs[rs.length - 1] : null; }
+  var guess = -1;
+  if (document.caretRangeFromPoint) { var rng = document.caretRangeFromPoint(x, y); if (rng && rng.startContainer === node) guess = rng.startOffset; }
+  for (var k = 0; k < 2; k++) {                                 // the caret snaps to a gap → test char at guess, then guess-1
+    var gi = guess - k; if (gi < 0 || gi >= text.length) continue;
+    var rc = rectOf(gi); if (rc && x >= rc.left - 0.5 && x <= rc.right + 0.5 && y >= rc.top - 2 && y <= rc.bottom + 2) return gi;
+  }
+  for (var j = 0; j < text.length; j++) { var b = rectOf(j); if (b && x >= b.left && x <= b.right && y >= b.top - 2 && y <= b.bottom + 2) return j; }
+  return guess >= 0 ? Math.min(text.length - 1, guess) : -1;
+}
+// Which glyph index a tester position renders (a per-occurrence alternate if one was chosen, else the
+// base glyph for that char) — mirrors the renderer so a click selects the glyph you actually see.
+function testerGlyphAt(f, text, i) {
+  if (!f || i < 0 || i >= text.length) return -1;
+  var ch = text[i], gL = null, baseIdx = -1;
+  for (var gx = 0; gx < f.glyphs.length; gx++) { if (f.glyphs[gx].char === ch) { gL = f.glyphs[gx]; if (isFilled(gL)) baseIdx = gx; break; } }
+  var alt = testerAlts[i];
+  if (alt != null && f.glyphs[alt] && gL && f.glyphs[alt].baseName === gL.name && isFilled(f.glyphs[alt])) return alt;
+  return baseIdx;
+}
 function setTesterBg(darkBg) {
   var p = $('t-paper');
   if (p) { p.classList.toggle('dark', darkBg); p.classList.toggle('light', !darkBg); }
@@ -3280,10 +4309,20 @@ function setTesterBg(darkBg) {
 function renderFloatTester() {
   var win = $('floatTester'); if (!win || win.classList.contains('hidden')) return;
   var box = $('ft-text'); if (!box) return;
-  var f = fonts.length ? curFont() : null;
   var text = $('ft-input') ? $('ft-input').value : 'Handgloves'; if (!text) text = ' ';
+  // NATIVE rendering with the SAME kern-bearing @font-face as the testing page → the two previews
+  // are identical and exactly like Photoshop/Illustrator (native kern + ligatures).
+  box.textContent = text;
+  box.style.fontFamily = $('t-text') ? $('t-text').style.fontFamily : 'inherit';
+  box.style.fontSize = (parseFloat($('ft-size') ? $('ft-size').value : 48) || 48) + 'px';
+  box.style.fontKerning = 'normal';
+  box.style.letterSpacing = ((($('t-track') ? +$('t-track').value : 0)) / 1000).toFixed(4) + 'em';
+  box.style.fontFeatureSettings = testLiga ? '"liga" 1, "clig" 1' : '"liga" 0, "clig" 0';
+  return;
+  // --- legacy SVG renderer below is unused (native rendering above) ---
+  var f = fonts.length ? curFont() : null;
   var fsPx = parseFloat($('ft-size') ? $('ft-size').value : 48) || 48;
-  var mode = $('t-kern') ? $('t-kern').value : 'optical';
+  var mode = $('t-kern') ? $('t-kern').value : 'metric';
   var trackPx = $('t-track') ? ($('t-track').value / 10) : 0;
   var mid = f ? curMasterId() : null, M = f ? f.metrics : null, upm = f ? (f.unitsPerEm || 1000) : 1000;
   var html = '';
@@ -3310,7 +4349,7 @@ function renderFloatTester() {
 function toggleLiveTest() {
   var win = $('floatTester'); if (!win) return;
   win.classList.toggle('hidden');
-  if (!win.classList.contains('hidden')) renderFloatTester();
+  if (!win.classList.contains('hidden')) { if (testerDirty) refreshTester(); renderFloatTester(); }
 }
 // make an element draggable by a handle (used for the Live Test window)
 function makeDraggable(win, handle) {
@@ -3336,24 +4375,35 @@ function makeDraggable(win, handle) {
 //    and skips the host call entirely — the Page Visibility API works in CEP;
 //  • when nothing's changed for a few ticks it widens 700ms → 3s, snapping back to
 //    700ms the instant a live edit is detected, so drawing still feels instant.
-var POLL_MS = 700, POLL_MAX = 3000, pollMs = POLL_MS, pollIdle = 0, polling = false, lastSig = {}, testerTimer = null;
+var POLL_MS = 2500, POLL_MAX = 6000, pollMs = POLL_MS, pollIdle = 0, polling = false, lastSig = {}, testerTimer = null;   // PERF: gentle background live-sync (was 700ms); instant sync on panel focus instead
+// Selection poll cadence: snappy (1.2s) for the Assign-shape preview, but drops to a
+// slow heartbeat on a TEMPLATE document (no live select there → stop hammering it).
+var POLL_SEL_MS = 2500, POLL_SEL_MAX = 6000, pollSelMs = POLL_SEL_MS;   // PERF: slower assign-preview poll (was 1200) — less Illustrator hammering
+var templateUntil = 0;   // PERF: once a TEMPLATE doc is detected, stop polling Illustrator for 30s (templates use Import, not live sync) — re-checks after
 function panelHidden() { return (typeof document !== 'undefined' && document.hidden) || $('view-work').classList.contains('hidden') || !fonts.length; }
-function pollBackoff(changed) {
+function pollBackoff(changed, hard) {
   if (changed) { pollMs = POLL_MS; pollIdle = 0; }
+  else if (hard) { pollMs = POLL_MAX; pollIdle = 99; }     // template/idle doc → straight to the slow heartbeat
   else if (++pollIdle > 4 && pollMs < POLL_MAX) pollMs = Math.min(POLL_MAX, pollMs + 350);
 }
 function startPolling() {
   if (polling) return; polling = true;
-  (function loopA() { setTimeout(function () { try { pollActive(); } catch (e) {} loopA(); }, panelHidden() ? 2000 : pollMs); })();
-  (function loopS() { setTimeout(function () { try { pollSelection(); } catch (e) {} loopS(); }, panelHidden() ? 2000 : 1200); })();
+  // PERF: only round-trip to Illustrator when truly needed. pollActive (live glyph-edit sync) runs
+  // ONLY while a glyph is open for editing; pollSelection ONLY on the glyphs page. Otherwise the
+  // loops tick slowly and do nothing, so the panel stops hammering Illustrator (the main lag source).
+  (function loopA() { setTimeout(function () { try { pollActive(); } catch (e) {} loopA(); }, (openGlyphIndex >= 0 && !panelHidden()) ? pollMs : 3000); })();
+  (function loopS() { setTimeout(function () { try { pollSelection(); } catch (e) {} loopS(); }, (activeSection === 'glyphs' && !panelHidden()) ? pollSelMs : 3000); })();
 }
 
 // Live-read the Illustrator selection while on the glyphs page so the Assign
 // handle shows the shape you're about to drop and the drop is instant.
 function pollSelection() {
   if (panelHidden() || activeSection !== 'glyphs') return;
+  if (templateUntil && Date.now() < templateUntil) return;   // on a template → don't poll Illustrator
   evalScript('fmReadSelection()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { res = null; }
+    if (res && res.error === 'template') { pollSelMs = POLL_SEL_MAX; templateUntil = Date.now() + 30000; return; }   // template doc → stop polling for 30s
+    templateUntil = 0; pollSelMs = POLL_SEL_MS;
     var contours = (res && res.ok && res.paths) ? ilbridge.contoursFromSelection(res.paths) : null;
     var had = !!(selSourceContours && selSourceContours.length);
     selSourceContours = (contours && contours.length) ? contours : null;
@@ -3371,9 +4421,11 @@ function shapeThumbSVG(contours, cls) {
 function scheduleTester() { if (testerTimer) clearTimeout(testerTimer); testerTimer = setTimeout(refreshTester, 1200); }
 
 function pollActive() {
-  if (panelHidden()) return;
+  if (panelHidden() || openGlyphIndex < 0) return;   // PERF: live-sync ONLY while a glyph is open for editing — no Illustrator round-trips otherwise
+  if (templateUntil && Date.now() < templateUntil) return;   // on a template → don't poll Illustrator
   evalScript('fmReadActive()').then(function (raw) {
     var res; try { res = JSON.parse(raw); } catch (e) { return pollBackoff(false); }
+    if (res && res.error === 'template') { templateUntil = Date.now() + 30000; return pollBackoff(false, true); }   // template sheet → stop polling for 30s
     if (!res || !res.ok || !res.paths || !res.paths.length) return pollBackoff(false);
     var f = curFont();
     // multiple glyph projects can be open — map the ACTIVE document to its glyph
@@ -3384,11 +4436,16 @@ function pollActive() {
     var contours = ilbridge.contoursFromArtboard(res.paths, res.rect, res.scale, f.metrics.descender);
     if (!contours.length) return pollBackoff(false);
     var adv = (res.rect[2] - res.rect[0]) / res.scale;
+    // Skip unchanged reads BEFORE writing: the write is what clears a composed glyph's
+    // composedFrom marker (glyphset.setGlyphContours), so an idle poll echo must not count
+    // as a hand edit (and skipping the whole set is cheaper anyway).
+    var lyr = { contours: contours };
+    var sigLayers = {}; sigLayers[curMasterId()] = lyr;
+    var sig = glyphset.layerSignature({ layers: sigLayers }, curMasterId());
+    if (sig === lastSig[idx] && Math.round(adv) === f.glyphs[idx].advanceWidth) return pollBackoff(false);
     glyphset.setGlyphContours(f, idx, curMasterId(), contours, adv);
-    var sig = glyphset.layerSignature(f.glyphs[idx], curMasterId());
-    if (sig === lastSig[idx]) return pollBackoff(false);
     lastSig[idx] = sig; pollBackoff(true);
-    renderGrid();
+    refreshGlyphCell(idx);                       // PERF: update the ONE changed cell, not the whole grid
     if (activeSection === 'mod') renderModGrid();
     if (idx === selectedSlot) renderRight();
     renderFloatTester();
@@ -3421,17 +4478,26 @@ function applyEdition() {
   lockCtl('countryBtn', !FEAT.charsets, PRO);           // country auto-select (locked sets greyed in the list)
   lockCtl('tg-grid', FEAT.gridPresets, 'Grid presets are a Pro feature');
   lockCtl('nf-opentpl', FEAT.template, PRO); lockCtl('nf-importtpl', FEAT.template, PRO);
+  lockCtl('openTplBtn', FEAT.template, PRO); lockCtl('importTplBtn', FEAT.template, PRO);
   lockCtl('altBtn', FEAT.alternates, PRO); lockCtl('altChip', FEAT.alternates, PRO);
   lockCtl('ligBtn', FEAT.alternates, PRO); lockCtl('ligInput', FEAT.alternates, PRO);
-  lockCtl('accentBtn', FEAT.accents, PRO); lockCtl('genMarksBtn', FEAT.accents, PRO);
-  lockCtl('autoKern', FEAT.optimize, PRO); lockCtl('optimizeBtn', FEAT.optimize, PRO);
-  lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('optical', FEAT.optimize, PRO);
-  lockCtl('expProfile', FEAT.optimize, PRO); lockCtl('aiAnalyze', FEAT.optimize, PRO);
+  lockCtl('accentTplBtn', FEAT.accents, PRO); lockCtl('accentImportBtn', FEAT.accents, PRO);
+  lockCtl('composeAccentsBtn', FEAT.accents, PRO);
+  lockCtl('optimizeBtn', FEAT.optimize, PRO);
+  lockCtl('refSpace', FEAT.optimize, PRO); lockCtl('moBlend', FEAT.optimize, PRO);
+  lockCtl('moBearingAI', FEAT.optimize, PRO); lockCtl('moKern', FEAT.optimize, PRO); lockCtl('moKernAI', FEAT.optimize, PRO);
+  lockCtl('moTrack', FEAT.optimize, PRO); lockCtl('aiAnalyze', FEAT.optimize, PRO);
   lockFmt('exOtf', FEAT.exportOtf); lockFmt('exTtf', FEAT.exportTtf); lockFmt('exVar', FEAT.exportVariable);
 }
 
 // ---- boot ----
 function boot() {
+  // Reload the ExtendScript (jsx) from disk on every panel open. The manifest <ScriptPath> loads
+  // fontmaker.jsx ONCE into the host's ExtendScript engine, which persists for the whole Illustrator
+  // session — so edits to the jsx (e.g. template cell sizes) otherwise need a full Illustrator
+  // RESTART, not just a panel reopen. Re-evaluating the current file here redefines every fm*
+  // function fresh, so a panel reopen (with the ?v= cache-busted main.js) is enough.
+  try { evalScript(fs.readFileSync(ROOT + '/jsx/fontmaker.jsx', 'utf8')); } catch (e) {}
   buildPage1(); show('new');
   // page 1 (RuneType)
   $('m-add').addEventListener('click', onAddMaster);
@@ -3440,6 +4506,9 @@ function boot() {
   $('m-ddbtn').addEventListener('click', function () { $('m-list').classList.toggle('hidden'); });
   $('tg-lang').addEventListener('click', function () { setToggle('lang'); });
   $('tg-grid').addEventListener('click', function () { setToggle('preset'); });
+  if ($('modeBasic')) $('modeBasic').addEventListener('click', function () { setMode('basic'); });
+  if ($('modeAdv')) $('modeAdv').addEventListener('click', function () { setMode('advanced'); });
+  applyMode();   // start in Basic by default
   $('countryBtn').addEventListener('click', function () { $('countryList').classList.toggle('hidden'); });
   $('nf-family').addEventListener('input', renderProfile);
   if ($('nf-imgimport')) $('nf-imgimport').addEventListener('click', onImgImportPage1);
@@ -3453,8 +4522,7 @@ function boot() {
   $('nf-create').addEventListener('click', onStartCreating);
   // page 2 (workspace)
   $('w-home').addEventListener('click', function () { draft = newDraft(); buildPage1(); show('new'); });
-  $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
-  $('openInAi').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
+  if ($('glyphSearch')) $('glyphSearch').addEventListener('input', function () { searchQuery = this.value; renderGrid(); });
   $('assignBtn').addEventListener('click', onAssign);
   // the Assign Shape control is a drag source — drop it on any glyph cell to
   // assign the current Illustrator selection to that letter
@@ -3478,6 +4546,10 @@ function boot() {
   $('altBtn').addEventListener('click', onAlt);
   $('ligBtn').addEventListener('click', onLig);
   $('ligInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') onLig(); });
+  $('ligInput').addEventListener('input', updateLigPrev);
+  $('ligInput').addEventListener('focus', updateLigPrev);
+  if ($('openTplBtn')) $('openTplBtn').addEventListener('click', onOpenCurrentTemplate);
+  if ($('importTplBtn')) $('importTplBtn').addEventListener('click', onImportCurrentTemplate);
   if ($('altLigTplBtn')) $('altLigTplBtn').addEventListener('click', onOpenAltLigTemplate);
   if ($('altLigImportBtn')) $('altLigImportBtn').addEventListener('click', onImportAltLigTemplate);
 
@@ -3489,27 +4561,39 @@ function boot() {
     activeMaster = +this.value; lastSig = {}; flatCache = {}; kernCache = {};
     renderGrid(); renderModGrid(); refreshTester(); renderRight(); updateAssign();
   });
-  $('autoKern').addEventListener('click', onAutoKern);
   $('optimizeBtn').addEventListener('click', onOptimize);
-  if ($('refSpace')) {
-    $('refSpace').addEventListener('input', function () { if ($('refSpaceVal')) $('refSpaceVal').textContent = this.value + '%'; scheduleCorrections(); });
-    $('refSpace').addEventListener('change', function () { applyCorrections(true); });
+  if ($('composeAccentsBtn')) $('composeAccentsBtn').addEventListener('click', onComposeAccents);
+  Array.prototype.forEach.call(document.querySelectorAll('.w-ctab'), function (b) {
+    b.addEventListener('click', function () { setCorrTab(b.getAttribute('data-corr-tab')); });
+  });
+  if ($('aiOptWidth')) $('aiOptWidth').addEventListener('click', onAIOptWidth);
+  if ($('aiSpacingBtn')) $('aiSpacingBtn').addEventListener('click', onAISpacing);
+  if ($('visualKernBtn')) $('visualKernBtn').addEventListener('click', onVisualKern);
+  if ($('visualKernClear')) $('visualKernClear').addEventListener('click', onVisualKernClear);
+  if ($('kernToBearingsBtn')) $('kernToBearingsBtn').addEventListener('click', onKernToBearings);
+  if ($('vkAggr')) $('vkAggr').addEventListener('input', function () { if ($('vkAggrVal')) $('vkAggrVal').textContent = this.value + '%'; });
+  // === modification pipeline: AI Genişlik (geometric, instant) + AI Optik (model) + Tracking → applyAIOptic
+  if ($('aiOptimizeBtn')) $('aiOptimizeBtn').addEventListener('click', onAIOptimize);     // run the optical model
+  if ($('moTrack')) {
+    $('moTrack').addEventListener('input', function () { applyAIOptic(false); });
+    $('moTrack').addEventListener('change', function () { applyAIOptic(true); });
   }
-  if ($('optical')) {
-    $('optical').addEventListener('input', function () { if ($('opticalVal')) $('opticalVal').textContent = this.value + '%'; scheduleCorrections(); });
-    $('optical').addEventListener('change', function () { applyCorrections(true); });
+  if ($('aiOptic')) {   // AI Optimizasyon (bearing) — needs the per-font shape model (ensureAIOpt)
+    $('aiOptic').addEventListener('input', function () { applyAIOptic(false); });
+    $('aiOptic').addEventListener('change', function () { var f = curFont(); ensureAIOpt(f).then(function () { if (curFont() === f) applyAIOptic(true); }); });
   }
-  if ($('expProfile')) {
-    $('expProfile').addEventListener('input', function () { if ($('expProfileVal')) $('expProfileVal').textContent = this.value + '%'; scheduleCorrections(); });
-    $('expProfile').addEventListener('change', function () { applyCorrections(true); });
+  if ($('aiAvg')) {     // AI Optik (kern) — same per-font model
+    $('aiAvg').addEventListener('input', function () { applyAIOptic(false); });
+    $('aiAvg').addEventListener('change', function () { var f = curFont(); ensureAIOpt(f).then(function () { if (curFont() === f) applyAIOptic(true); }); });
   }
-  if ($('aiAnalyze')) $('aiAnalyze').addEventListener('click', aiAnalyze);
+  if ($('aiAnalyze')) $('aiAnalyze').addEventListener('click', function () { aiAnalyze(); if ($('aiModal')) $('aiModal').classList.remove('hidden'); });
+  if ($('aiModalX')) $('aiModalX').addEventListener('click', function () { $('aiModal').classList.add('hidden'); });
   if ($('m-space')) {
     $('m-space').addEventListener('input', function () { setSpaceWidth(parseInt(this.value, 10), false); });
     $('m-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
   }
-  $('accentBtn').addEventListener('click', onComposeAccents);
-  if ($('genMarksBtn')) $('genMarksBtn').addEventListener('click', onGenerateMarks);
+  if ($('accentTplBtn')) $('accentTplBtn').addEventListener('click', onMakeMarksTemplate);
+  if ($('accentImportBtn')) $('accentImportBtn').addEventListener('click', onImportMarksTemplate);
   if ($('imgImportBtn')) $('imgImportBtn').addEventListener('click', onImgImportClick);
   if ($('imgFillBtn')) $('imgFillBtn').addEventListener('click', onImgFill);
   if ($('imgCancelBtn')) $('imgCancelBtn').addEventListener('click', closeImgModal);
@@ -3518,6 +4602,7 @@ function boot() {
   $('gotoBtn').addEventListener('click', function () { if (selectedSlot >= 0) openGlyph(selectedSlot); });
   $('saveProject').addEventListener('click', onSaveProject);
   $('exportGo').addEventListener('click', onExportGo);
+  if ($('demoFont')) $('demoFont').addEventListener('change', function () { var f = curFont(); if (f) { f.demoFont = this.checked; autosave(); } });
   $('openFileBtn').addEventListener('click', onOpenFile);
   if ($('resetBtn')) $('resetBtn').addEventListener('click', function () { var m = $('resetModal'); if (m) m.classList.remove('hidden'); });
   if ($('resetCancel')) $('resetCancel').addEventListener('click', function () { var m = $('resetModal'); if (m) m.classList.add('hidden'); });
@@ -3536,21 +4621,22 @@ function boot() {
     $('t-space').addEventListener('change', function () { setSpaceWidth(parseInt(this.value, 10), true); });
   }
   $('t-kern').addEventListener('change', applyTesterCtl);
+  if ($('t-liga')) $('t-liga').addEventListener('change', function () { testLiga = this.checked; renderTesterText(); });
   $('t-text').addEventListener('input', function () { testerAlts = {}; renderTesterText(); });  // edits clear per-position overrides
-  // click a drawn letter in the tester → select it in the metrics editor so its
-  // spacing/kerning can be tuned (the word updates live as you drag the lines)
+  // click a drawn letter in the tester → select it in the metrics editor so its spacing/kerning can be
+  // tuned (the word updates live as you drag the lines). Native preview is plain text, so we map the
+  // click POINT → character index → glyph index (caretRangeFromPoint), restoring click-to-edit.
   $('t-text').addEventListener('click', function (ev) {
-    var sp = ev.target && ev.target.closest ? ev.target.closest('[data-gi]') : null;
-    if (!sp) return;
-    selectedSlot = +sp.getAttribute('data-gi');
-    renderRight();
-    renderTesterText();
+    var el = $('t-text'); var f = fonts.length ? curFont() : null; if (!f) return;
+    var i = testerCharIndex(el, ev.clientX, ev.clientY); if (i < 0) return;
+    var gi = testerGlyphAt(f, el.textContent || '', i); if (gi < 0) return;
+    selectedSlot = gi; renderRight();
   });
   // right-click a letter → its own alternates (just that occurrence)
   $('t-text').addEventListener('contextmenu', function (ev) {
-    var sp = ev.target && ev.target.closest ? ev.target.closest('[data-ti]') : null;
-    if (!sp) return;
-    showTesterAltMenu(ev, +sp.getAttribute('data-ti'));
+    var el = $('t-text'); if (!fonts.length) return;
+    var i = testerCharIndex(el, ev.clientX, ev.clientY); if (i < 0) return;
+    ev.preventDefault(); showTesterAltMenu(ev, i);
   });
   // dismiss the popup menus on any outside click / Escape
   document.addEventListener('mousedown', function (ev) {

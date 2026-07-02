@@ -1,0 +1,1 @@
+{"size": 96, "nctx": 8, "band": 0.04, "val_mae": 0.008768215681603103, "feat_order": ["priorL", "priorR", "weight/900", "width/9", "contrast", "xH/capH", "spikiness", "isLower"]}

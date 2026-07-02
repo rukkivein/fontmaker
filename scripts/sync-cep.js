@@ -44,6 +44,7 @@ function sync() {
   out.accentCompose = write('cep/js/accentCompose.js', read('shared/accentCompose.js'));
   out.markgen = write('cep/js/markgen.js', read('shared/markgen.js'));
   out.optimizer = write('cep/js/optimizer.js', read('shared/optimizer.js'));
+  out.kernvision = write('cep/js/kernvision.js', read('shared/kernvision.js'));
   out.refspace = write('cep/js/refspace.js', read('shared/refspace.js'));
   out.varCompat = write('cep/js/varCompat.js', read('shared/varCompat.js'));
   out.imgglyphs = write('cep/js/imgglyphs.js', read('shared/imgglyphs.js'));

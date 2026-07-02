@@ -61,28 +61,28 @@ const ALPHABETS = [
     glyphs: () => range(0x0905, 0x0939).concat(range(0x093E, 0x094D)) },
   { key: 'hangul', label: 'Korean (Hangul Jamo)', desc: 'Conjoining/compatibility jamo',
     glyphs: () => range(0x3131, 0x3163) },
-  { key: 'numbers', label: 'Numbers', desc: '0–9 lining figures',
-    glyphs: () => chars('0123456789') },
-  { key: 'fractions', label: 'Fractions & Numerals', desc: 'Fractions, super/subscripts · GF Latin Plus',
-    glyphs: () => chars('½¼¾').concat(cp(0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E, 0x2044,
-      0x00B9, 0x00B2, 0x00B3, 0x2070, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079))
-      .concat(range(0x2080, 0x2089)) },
-  { key: 'punct', label: 'Basic Punctuation', desc: 'Everyday marks: . , ? ! ; : ‘ ’ " - ( ) / & @ # + quotes, dashes, space',
-    glyphs: () => chars('.,;:!?\'"()-/&@#').concat(cp(0x2013, 0x2014, 0x2026, 0x2018, 0x2019,
-      0x201C, 0x201D), [{ char: ' ', unicode: 32 }]) },
-  { key: 'punctExtra', label: 'Punctuation Extended', desc: 'Brackets, guillemets, inverted marks & reference dots — the rarer punctuation',
-    glyphs: () => chars('[]{}\\_').concat(cp(0x00AB, 0x00BB, 0x2039, 0x203A, 0x2022, 0x00B7, 0x00A1, 0x00BF)) },
-  { key: 'symbols', label: 'Symbols & Currency', desc: 'Currency, ©®™ & reference marks',
-    glyphs: () => chars('*').concat(cp(0x0024, 0x20AC, 0x00A3, 0x00A5, 0x00A2, 0x20BA, 0x00A4,
-      0x00A9, 0x00AE, 0x2122, 0x00A7, 0x00B6, 0x00B0, 0x2020, 0x2021)) },
-  { key: 'math', label: 'Math', desc: 'Operators · GF Latin Plus',
-    glyphs: () => chars('+<>=~^|').concat(cp(0x2212, 0x00D7, 0x00F7, 0x2260, 0x00B1, 0x2264, 0x2265,
-      0x0025, 0x2030, 0x221A, 0x221E, 0x2248, 0x00B5, 0x03C0)) },
+  // ---- Non-letter sets, grouped by REAL-WORLD popularity (Google Fonts glyphset
+  // tiers: Core = in nearly every font, Plus = scientific/specialist). Numbers +
+  // everyday punctuation, then the common symbols/operators/currency, then the
+  // rarer scientific math / fractions / extended marks. (Was 6 sets → now 3.)
+  { key: 'coreText', label: 'Numbers & Punctuation', desc: 'Digits + everyday marks: . , ? ! ( ) " - / & @ # · GF Latin Core',
+    glyphs: () => chars('0123456789.,;:!?\'"()-/&@#').concat(cp(0x2013, 0x2014, 0x2026,
+      0x2018, 0x2019, 0x201C, 0x201D), [{ char: ' ', unicode: 32 }]) },
+  { key: 'coreSymbols', label: 'Common Symbols & Math', desc: 'Everyday + − × ÷ = % , $ € £ ¥ ¢ , © ® ™ § ¶ , * [ ] { } • · GF Latin Core',
+    glyphs: () => chars('*+<>=%~^|[]{}').concat(cp(0x2212, 0x00D7, 0x00F7, 0x00B0,
+      0x0024, 0x20AC, 0x00A3, 0x00A5, 0x00A2, 0x00A9, 0x00AE, 0x2122, 0x00A7, 0x00B6,
+      0x2022, 0x00B7)) },
+  { key: 'extendedSymbols', label: 'Extended & Specialist', desc: 'Scientific √ ≈ ≠ ≤ ≥ ± µ , fractions ½ ¼ ¾ + super/subscripts , « » ¡ ¿ , ₺ † ‡ · GF Latin Plus',
+    glyphs: () => chars('½¼¾\\_').concat(cp(0x00B1, 0x221A, 0x221E, 0x2248, 0x2260, 0x2264, 0x2265,
+      0x2030, 0x00B5, 0x03C0, 0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E, 0x2044,
+      0x00B9, 0x00B2, 0x00B3, 0x2070, 0x2074, 0x2075, 0x2076, 0x2077, 0x2078, 0x2079),
+      range(0x2080, 0x2089),
+      cp(0x00AB, 0x00BB, 0x2039, 0x203A, 0x00A1, 0x00BF, 0x20BA, 0x00A4, 0x2020, 0x2021)) },
 ];
 // Display order: the classic/essential sets first, then by rough popularity.
 // Basic Punctuation sits right after Numbers (everyday marks, easy to grab); the
 // rarer Punctuation Extended / Symbols / Math come later.
-const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'fractions', 'symbols', 'math', 'punctExtra',
+const ORDER = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'coreText', 'coreSymbols', 'extendedSymbols',
   'cyrillic', 'greek', 'arabic', 'hebrew', 'hanzi', 'hiragana', 'katakana', 'latinVietnamese',
   'devanagari', 'thai', 'hangul', 'armenian', 'georgian'];
 ALPHABETS.sort((a, b) => ORDER.indexOf(a.key) - ORDER.indexOf(b.key));
@@ -144,14 +144,15 @@ function collectGlyphs(alphabetKeys, opts) {
   return out;
 }
 
-// The "classic" sets every common font ships — flagged important in the UI.
-const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'numbers', 'punct', 'fractions', 'symbols', 'math', 'punctExtra'];
+// The "classic" sets every common font ships — flagged important (Recommended) in
+// the UI. The Extended & Specialist set is opt-in, so it is NOT recommended.
+const ESSENTIAL = ['latinUpper', 'latinLower', 'latinWest', 'latinCentral', 'coreText', 'coreSymbols'];
 
 // Pick a country → auto-select the sets its written language needs (+ the common
-// numbers/punctuation/symbols/math every font ships). Picking a country UNIONS
-// these into the current selection. Countries are mapped to a script group;
-// scripts we don't ship yet fall back to a Latin baseline.
-const COMMON = ['numbers', 'fractions', 'punct', 'symbols', 'math'];
+// numbers/punctuation/symbols every font ships). Picking a country UNIONS these
+// into the current selection. The specialist set (extendedSymbols) stays opt-in.
+// Countries map to a script group; scripts we don't ship yet fall back to Latin.
+const COMMON = ['coreText', 'coreSymbols'];
 const LAT = ['latinUpper', 'latinLower'];
 const SCRIPT_SETS = {
   latin: LAT.concat(['latinWest'], COMMON),
@@ -214,12 +215,64 @@ const COUNTRY_SCRIPT = {
   // Caucasus
   'Armenia': 'armenian', 'Georgia': 'georgian',
 };
+// Primary written language per country, for the Basic-mode "selected languages"
+// list (picking a country adds a language chip). Countries that share a language
+// collapse to ONE chip (United States + United Kingdom → "English"). Genuinely
+// multilingual countries are left out and fall back to their own name.
+const LANGUAGE_BY_COUNTRY = {
+  'United States': 'English', 'United Kingdom': 'English', 'Ireland': 'English',
+  'Canada': 'English', 'Australia': 'English', 'New Zealand': 'English',
+  'Nigeria': 'English', 'Ghana': 'English', 'Uganda': 'English', 'Botswana': 'English',
+  'Namibia': 'English',
+  'Germany': 'German', 'Austria': 'German',
+  'France': 'French', 'Ivory Coast': 'French', 'Senegal': 'French',
+  'Spain': 'Spanish', 'Mexico': 'Spanish', 'Argentina': 'Spanish', 'Chile': 'Spanish',
+  'Colombia': 'Spanish', 'Peru': 'Spanish', 'Venezuela': 'Spanish', 'Ecuador': 'Spanish',
+  'Bolivia': 'Spanish', 'Uruguay': 'Spanish', 'Paraguay': 'Spanish', 'Cuba': 'Spanish',
+  'Portugal': 'Portuguese', 'Brazil': 'Portuguese', 'Angola': 'Portuguese', 'Mozambique': 'Portuguese',
+  'Italy': 'Italian', 'Netherlands': 'Dutch',
+  'Denmark': 'Danish', 'Sweden': 'Swedish', 'Norway': 'Norwegian', 'Finland': 'Finnish',
+  'Iceland': 'Icelandic',
+  'Indonesia': 'Indonesian', 'Malaysia': 'Malay', 'Philippines': 'Filipino',
+  'Kenya': 'Swahili', 'Tanzania': 'Swahili',
+  // Latin Extended-A
+  'Poland': 'Polish', 'Czechia': 'Czech', 'Slovakia': 'Slovak', 'Hungary': 'Hungarian',
+  'Croatia': 'Croatian', 'Slovenia': 'Slovenian', 'Bosnia and Herzegovina': 'Bosnian',
+  'Romania': 'Romanian', 'Lithuania': 'Lithuanian', 'Latvia': 'Latvian', 'Estonia': 'Estonian',
+  'Albania': 'Albanian', 'Turkey': 'Turkish', 'Azerbaijan': 'Azerbaijani',
+  'Turkmenistan': 'Turkmen', 'Malta': 'Maltese',
+  // Vietnamese
+  'Vietnam': 'Vietnamese',
+  // Cyrillic
+  'Russia': 'Russian', 'Belarus': 'Belarusian', 'Ukraine': 'Ukrainian', 'Bulgaria': 'Bulgarian',
+  'Serbia': 'Serbian', 'North Macedonia': 'Macedonian', 'Montenegro': 'Montenegrin',
+  'Kazakhstan': 'Kazakh', 'Kyrgyzstan': 'Kyrgyz', 'Tajikistan': 'Tajik', 'Mongolia': 'Mongolian',
+  // Greek
+  'Greece': 'Greek', 'Cyprus': 'Greek',
+  // Arabic-script
+  'Saudi Arabia': 'Arabic', 'Egypt': 'Arabic', 'United Arab Emirates': 'Arabic', 'Iraq': 'Arabic',
+  'Jordan': 'Arabic', 'Lebanon': 'Arabic', 'Syria': 'Arabic', 'Kuwait': 'Arabic', 'Qatar': 'Arabic',
+  'Bahrain': 'Arabic', 'Oman': 'Arabic', 'Yemen': 'Arabic', 'Algeria': 'Arabic', 'Morocco': 'Arabic',
+  'Tunisia': 'Arabic', 'Libya': 'Arabic', 'Sudan': 'Arabic',
+  'Iran': 'Persian', 'Pakistan': 'Urdu',
+  // Hebrew
+  'Israel': 'Hebrew',
+  // CJK / Korean
+  'China': 'Chinese', 'Taiwan': 'Chinese', 'Hong Kong': 'Chinese', 'Singapore': 'Chinese',
+  'Japan': 'Japanese', 'South Korea': 'Korean', 'North Korea': 'Korean',
+  // Devanagari
+  'India': 'Hindi', 'Nepal': 'Nepali',
+  // Thai
+  'Thailand': 'Thai',
+  // Caucasus
+  'Armenia': 'Armenian', 'Georgia': 'Georgian',
+};
 const COUNTRIES = Object.keys(COUNTRY_SCRIPT)
   .sort()
   .map(name => {
     const seen = {}, sets = [];
     SCRIPT_SETS[COUNTRY_SCRIPT[name]].forEach(k => { if (!seen[k]) { seen[k] = 1; sets.push(k); } });
-    return { name, sets };
+    return { name, lang: LANGUAGE_BY_COUNTRY[name] || name, sets };
   });
 
 // A short sample of the characters a set brings (shown instead of prose).

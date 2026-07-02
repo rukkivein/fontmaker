@@ -212,7 +212,7 @@ function rectContour(x0, y0, x1, y1, isHole) {
   ok(sheet.category === 'digits' || sheet.clusters.length === 3, 'e2e: 3 digit blobs found');
   ok(sheet.clusters.length === 3, 'e2e: clustered into 3 glyphs');
 
-  const project = glyphset.createProject({ alphabets: ['numbers'] });
+  const project = glyphset.createProject({ alphabets: ['coreText'] });
   const seated = ig.seatClusters(sheet.clusters, 'digits', project.metrics);
   const mid = project.masters[0].id;
   let filled = 0;

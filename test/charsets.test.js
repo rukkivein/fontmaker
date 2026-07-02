@@ -14,10 +14,10 @@ ok(charsets.ALPHABET_BY_KEY.hanzi.glyphs().length > 50, 'Hanzi set is non-trivia
 ok(charsets.ALPHABET_BY_KEY.katakana.glyphs().some(g => g.char === 'ア'), 'Katakana present');
 
 // --- dedupe across sets ---
-const merged = charsets.collectGlyphs(['latinUpper', 'latinUpper', 'numbers'], {});
+const merged = charsets.collectGlyphs(['latinUpper', 'latinUpper', 'coreText'], {});
 const uniq = new Set(merged.map(g => g.unicode));
 ok(merged.length === uniq.size, 'collectGlyphs dedupes by unicode');
-ok(merged.length === 26 + 10, 'A–Z + 0–9 = 36 glyphs');
+ok(merged.length === 26 + charsets.ALPHABET_BY_KEY.coreText.glyphs().length, 'A–Z + Numbers & Punctuation');
 
 // --- case filters ---
 const upperOnly = charsets.collectGlyphs(['latinUpper', 'latinLower'], { upperOnly: true });
@@ -33,10 +33,10 @@ ok(charsets.GRID_BY_KEY.golden.build(1000).metrics.capHeight === 700, 'golden gr
 // --- createProject from dialog choices ---
 const p = glyphset.createProject({
   familyName: 'Demo', version: '2.000',
-  alphabets: ['latinUpper', 'numbers'], preset: 'Geometric Sans',
+  alphabets: ['latinUpper', 'coreText'], preset: 'Geometric Sans',
   masterName: 'Thin', masterType: 'Condensed',
 });
-ok(p.glyphs.length === 36, 'project built A–Z + 0–9');
+ok(p.glyphs.length === 26 + charsets.ALPHABET_BY_KEY.coreText.glyphs().length, 'project built A–Z + Numbers & Punctuation');
 ok(p.meta.version === '2.000', 'version stored');
 ok(p.preset === 'Geometric Sans', 'DNA preset stored');
 ok(p.dna && p.dna.geometry === 100, 'DNA params applied (geometry 100)');
@@ -72,10 +72,10 @@ ok(p.glyphs.every(g => g.layers[m2.id] && g.layers[m2.id].contours.length === 0)
 ok(p.masters[0].id !== p.masters[1].id, 'master ids are unique');
 
 // --- glyphs are tagged with their source alphabet (for filtering) ---
-const pf = glyphset.createProject({ alphabets: ['latinUpper', 'latinWest', 'numbers'] });
+const pf = glyphset.createProject({ alphabets: ['latinUpper', 'latinWest', 'coreText'] });
 ok(pf.glyphs.find(g => g.char === 'A').alphabet === 'latinUpper', 'A tagged latinUpper');
 ok(pf.glyphs.find(g => g.char === 'Ä').alphabet === 'latinWest', 'Ä tagged latinWest');
-ok(pf.glyphs.find(g => g.char === '5').alphabet === 'numbers', '5 tagged numbers');
+ok(pf.glyphs.find(g => g.char === '5').alphabet === 'coreText', '5 tagged coreText');
 
 // --- search: similar-letter matching ---
 const A = pf.glyphs.find(g => g.char === 'A');

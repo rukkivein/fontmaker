@@ -1,0 +1,1 @@
+{"hc": 80, "wc": 192, "pxem": 48, "in_ch": 1, "ctxn": 2, "nctx": 6, "label_clip": 0.6, "kren": [-0.15, 0.08], "jit": [-0.06, 0.06], "val_mae": 0.0084510118663311, "ctx_order": ["weight/900", "width/9", "capH/upm", "xH/capH", "leftIsLower", "rightIsLower"]}

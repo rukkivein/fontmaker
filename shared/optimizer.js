@@ -32,6 +32,33 @@ function translateX(contours, dx) {
 }
 function median(a) { a = a.filter(function (v) { return v != null && isFinite(v); }).sort(function (x, y) { return x - y; }); return a.length ? a[a.length >> 1] : null; }
 
+// === Robust optical close-approach. A pair's kern is driven by how close the two ink PROFILES
+// come across the cap band. Using the single TIGHTEST scan height makes ONE protruding terminal
+// or serif spike (C's beak, B's swash) a phantom collision the kerner then over-separates → the
+// exported "too much space after C / B" the user saw. Take a LOW PERCENTILE (p15) of the
+// per-height gaps instead: it discards the worst ~1/7 of contact heights (the spikes) while still
+// catching pairs that are tight across a real band (AV / To / WA stay snug). A render judge panel
+// picked p15 over min / 3rd / p20 (p20 began colliding dense verticals). ONE source of truth —
+// every kern path (optimizeKerning, bakeMetricOptical, the live tester's opticalKern) consumes
+// robustGap + kernTarget, so the in-program preview and the exported font agree.
+var KERN_GAP_PCTILE = 0.15;
+function robustGap(gaps) {
+  if (!gaps || !gaps.length) return Infinity;
+  var s = gaps.slice().sort(function (a, b) { return a - b; });
+  return s[Math.floor(KERN_GAP_PCTILE * (s.length - 1))];
+}
+// All per-height profile gaps for the ordered pair (gL then gR), using gL's CURRENT advance.
+function pairGaps(flatsL, advL, flatsR, ref) {
+  var out = [];
+  for (var s = 0; s <= 22; s++) {
+    var y = 5 + (ref.capHeight - 10) * s / 22;
+    var pl = profileAt(flatsL, y, 'R'), pr = profileAt(flatsR, y, 'L');
+    if (pl == null || pr == null) continue;
+    out.push((advL - pl) + pr);
+  }
+  return out;
+}
+
 // Reference metrics derived from the drawn glyphs (with sane fallbacks).
 function buildRef(project, mid) {
   var upm = project.unitsPerEm || 1000;
@@ -118,32 +145,164 @@ function profileAt(segs, y, side) {
   }
   return hit ? v : null;
 }
+// The font's own "typical pair gap" = median(LSB)+median(RSB) of the filled glyphs,
+// clamped to [6%,14%] em. ONE source of truth so the tester preview == the bake.
+// (bezBounds returns xMin/xMax — the old code read minX/maxX = undefined → NaN → the
+// target silently fell to the 8.5% fallback; fixed here.)
+function fontAirTargetUnits(project, mid, ref) {
+  ref = ref || buildRef(project, mid);
+  var filled = project.glyphs.filter(function (g) { return drawn(g, mid) && g.char && (g.unicode >= 0x21); });
+  var sides = filled.map(function (g) { var b = bezBounds(layerOf(g, mid).contours); return { l: Math.max(0, b.xMin), r: Math.max(0, g.advanceWidth - b.xMax) }; });
+  var target = (median(sides.map(function (s) { return s.l; })) || 0) + (median(sides.map(function (s) { return s.r; })) || 0);
+  return Math.max(0.06 * ref.upm, Math.min(0.14 * ref.upm, target || 0.085 * ref.upm));
+}
+// The font's typical optical pair gap = MEDIAN over all filled ordered pairs of robustGap.
+// Straight pairs land near it → ~0 kern; only genuinely tight/loose pairs get a value. The live
+// tester (opticalKern) calls this so its optical preview aims at the SAME target the export bake
+// uses — preview == export. (Falls back to the bbox air target if there are too few pairs.)
+function kernTarget(project, mid) {
+  var ref = buildRef(project, mid);
+  var filled = project.glyphs.filter(function (g) { return drawn(g, mid) && g.char && (g.unicode >= 0x21); });
+  var flats = {}; filled.forEach(function (g) { flats[g.name] = flatten(layerOf(g, mid).contours); });
+  var mgs = [];
+  for (var a = 0; a < filled.length; a++) for (var b = 0; b < filled.length; b++) {
+    var mg = robustGap(pairGaps(flats[filled[a].name], filled[a].advanceWidth, flats[filled[b].name], ref));
+    if (mg < Infinity) mgs.push(mg);
+  }
+  return median(mgs) || fontAirTargetUnits(project, mid, ref);
+}
 function optimizeKerning(project, mid) {
   var ref = buildRef(project, mid);
   var filled = project.glyphs.filter(function (g) { return drawn(g, mid) && g.char && (g.unicode >= 0x21); });
-  // typical air = median (LSB + RSB) of the filled glyphs
-  var sides = filled.map(function (g) { var b = bezBounds(layerOf(g, mid).contours); return { l: Math.max(0, b.minX), r: Math.max(0, g.advanceWidth - b.maxX) }; });
-  var target = (median(sides.map(function (s) { return s.l; })) || 0) + (median(sides.map(function (s) { return s.r; })) || 0);
-  target = Math.max(0.06 * ref.upm, Math.min(0.14 * ref.upm, target || 0.085 * ref.upm));
   var flats = {}; filled.forEach(function (g) { flats[g.name] = flatten(layerOf(g, mid).contours); });
-  var table = {}, pairs = 0;
+  // PASS 1 — every pair's robust optical closest-approach (p15 over the scan heights — see robustGap).
+  var gaps = [];
   for (var a = 0; a < filled.length; a++) {
     for (var b = 0; b < filled.length; b++) {
-      var gL = filled[a], gR = filled[b], minGap = Infinity;
-      for (var s = 0; s <= 22; s++) {
-        var y = 5 + (ref.capHeight - 10) * s / 22;
-        var pl = profileAt(flats[gL.name], y, 'R'), pr = profileAt(flats[gR.name], y, 'L');
-        if (pl == null || pr == null) continue;
-        var gap = (gL.advanceWidth - pl) + pr;
-        if (gap < minGap) minGap = gap;
-      }
-      if (minGap < Infinity) {
-        var v = Math.round(Math.max(-0.12 * ref.upm, Math.min(0.06 * ref.upm, target - minGap)));
-        if (Math.abs(v) >= 12) { table[gL.name + ',' + gR.name] = v; pairs++; }
-      }
+      var gL = filled[a], gR = filled[b];
+      var mg = robustGap(pairGaps(flats[gL.name], gL.advanceWidth, flats[gR.name], ref));
+      if (mg < Infinity) gaps.push({ key: gL.name + ',' + gR.name, mg: mg });
     }
   }
+  // The kern TARGET is the MEDIAN of those SAME robust gaps — the font's typical optical pair gap.
+  // (Measured the SAME way as each pair's gap, so straight pairs land ~0 and only genuinely
+  // tight/loose pairs kern. robustGap replaced the raw min so a lone terminal spike on C/B no
+  // longer reads as a collision and over-separates the pair.)
+  var target = median(gaps.map(function (g) { return g.mg; })) || fontAirTargetUnits(project, mid, ref);
+  var table = {}, pairs = 0;
+  gaps.forEach(function (g) {
+    var v = Math.round(Math.max(-0.12 * ref.upm, Math.min(0.06 * ref.upm, target - g.mg)));
+    if (Math.abs(v) >= 12) { table[g.key] = v; pairs++; }
+  });
   return { table: table, pairs: pairs };
+}
+
+// === Metric ⟷ Optical bake. t in [0,1]: 0 = a clean METRIC baseline, 1 = optical (every
+// glyph centred with a symmetric air/2 bearing). The metric baseline AND the air target are
+// CLASS-BASED (sbTargets / median) — pure functions of each glyph's INK SHAPE, independent of
+// its current POSITION — and every glyph is re-seated to an ABSOLUTE target. That makes the
+// bake IDEMPOTENT: re-applying the same t (which happens every drag frame) is a no-op, with
+// ZERO drift. (The earlier version read the LIVE bearing as the origin, so it re-baked on top
+// of its own output and collapsed toward optHalf as you dragged — the blocker bug.) The bbox
+// edge is the spike, so spike pairs land at `air` while recessed/round/diagonal bodies open
+// more for free. stdMul = the Standard %. Channel B adds the residual optical pair kern,
+// measured AFTER the bearings (no double-count), scaled by t. Never resizes a glyph.
+// opts.optBearings (optional) = { glyphName: { recL, recR } } per-side optical RECESSION
+// in FONT UNITS (how much TIGHTER than optHalf each side should sit), supplied by the
+// sidebearing ML model. The bake applies oL = max(floor, round(optHalf - recL)) so the
+// Standard (stdMul) scaling stays on optHalf while the shape-driven recession composes on
+// top. NOTE: the field is a RECESSION, not a final bearing — passing {oL,oR} would read as
+// recL=0 → silent uniform. When absent every glyph uses the uniform optHalf, so the bake is
+// BYTE-IDENTICAL to today with no model — a backward-compatible seam.
+// Bake spacing + kerning. FOUR independent axes (the panel exposes one slider each),
+// all idempotent (absolute re-seat from the class-based metric baseline):
+//   opts.tBearing  0..1  side-bearing blend: 0 = metric (class baseline), 1 = optical
+//   opts.aiBearing 0..1  how much the trained side-bearing model shapes the OPTICAL target
+//                        (0 = uniform optHalf for every glyph, 1 = full per-glyph recession)
+//   opts.tKern     0..1  KERNING blend (Photoshop mechanic): 0 = metric (font's own pairs,
+//                        i.e. none here → 0), 1 = full shape-based optical pair kern
+//   opts.aiKern    0..1  how much the model's per-glyph recession refines the optical kern
+//                        (0 = pure geometric profile kern, 1 = + model-informed tightening)
+//   opts.track     units static tracking, applied LAST + independently (half each side)
+//   opts.stdMul    Standard multiplier on the air target (scales optHalf)
+//   opts.optBearings { name:{recL,recR} } the model's per-glyph recession (font units)
+// No opts ⇒ everything 0 ⇒ the class-based metric spacing, no kern — a stable baseline.
+function bakeMetricOptical(project, mid, opts) {
+  opts = opts || {};
+  var clamp01 = function (v) { return Math.max(0, Math.min(1, v || 0)); };
+  var tB = clamp01(opts.tBearing), aB = clamp01(opts.aiBearing);
+  var tK = clamp01(opts.tKern), aK = clamp01(opts.aiKern);
+  var stdMul = opts.stdMul == null ? 1 : opts.stdMul;
+  var sbModel = opts.optBearings, mBase = opts.metricBase;
+  var ref = buildRef(project, mid);
+  // The METRIC baseline (what tBearing=0 reproduces). By default it's the class-based
+  // sbTargets (a pure function of the ink shape → idempotent). When opts.metricBase is
+  // supplied (the panel captures the glyph's DRAWN/hand-edited spacing once), tBearing=0
+  // reproduces THAT instead — so the optical/AI/kern/track dials LAYER on top of the user's
+  // own spacing rather than resetting it to the algorithmic baseline. Air = median of
+  // whichever baseline is in play.
+  var items = [], ls = [], rs = [];
+  project.glyphs.forEach(function (g) {
+    if (g.kind === 'ligature' || g.kind === 'alternate' || g.kind === 'composed') return;
+    if (!drawn(g, mid)) return;
+    var cs = layerOf(g, mid).contours, b = bezBounds(cs);
+    if (!isFinite(b.xMin)) return;
+    var cl = classify(g, b, ref), sb = sbTargets(cl, b, ref);
+    var pun = cl.cls === 'PUNCT_CENTERED';                    // keep punctuation centred in its slot
+    var base = (mBase && mBase[g.name]) ? mBase[g.name] : sb;
+    items.push({ g: g, cs: cs, b: b, mlsb: base.lsb, mrsb: base.rsb, pun: pun });
+    if (!pun) { ls.push(base.lsb); rs.push(base.rsb); }
+  });
+  var airBase = (median(ls) || 0) + (median(rs) || 0);
+  var air = Math.max(0.06 * ref.upm, Math.min(0.14 * ref.upm, airBase || 0.085 * ref.upm)) * stdMul;
+  var optHalf = Math.round(air / 2), spaced = 0, floor = Math.round(0.02 * ref.upm);
+  var half = Math.round((opts.track || 0) / 2);
+  items.forEach(function (it) {
+    // optical bearing target: uniform optHalf, pulled in by aiBearing × the model recession
+    var recL = 0, recR = 0;
+    if (sbModel && !it.pun && sbModel[it.g.name]) { var m = sbModel[it.g.name]; recL = m.recL || 0; recR = m.recR || 0; }
+    var oL = Math.max(floor, Math.round(optHalf - aB * recL));
+    var oR = Math.max(floor, Math.round(optHalf - aB * recR));
+    // metric → optical blend by tBearing, then static tracking (independent final layer)
+    var sbL = (it.pun ? it.mlsb : Math.round(it.mlsb + tB * (oL - it.mlsb))) + half;
+    var sbR = (it.pun ? it.mrsb : Math.round(it.mrsb + tB * (oR - it.mrsb))) + half;
+    translateX(it.cs, sbL - it.b.xMin);                       // absolute re-seat → idempotent
+    it.g.advanceWidth = Math.round(sbL + it.b.w + sbR);
+    spaced++;
+  });
+  // KERNING (Photoshop optical = shape-based pair gaps). tK gates it; aiKern adds the
+  // model's per-glyph optical tightening on top of the geometric profile kern.
+  var table = {}, pairs = 0;
+  if (tK > 0) {
+    var filled = project.glyphs.filter(function (g) { return drawn(g, mid) && g.char && (g.unicode >= 0x21); });
+    var flats = {}; filled.forEach(function (g) { flats[g.name] = flatten(layerOf(g, mid).contours); });
+    // PASS 1 — every pair's ROBUST profile closest-approach (p15 over scan heights — see robustGap;
+    // uses the just-baked advances). Raw min made a lone terminal spike (C/B) a phantom collision.
+    var gaps = [];
+    for (var a = 0; a < filled.length; a++) {
+      for (var bi = 0; bi < filled.length; bi++) {
+        var gL = filled[a], gR = filled[bi];
+        var mg = robustGap(pairGaps(flats[gL.name], gL.advanceWidth, flats[gR.name], ref));
+        if (mg < Infinity) gaps.push({ L: gL, R: gR, mg: mg });
+      }
+    }
+    // Kern relative to the MEDIAN robust gap (the font's typical optical pair gap), measured the SAME
+    // way as each pair's gap → balanced kerns (≈ half +, half −, mean ≈ 0), and no single-terminal
+    // spike over-separates open letters (C/G/B). Matches optimizeKerning + the live opticalKern.
+    var tgt = median(gaps.map(function (g) { return g.mg; })) || air;
+    gaps.forEach(function (gp) {
+      var vGeo = Math.max(-0.12 * ref.upm, Math.min(0.06 * ref.upm, tgt - gp.mg));   // geometric optical
+      // model nudge: a receding right-edge of L / left-edge of R lets the pair tuck closer
+      var vAi = 0;
+      if (sbModel) {
+        var mL = sbModel[gp.L.name], mR = sbModel[gp.R.name];
+        vAi = -0.25 * (((mL && mL.recR) || 0) + ((mR && mR.recL) || 0));
+      }
+      var v = Math.round(tK * (vGeo + aK * vAi));
+      if (Math.abs(v) >= 12) { table[gp.L.name + ',' + gp.R.name] = v; pairs++; }
+    });
+  }
+  return { spaced: spaced, kernPairs: pairs, table: table };
 }
 
 // === one pass: spacing + kerning. tracking is applied separately (live).
@@ -154,4 +313,4 @@ function optimizeAll(project, mid) {
   return { spaced: sp.count, kernPairs: kn.pairs, ref: sp.ref };
 }
 
-module.exports = { buildRef, classify, sbTargets, optimizeSpacing, optimizeKerning, optimizeAll, bezBounds };
+module.exports = { buildRef, classify, sbTargets, optimizeSpacing, optimizeKerning, optimizeAll, bezBounds, fontAirTargetUnits, bakeMetricOptical, robustGap, kernTarget, flatten };

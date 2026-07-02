@@ -1,205 +1,151 @@
-# RuneType™ Glyphmaker — Handoff
+# RuneType™ Glyphmaker — Project Handoff
 
-_Last updated: 2026-06 (this session) · branch `claude/inspiring-bardeen-fqkF4` · repo `rukkivein/fontmaker`_
-_This file is **editable**. Newest work is in **§ This session**; the variable-font state (for the
-second AI) is in **§ Variable fonts**._
+_Last updated: 2026-06-26 · local: `C:\Users\okana\fontmaker` · installed: `%APPDATA%\Adobe\CEP\extensions\com.fontmaker.illustrator` · edition: **pro**_
 
-## What it is
-RuneType™ Glyphmaker by **BRST STUDIO** — a tool that turns shapes drawn in **Adobe
-Illustrator** into real fonts (**OTF**, **TTF**, and a multi-master/variable groundwork).
-Fontself/Glyphs-inspired but more detailed (a construction-grid system + "Font DNA" +
-metrics/kerning editor + a small offline "smart" spacing/kerning pass). It is an
-**Illustrator CEP panel** (NOT UXP — third-party UXP is unavailable for Illustrator;
-CEP is the only way to ship an Illustrator panel, which is also how Fontself does it).
+Hand this file to a new maintainer (human or AI). It is **self-contained** — you should not need any other doc to get oriented, build, and extend the project. Newest work is in **§9 This session**; the most important traps are in **§10 Critical gotchas**.
 
-## Where everything lives
+---
+
+## 1. What it is
+
+**RuneType™ Glyphmaker** (BRST STUDIO) turns shapes drawn in **Adobe Illustrator** into real fonts (**OTF**, **TTF**, variable-font groundwork). Fontself/Glyphs-inspired but more detailed: a construction-grid system, "Font DNA" presets, a metrics/kerning editor, an **optical-centre** spacing editor, and small **offline** ML passes (sidebearing model, glyph recognizer, vector refiner).
+
+It is an **Adobe Illustrator CEP panel** — Chromium UI + Node runtime — **not UXP** (third-party UXP is unavailable for Illustrator; CEP is the only way to ship an Illustrator panel, and is how Fontself does it). Because it runs Node, `require`/`fs`/`Buffer` are native (no polyfills). The Illustrator DOM is **Y-up**, same as the font model, so geometry is **not** flipped anywhere.
+
+---
+
+## 2. Where everything lives
+
 | Thing | Location |
 |---|---|
-| Git repo | `github.com/rukkivein/fontmaker` (working branch: `claude/inspiring-bardeen-fqkF4` — this IS the default branch, all work is here) |
 | Local clone | `C:\Users\okana\fontmaker` |
 | Installed panel (live in Illustrator) | `%APPDATA%\Adobe\CEP\extensions\com.fontmaker.illustrator` |
-| One-click installer (EXE) | `C:\Users\okana\Desktop\RuneType_Glyphmaker_Setup.exe` (built by Inno Setup) |
-| Source backup (zip) | `C:\Users\okana\Desktop\RuneType_Glyphmaker_backup_20260614.zip` |
-| Inno Setup compiler | `%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe` |
+| CEF JS cache (the stale-code culprit) | `%LOCALAPPDATA%\Temp\cep_cache\ILST_*_com.fontmaker.illustrator.panel\` |
+| User project autosave | `%APPDATA%\RuneType\autosave.runetype` |
+| Repo | `github.com/rukkivein/fontmaker` |
+| ML training workspaces | `fontmaker/ml/` (+ `E:\glyphset` per memory) |
 
-## How to install / open it
-- **End user:** run `RuneType_Glyphmaker_Setup.exe` (per-user, no admin — copies the
-  panel into the CEP extensions folder and enables unsigned CEP extensions). Then open
-  Illustrator ▸ **Window ▸ Extensions ▸ RuneType Glyphmaker**.
-- **From source (dev):** `npm install`, then `npm run cep:install` (bundles shared code
-  into `cep/js` and copies `cep/` into the extensions folder). Reload the panel in
-  Illustrator after each change.
+---
 
-## How you actually make a font (the workflow)
-1. **New Font** (page 1): name it, pick character sets + a style preset (grid), masters.
-2. **glyphs.** (page 2): draw a shape in Illustrator, then **assign** it to a glyph slot
-   (drag the Assign handle onto a cell, double-click a cell, or drop a shape). Click a
-   cell to open that glyph as its own Illustrator document for editing (edits sync live).
-   Right-click a cell → Delete shape / Delete glyph / Open in Illustrator.
-3. **modification.** (kerning & metrics): the right pane is a metrics editor — drag the
-   shape, the blue **LSB** line, the red **advance** line (all independent); a 3-state
-   **hand** pan-tool (blue=pan → red=lock → reset). Tools: **Optimize** + **Auto Kern**
-   (kern table), the **Standard / Optical / Profile / Space** sliders (the new spacing
-   system — see § This session), an **experimental optimisation** block, the **✦ Analyze**
-   assistant, and a **⊞ Live Test** floating preview. (Note: the old size-changing
-   "Auto Fit / Optimize Test" were removed — font size never auto-changes.)
-4. **testing.** (type & preview): a live @font-face preview; click a letter to tune its
-   spacing in the metrics editor; **right-click a letter to swap in one of its alternates**
-   for that occurrence only.
-5. **save.** (signature + export): metadata fields + **Export to Folder** (OTF/TTF/Variable),
-   **Save Project (.runetype)**, **Open File** (reopen a .runetype OR import an existing
-   .otf/.ttf to edit).
+## 3. Install / open / use
 
-## Architecture (the important files)
-- `core/fontEngine.js` — host-agnostic font builder (pure JS + opentype.js; **do not break**
-  — reused everywhere). `core/ttfWriter.js` — real `glyf` TTF writer (cubic→quad, fontTools-validated).
-- `shared/` — `glyphset.js` (project/glyph model + charsets), `dna.js` (Font DNA presets →
-  grids), `charsets.js`, `optimizer.js` (the spacing/kerning "mini-AI"), `accentCompose.js`
-  (auto é/ç/ş… from base + mark), `varCompat.js` (master interpolation compatibility),
-  `ilbridge.js` (Illustrator-path ↔ font-unit geometry).
-- `cep/` — the panel: `index.html`, `css/styles.css`, `js/main.js` (~2k lines, the controller),
-  `jsx/fontmaker.jsx` (ExtendScript that runs inside Illustrator — opens/draws glyph docs,
-  reads selection geometry, writes compound paths so counters are holes).
-- `scripts/sync-cep.js` — bundles `shared/` + `core/` into `cep/js` (so the installed panel
-  is self-contained). `test/cepsync.test.js` fails if `cep/js` drifts → always `npm run cep:sync`/`cep:install`.
-- `installer/runetype.iss` — Inno Setup script → the Setup EXE.
+**Dev install:** `npm install` once, then **`npm run cep:install`** after *every* change (syncs `shared/`+`core/` → `cep/js`, copies `cep/` → the extensions folder, cache-busts, wipes CEF cache). Open Illustrator ▸ **Window ▸ Extensions ▸ RuneType Glyphmaker**.
 
-## Build / test / package commands (run from `C:\Users\okana\fontmaker`)
+**Verify the build loaded:** the workspace header shows **`build <id>`** (top-right). It changes every install. If it does *not* change after reopening the panel, CEF/ExtendScript is running cached code → close Illustrator fully and reopen (see §10).
+
+**Making a font (the flow):**
+1. **New Font** (page 1): name, character sets, master(s), a construction-grid preset (Font DNA).
+2. **glyphs.** (page 2): draw in Illustrator → **assign** to a slot (drag handle / double-click / drop). Click a cell to open that glyph as its own Illustrator doc (edits sync live). Or **⊕ Image Import** a reference sheet to auto-fill the grid. Or **Open Template** → draw every letter in its box → **Import Template**.
+3. **modification.** — two sub-tabs:
+   - **Kerning**: Standard / Bearings (Metric⟷Optical + AI) / Kerning (Metric⟷Optical + AI) / Tracking / Space sliders.
+   - **Optik merkez** (optical centre): the metrics editor shows a **green** centre line (drag = optically centre the glyph, manual) with **blue/red** symmetric box edges (= exported LSB/RSB), plus an **AI · daralt/genişlet** button (the model sets each letter's width). `+ Accents` button (next to Optimize) composes À-ÿ.
+4. **testing.** — live `@font-face` preview; the kern shown is **exactly what exports** (see §5). Right-click a letter to swap an alternate for that occurrence.
+5. **save.** — metadata + **Export** (OTF/TTF/Variable), **Save .runetype**, **Open** (.runetype or import .otf/.ttf to edit).
+
+---
+
+## 4. Build / test / commands (run from `C:\Users\okana\fontmaker`)
+
 ```
-npm install                 # deps (opentype.js etc.)
-npm test                    # all suites (structural, sync, finalize.verify, fontTools TTF gate)
-npm run cep:install         # sync shared→cep/js AND copy cep/ → installed extension
-"%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" installer\runetype.iss   # rebuild the EXE
+npm install            # deps: opentype.js, onnxruntime-web, imagetracerjs, fzstd, chokidar
+npm test               # 20 suites incl. cepsync (sync-drift gate), bosharf-export (real OTF), spacing-parity
+npm run cep:sync       # shared/+core/ → cep/js (no install)
+npm run cep:install    # cep:sync + copy cep/ → extension + cache-bust ?v= + wipe CEF cache
+node scripts/bake-bosharf.js   # re-bake the placeholder mark after editing cep/assets/bosharf.svg
 ```
 
-## Key facts & caveats (so you don't relearn them)
-- **CEP, not UXP** (UXP isn't available for Illustrator). The panel runs Node, so
-  `require`/`fs`/`Buffer` are native — no polyfills.
-- **Illustrator DOM is Y-UP** — geometry is NOT flipped. opentype.js `glyph.path.commands`
-  are also y-up font units (it only flips in `getPath`), so font import needs no flip.
-- **opentype.js 1.3.4 writes OTTO/CFF only** (no glyf/variable) — that's why TTF has its own
-  `ttfWriter.js`, and single-file variable (fvar/gvar) is still a marked follow-up.
-- After editing `cep/`/`shared/`/`core/`, **always `npm run cep:install`** (not just sync) or
-  the user tests a stale panel in Illustrator.
-- ExtendScript (`cep/jsx`) can't be tested in a browser — its pure-JS bits are unit-tested in
-  Node; the rest is verified live in Illustrator by the user.
+---
 
-## Current state
-Working end-to-end: draw → assign → modify (independent LSB/advance/shape, pan/zoom,
-infinite grid, auto-fit/kern/optimize) → test (live preview, per-letter spacing, alternate
-swap) → save/export (OTF + TTF, .runetype save+reopen, OTF/TTF import for editing). Glyphs
-with counters (O/D/B…) draw as compound paths (holes). UI verified responsive / no overflow
-on 1920×1080 (and the user's 4K). All tests green; EXE + backup on the Desktop.
+## 5. Architecture — the 3-tier sync model
 
-## This session (2026-06) — spacing system, optical/AI, template, perf
+The panel is assembled from three tiers; understanding this is essential.
 
-Major additions on top of the state above:
+1. **Pure-data logic** in `shared/` (no font lib) and `core/` (the font engine) — runs identically in the panel AND in Node tests. **SYNCED** into `cep/js/` (and `core/` → `cep/js/lib/`) by `scripts/sync-cep.js`. `sync-cep.js` rewrites `require('opentype.js')` → `require('./opentype.js')` for the bundled copy. **`test/cepsync.test.js` asserts byte-for-byte equality** and fails on drift → after editing any `shared/`/`core/` file you MUST `npm run cep:sync`/`cep:install`.
+2. **CEP-ONLY files**, edited directly in `cep/js/`, never synced (they need CEP runtime — `fs`, ONNX, CSInterface): **`main.js`** (the ~4k-line controller), `kerninject.js`, `spacingai.js`, `unite.js`, `glyphreco.js`, `vecai.js`, plus `cep/index.html`, `cep/css/styles.css`, `cep/jsx/fontmaker.jsx`, and the `cep/js/lib/` vendored libs (`opentype.js`, `paper-core.min.js`, ONNX `ort/`, `model/`).
+3. **The ExtendScript bridge** `cep/jsx/fontmaker.jsx` — loaded into Illustrator's ExtendScript engine via the manifest `<ScriptPath>`; the panel calls `fm*` functions through `cs.evalScript('fmFoo(...)')`. **It is a SEPARATE engine from the panel JS** (see the cache gotcha in §10).
 
-- **Reference spacing — the "X value"** (`shared/refspace.js`, unit-tested in `test/refspace.test.js`).
-  In **modification**, three stacked, **horizontal-only, never-resizing** sliders:
-  - **Standard (0–200%)** — every glyph's side bearings set to the average of **Arial + Times
-    New Roman** bearings (read live from `C:\Windows\Fonts\arial.ttf`/`times.ttf` via opentype,
-    as em-fractions). 100% = the classic consensus (I tight, W open), >100% widens, <100% tightens.
-    It **never** uses the font's own values, so it can't fall back to the original.
-  - **Optical (0–100%)** — nudges each glyph toward its ink **area centroid** (mass) within the
-    Standard bearings; advance box (blue/red lines) stays put.
-  - **Profile (0–100%, experimental)** — same idea but by the **silhouette** profile.
-  - **Space (0–80%)** — the space glyph's advance as % of em; in both testing AND modification.
-  - All compose; apply live on drag (cheap render only), commit on release.
-- **Experimental optimisation** block + **✦ Analyze** — a tiny **no-API** assistant: local
-  heuristics that flag tight/loose spacing outliers, cap-height inconsistency, coverage %, and
-  glyphs sitting off the baseline (↑/↓ suggestion), plus one suggested next move.
-- **Template overhaul:** selected sets each on their own row, wrap at 50/row, tiny set captions,
-  artboard anchored top-left and hugging content, ~13% wider cells, ghosts seated by **real Arial
-  per-char y-bounds** (passed from `main.js`), so `_` sits low, `-` mid, accents high. GPU fixes:
-  ghosts are **solid gray** (no transparency → no driver TDR), artwork scan de-quadratic, and the
-  whole sheet builds at **`FM_TPL_SCALE = 0.1`** (was 0.25) → a ~2000–3000pt document instead of
-  ~8000×5000 (much lighter on low-RAM machines). Import preserves drawn size & position exactly.
-- **Reset/rescue:** floating **⟳** button (top-right) → modal (Save .runetype & Reset / Reset /
-  Cancel) → `hardReset()` clears caches + reloads the panel.
-- **Live Test window:** floating, in-panel (NOT a 2nd OS window → RAM-safe), updates live with
-  spacing/kern/space changes.
-- **Perf:** the live-sync poller is now **adaptive** (700ms→3s when idle, sleeps when the panel is
-  hidden via Page Visibility) and spacing drags do only the light metrics-editor render.
-- **Misc:** grid thumbnails scale to the em (`.` small, `H` cap-height); punctuation reorganised
-  (one "Basic Punctuation" set + a separate "Punctuation Extended"); **EDITION flipped to `'pro'`**.
+`shared/features.js` `EDITION = 'pro' | 'alpha'` drives the whole premium surface via `FEATURES`; controls are disabled-in-place (an upsell), and each handler also early-returns on its flag (defense-in-depth). Synced; guarded by tests.
 
-### Image Import (auto-trace reference sheets → auto-fill the grid)
-**glyphs.** page has an **⊕ Image Import** button (in the alt/lig/accent row). Pick 1–4 raster
-sheets (numbers / uppercase+accents / lowercase+accents / punctuation — in ANY order); the panel
-traces each, splits it into glyphs, guesses each character, shows a **review dialog**, and on
-confirm seats the chosen glyphs into the active master. The dialog is the safety net: per-sheet
-**set** dropdown (overrides auto-detect) + an editable **character box** under every traced glyph
-(clear a box to skip it). Filling reuses `glyphset.setGlyphContours` so it behaves like any other
-assignment; matches existing glyph slots by unicode and reports any chars not in the font's sets.
+---
 
-Pipeline (clustering/detection/mapping/seating are pure JS, unit-tested in `test/imgimport.test.js`):
-- **Vectorize = Illustrator's own Image Trace** (jsx `fmTraceImage` → `PlacedItem.trace()` +
-  `tracing.expandTracing()` in a throwaway doc): `fmPickImages` shows a native multi-select dialog,
-  then each sheet is traced B/W and expanded to paths; `fmCollectTrace` drops light/background
-  fills (robust even where v28+ `ignoreWhite` is a no-op) so counters (o a 0 8…) stay as real
-  compound-path HOLES. `imgglyphs.contoursFromTracePaths(paths, bounds)` converts Illustrator's
-  Y-UP path points to pixel space (Y-down, flipped against the traced group's bounds). **Replaced
-  the old JS tracer** — imagetracerjs filled counters and was glitchy on decorative faces. (Legacy
-  `shared/imagetrace.js` + imagetracerjs stay bundled but unused; remove later if desired.)
-- `shared/imgglyphs.js` — the geometry brain: `clusterGlyphs` (rows by Y-whitespace, then columns
-  by X-overlap, so i=stem+dot, ==two bars, accent=base+mark each merge into ONE glyph while
-  neighbours stay separate), `detectCategory` (digits/upper/lower/symbols from glyph count, height
-  uniformity, x-height ratio, baseline scatter), `SEQ` (canonical char order transcribed from the 4
-  reference sheets), `mapClusters`, and `seatClusters` (per-sheet scale from the dominant ascent =
-  cap/x-height line via `modeApprox`, each glyph on its row baseline → accents float up, descenders
-  drop below; outputs font-unit contours for `setGlyphContours`).
-- Panel side (`cep/js/main.js`, search "IMAGE IMPORT"): file decode via Chromium `<canvas>`
-  (downscales to ≤1500px, flattens alpha to white — no PNG-decoder dep), the review modal, and
-  commit. `scripts/sync-cep.js` bundles both modules + the tracer; `cepsync.test.js` guards drift.
-- **Not edition-gated yet** — if Image Import should be a pro feature, add a `FEATURES.imageImport`
-  gate in `shared/features.js` and early-return in `onImgImportClick` (mirror the accents/optimize
-  pattern). Tuning knobs live in `imagetrace.DEFAULT_TRACE` (pathomit/ltres/qtres) and the
-  `clusterGlyphs` rowTol/xTol if real sheets cluster wrong.
+## 6. Font engine + export
 
-## Variable fonts (READ THIS — the second-AI target area)
+- **`core/fontEngine.js`** — opentype.js-based **OTF/CFF** builder. `buildFont(project, 'otf'|'ttf', meta)` is the entry. `glyphToPath` → `normalizeWinding(contours)` → `contourToCommands`. `addGsub` emits `liga`/`salt`/`ssNN` (ligatures need `components` codepoints; alternates need `baseName`; missing → silently skipped). Variable groundwork: fvar/gvar (deltas encoded as `(factor-1)*coord`; advance via the gvar pp2 phantom point) — **single-file variable export is still the open follow-up** (§11).
+- **`core/ttfWriter.js`** — the real **glyf/TTF** writer (`buildGlyfFont`, `cubicToQuads`). Writes the `name` table inline → the TTF path does NOT call `applyNames`. (opentype.js 1.3.4 writes CFF/OTTO only — that's why TTF has its own writer.)
+- **`normalizeWinding`** exists in BOTH fontEngine.js and ttfWriter.js (kept dep-free) — **keep them in sync when fixing winding**. It re-derives winding by area-containment **depth parity** (outer CCW, holes CW) so counters punch under non-zero fill.
+- **`cep/js/kerninject.js`** — opentype.js drops GPOS/kern on write, so this splices a real format-0 `kern` table onto the FINAL sfnt (after `buildFont` + `applyNames`). This is why the tester's kerning actually ships. Splits >10k pairs into subtables.
+- **`cep/js/unite.js`** — containment-tree contour **union** that PRESERVES counters/holes while removing self-intersections (GDI-safe). Used per drawn glyph at export.
+- **Export pipeline** (main.js): `buildCleanOtf/Ttf(f, master)` → `cleanedProject(f)` (deep copy; `uniteContours` each drawn glyph; `bakeGlyphOrigin` folds the blue-line LSB offset into the outline; **re-seats advance/lsbLineX from optical-centre lines if that mode is on**) → `fontEngine.buildFont` → `applyNames` (OTF only) → `kerninject.injectKernTable(buf, exportKernTable(f), glyphs)`.
+- **`preWound` flag**: the placeholder mark (`shared/bosharf.json`, the "DEMO" art) is baked as a boolean UNION of the SVG's top-level paths (each painted with its own fill-rule) → clean non-zero geometry with correct counters. `shared/placeholder.js fillEmptyGlyphs` stamps `layer.preWound=true`, and both writers **skip `normalizeWinding`** for it — because the grunge mark's counters are enclosed by the *combined* ink of many strokes (no single bigger contour), so depth-parity would fill them solid. **Never call `uniteContours` on the placeholder** (it collapses 187→16 contours and fills the counters).
 
-- **Masters exist** as data: `project.masters[]` (`{id,name,type}`) + per-glyph
-  `layers[masterId].contours`. `glyphset.addMaster()` adds an empty layer to every glyph.
-- **`shared/varCompat.js` is ready:** `report(f)` checks interpolation compatibility (same contour
-  & point counts across masters); `matchPoints(f)` aligns start points/rotation. No changes needed.
-- **What's MISSING:** a single-file **fvar/gvar** variable font is **not produced yet**. Today the
-  "Variable" export (`cep/js/main.js` ~1975) only validates compatibility, writes a
-  `-variable-report.txt`, and exports **each master as a separate file**. Code note: *"a single-file
-  .ttf with fvar/gvar is the follow-up."*
-- **To implement real variable export (in order):**
-  1. `core/fontEngine.js` — extend `buildFont` to take multiple master ids → emit **fvar** (axes)
-     + **gvar** (per-glyph point deltas).
-  2. `core/ttfWriter.js` — write the **gvar** binary (per-master point deltas) alongside glyf.
-     (Note: bundled opentype.js 1.3.4 writes CFF/OTTO only, so TTF/variable go through `ttfWriter`.)
-  3. `cep/js/main.js` (~1975) — rewire the export to produce one variable file from the compatible
-     masters instead of looping.
-  4. `shared/features.js` — `exportVariable` gate (already defined).
+---
 
-## Edition gating — current = **`pro`** (full); alpha is the free build
-One flag drives the whole premium surface: **`shared/features.js`** → `EDITION = 'alpha' | 'pro'`
-(exposes `FEATURES`). Flip to `'pro'` = one line, everything unlocks. Synced into
-`cep/js/features.js` (in `sync-cep.js`; guarded by `cepsync.test.js`).
+## 7. Spacing / kerning / optical
 
-Alpha gates (all premium controls are **disabled/greyed in place, not hidden** — an upsell):
-- **Masters** → single "Regular" (page-1 add + page-2 picker disabled).
-- **Export** → OTF only (TTF/Variable checkboxes disabled; `onExportGo` also gates them).
-- **Font import** → `.runetype` reopen only; opening an existing `.otf/.ttf` to edit is blocked.
-- **+Accents**, **Optimize**, **Auto Kern** → disabled (**Auto Fit stays on**).
-- **+Alternate / +Ligature** + the tester's right-click alternate swap → disabled.
-- **Grid presets** → page-1 Grid pill + the designer's `Preset…` menu disabled (default grid only).
-- **Character sets** → only Latin Uppercase + Numbers selectable; the rest show greyed with a "Pro"
-  tag; country auto-select disabled.
-- Every handler also early-returns on its flag (defense-in-depth), so unhiding a control still no-ops.
+- **`shared/optimizer.js`** — `bakeMetricOptical(project, mid, opts)` is the Metric⟷Optical bake of sidebearings + kern (idempotent: re-seats from an absolute class-based or captured baseline, never the live bearing). `optimizeKerning` and the kern block both use:
+  - **`robustGap(gaps)`** = the **p15 (15th-percentile)** of the per-height profile gaps, NOT the raw min — so a lone protruding terminal (C's beak, B's swash) does not phantom-collide and over-separate the pair. (This was the "C over-open" bug.)
+  - **`kernTarget`** = median robustGap over all pairs (the font's typical gap); straight pairs land ~0.
+  - `classify`/`sbTargets` (class-based metric baseline), `fontAirTargetUnits` (median LSB+RSB, clamped).
+- **`cep/js/spacingai.js`** — offline **onnxruntime-web MobileNetV3-Small** (`spacing.onnx`, ~4MB). `predict(project, mid, {weight, root})` → `{glyphName: {recL, recR}}` per-glyph optical **recession** (how much *tighter than optHalf* each side should sit — a tightening, NOT an absolute bearing). `ensureAISpacing` (main.js) caches it in `f._optBearings`, invalidated by `sbSig` (a shape-only hash — survives slider/bake/advance changes, invalidates on contour edits). Runs on the main thread (no SharedArrayBuffer in CEP); fails soft → `{}`.
+- **OPTICAL-CENTRE mode** (`f.optBearings`, main.js) — the "Optik merkez" sub-tab. Per glyph `g.ob = { ocOff, hw }`:
+  - `ocOff` = the optical-centre offset from the ink's geometric middle = the **GREEN** line (user drags it; MANUAL; does NOT scale with tracking).
+  - `hw` = symmetric half box-width = distance centre→blue/red (SCALES with tracking `T = 1 + moTrack/100`; set by the **AI width** button or by dragging blue/red).
+  - `oc = inkC + ocOff`; `blue = oc − hw*T`; `red = oc + hw*T`; `advance = 2*hw*T`; `lsbLineX = blue`. Helpers: `obParams/obLines/obSeat/applyOpticalBearings`. Drag modes `obscen` (green) / `obhw` (edges) in `mxRedraw`/`mxDrag`. `onAIOptWidth` sets `hw = inkW/2 + optHalf − (recL+recR)/2` per glyph (keeps the user's `ocOff`). `setCorrTab` switches Kerning↔Optical-centre.
+- **CRITICAL INVARIANT — testing ≡ export.** The exported kern table is recomputed **live from the outlines** at export (`exportKernTable(f)` loops `opticalKern`, the SAME function the tester shows), NOT spliced from the stored `f.kerning` (which goes stale the instant the bake re-seats an advance — kern computed for old widths no longer fits → letters collide/float). Do NOT reuse `optimizer.optimizeKerning` for the export table: it scans at `buildRef`'s derived capHeight while `opticalKern` uses `f.metrics.capHeight` → ~60% of pairs disagree. Do NOT recompute *bearings* at export (`bakeMetricOptical` is opts-sensitive; wrong opts blew advances +200).
 
-**Empty-glyph art ("boş harf"):** undrawn slots still show their letter in the grid, but at EXPORT
-every undrawn encoded slot is filled with **`bosharf.svg`** so a half-finished free font exports a
-complete, branded set (can't be passed off as done). Pipeline: `scripts/bake-bosharf.js` parses the
-138-path SVG (incl. arcs) → `shared/bosharf.json` (font-unit contours, baseline-seated, ~823 pts);
-`shared/placeholder.js` `fillEmptyGlyphs()` injects it post-clean in `buildCleanOtf/Ttf`
-(`FEATURES.emptyGlyphArt`). Re-bake after editing the SVG: `node scripts/bake-bosharf.js`.
-Tests: `features.test.js`, `placeholder.test.js`, `bosharf-export.test.js` (builds a real OTF).
+---
 
-## Next
-- Single-file variable (`fvar`/`gvar`) TTF is still the open follow-up (pro).
-- When monetizing: flip `EDITION` to `'pro'` in `shared/features.js` for the paid build.
+## 8. Template + image import (the Illustrator bridge)
+
+**`cep/jsx/fontmaker.jsx`** (ExtendScript; can't be browser-tested — its pure bits are Node-tested, the rest verified live):
+- **Per-glyph editing**: `fmReadSelection`/`fmSetArt`/`fmShiftArt`/`fmOpenGlyph` (open a single glyph as its own doc; live sync). `FM_SCALE = 0.25` pt/unit for per-glyph editing.
+- **Template round-trip**: `fmTemplateCells` lays out one **box per glyph**; `fmOpenTemplate` builds the sheet (each box named `fmcell:<id>`, the grid + ghost letter drawn inside); `fmReadTemplate` reads boxes back by name and assigns artwork by centre-in-box. **`FM_TPL_SCALE = 0.075`** pt/unit (small pixel footprint; vector, no quality loss; import maps back with the same scale). **The box is the em GRID grown SYMMETRICALLY by `FM_TPL_PAD = 0.25` on every side** (box ~51% bigger than the grid, grid+letter centred). The grid frame is drawn inset; on import `fmReadTemplate` **insets the box by `pad = boxHeight*FM_TPL_PAD/(1+2*FM_TPL_PAD)` to recover the exact grid frame** → baseline/LSB import unchanged despite the bigger box (≈2.6-unit uniform error, negligible), and overflow into the box is captured (the big box is the capture region). The doc canvas is created ~1.4× bigger than content with the artboard shrunk to hug it → a large **gray pasteboard** to draw/overflow into.
+- **`ilbridge.js`** (shared + cep) — `contoursFromArtboard(paths, rect, scale, descender)` maps artboard paths → font units off `rect` **left + bottom** only (fixed scale; advance comes from the ink, `setGlyphContours(..., null)`). Illustrator paths are Y-up = font model, no flip.
+- **Image import** (auto-trace reference sheets → fill the grid): `⊕ Image Import` (glyphs page). Vectorize via Illustrator's own Image Trace (jsx `fmTraceImage`/`fmCollectTrace`, drops light/background fills so counters stay holes), OR `shared/potrace.js` (clean-room pixel-faithful tracer, primary) / `shared/imagetrace.js` (imagetracerjs, legacy fallback). `shared/imgglyphs.js` is the geometry brain: `clusterGlyphs` (rows by Y-whitespace, columns by X-overlap; i=stem+dot merge), `detectCategory`, `SEQ` canonical order, `mapClusters`, `seatClusters` (per-row baseline → accents up, descenders down). `cep/js/glyphreco.js` (offline MobileNetV3 glyph recognizer, first-guess) + `cep/js/vecai.js` (offline ONNX vector refiner). A review modal lets the user fix the set + per-glyph char before commit. Pure bits in `test/imgimport.test.js`.
+
+---
+
+## 9. This session (2026-06-26) — what changed, with anchors
+
+All deployed; tests green; build stamp current.
+
+1. **Kerning "C over-open" fixed** — `shared/optimizer.js`: `robustGap` (p15) replaced raw-min; `kernTarget` = median robustGap. Both `optimizeKerning` and `bakeMetricOptical` use them.
+2. **testing ≡ export forced at the source** — `buildCleanOtf` now recomputes the kern via `exportKernTable(f)` (loops `opticalKern`); `pairKern` defaults to optical; the tester's `t-kern` defaults to "Live (real)". (main.js)
+3. **Placeholder counters fixed** — `bake-bosharf.js` unions top-level paths; `placeholder.js` stamps `preWound`; `fontEngine.js`+`ttfWriter.js` skip `normalizeWinding` for preWound layers. Guard: `bosharf-export.test.js` (`holes >= 6`).
+4. **DEMO placeholder** — `cep/assets/bosharf.svg` is now the "Rune type / DEMO" mark (old one at `bosharf-runetype-backup.svg`); re-baked (16 contours / 10 holes).
+5. **"+ Accents" button** — `#composeAccentsBtn` next to Optimize → `onComposeAccents` (composes À-ÿ into the project; NOT silent at export anymore).
+6. **Optical-centre tab** — the green-master `{ocOff, hw}` model, `setCorrTab`, `onAIOptWidth` (AI width), mod sub-tabs. (main.js + index.html + styles.css)
+7. **Template** — centred-box growth (`FM_TPL_PAD=0.25`), smaller render (`FM_TPL_SCALE 0.12→0.075`), large gray pasteboard, grid-frame inset recovery. (fontmaker.jsx)
+8. **CEF cache-bust + JSX reload + build stamp** — `install-cep.js` stamps `?v=<build>` on the `<script>` tags + wipes the CEF cache; `main.js boot` re-evals `fontmaker.jsx` from disk (defeats the ExtendScript engine cache); `#buildTag` shows the loaded build. (See §10.)
+
+---
+
+## 10. Critical gotchas (read before touching anything)
+
+- **CEF caches the panel JS.** `index.html` loads `<script src="js/main.js">`; CEF compiles it into a per-extension Code Cache that survives reinstalls. `install-cep.js` stamps `?v=<build>` (unique per install) on the script URLs + wipes `cep_cache/*com.fontmaker*`. **Verify via the `build <id>` header tag** — if it doesn't change after reopening the panel, CEF is stale.
+- **The JSX is a SEPARATE engine, cached for the whole Illustrator session.** `cep/jsx/fontmaker.jsx` loads via the manifest `<ScriptPath>` ONCE per session — the `?v=` cache-bust does NOT cover it. `main.js boot` now `evalScript(fs.readFileSync(ROOT+'/jsx/fontmaker.jsx'))` to re-define all `fm*` functions fresh on every panel open. If template behaviour ever looks stale, confirm that boot re-eval ran (or restart Illustrator fully).
+- **Sync drift:** after editing `shared/`/`core/`, run `cep:sync`/`cep:install` or `cepsync.test.js` fails and the panel runs old logic. The `require('./opentype.js')` rewrite is automatic — don't hand-edit it in `cep/js/lib/fontEngine.js`.
+- **`bakeGlyphOrigin` decoupling:** `lsbLineX`, `advanceWidth`, and the ink are three independent objects until export folds `lsbLineX` into the outline. Dragging blue/red/shape never moves another.
+- **Stored `f.kerning` is stale after any advance re-bake** — always recompute at export (`exportKernTable`). `opticalKern` uses `f.metrics.capHeight`; `optimizer` uses a derived one → don't mix.
+- **`preWound` placeholder:** never run `uniteContours`/`normalizeWinding` on it (collapses/fills counters).
+- **paper.js loads as BROWSER (UMD)**, not Node — `getPaper()` hides `module/exports/define` so it takes the window branch (no jsdom).
+- **ONNX models** (spacingai/glyphreco/vecai) run main-thread, lazy-load, fail-soft → `{}`. Don't assume they're available.
+- **Grid Designer + Metrics editor use FONT UNITS** (x 0..1000, y −200..800), not pixels; `gdView`/`mxView` are separate zoom/pan states.
+- **`mxDrag` is mode-tagged** (pan/shape/scale/lsb/adv/obscen/obhw): mousedown sets the mode, onMove checks it, onUp delegates.
+- **`sbSig`** invalidates AI prediction on SHAPE edits only (contour/point/bounds), not position/advance/bake.
+- **`onComposeAccents` never auto-runs** — explicit click, so composed marks are real editable glyphs.
+- **`demoFont`** (per-font, Testing-tab checkbox) controls whether `fillEmptyGlyphs` stamps the placeholder on export.
+
+---
+
+## 11. Variable fonts (the open follow-up, pro)
+
+Masters exist as data (`project.masters[]` + per-glyph `layers[masterId].contours`; `glyphset.addMaster`). `shared/varCompat.js` checks interpolation compatibility (`report`) and aligns start points/rotation (`matchPoints` — rotates start position only; the user reconciles point-count mismatches). **A single-file fvar/gvar variable font is NOT produced yet** — today the "Variable" export validates compatibility, writes a `-variable-report.txt`, and exports each master as a separate file. To finish: extend `fontEngine.buildFont` for multi-master fvar/gvar, write gvar binary in `ttfWriter.js`, rewire the export loop in main.js, flip the `exportVariable` gate.
+
+## 12. Next steps
+
+- Single-file variable (fvar/gvar) TTF.
+- WOFF2 export; inject the kern table into the TTF path too.
+- Add Turkish **ş ğ ı İ** to the charset (they have no slot today, so accent-compose can't make them).
+- Optionally: auto-compose accents in the PANEL grid (not just on the button); a "copy width/centre to all" action in the optical-centre tab; per-side AI asymmetry.
+- The user often **can't test interactively** — verify changes via headless-Chrome renders of the actual exported `.otf` / real-glyph mocks before handing off, and keep the build cache-busted (`?v=` + `#buildTag`) every install.

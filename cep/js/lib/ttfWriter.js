@@ -13,12 +13,57 @@ function reverse(c) {
   var pts = c.points.slice().reverse().map(function (p) { return { x: p.x, y: p.y, handleIn: p.handleOut ? { x: p.handleOut.x, y: p.handleOut.y } : null, handleOut: p.handleIn ? { x: p.handleIn.x, y: p.handleIn.y } : null }; });
   return { closed: c.closed, points: pts };
 }
+// Flatten a contour (incl. bezier curves) to a dense polyline so the nesting test
+// follows the real outline, not just anchors — anchor-only polygons sit INSIDE a
+// curved contour and made round counters (O, Q) miss nesting and fill solid.
+function flattenContour(c) {
+  var pts = c.points, n = pts.length, out = [];
+  for (var i = 0; i < n; i++) {
+    var a = pts[i], b = pts[(i + 1) % n];
+    out.push({ x: a.x, y: a.y });
+    if (a.handleOut || b.handleIn) {
+      var c1 = a.handleOut || a, c2 = b.handleIn || b, STEPS = 8;
+      for (var s = 1; s < STEPS; s++) {
+        var t = s / STEPS, u = 1 - t;
+        out.push({
+          x: u * u * u * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * b.x,
+          y: u * u * u * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * b.y
+        });
+      }
+    }
+  }
+  return out;
+}
+// A point guaranteed inside the polygon (midpoint of the widest mid-height interior
+// span). A boundary anchor — or a big outline's centre — can fall inside a small
+// nested contour and flip its winding; a true interior point + the area guard below
+// avoid that. Robust for many-counter art and curved counters.
+function interiorPoint(poly) {
+  var ymin = Infinity, ymax = -Infinity;
+  for (var i = 0; i < poly.length; i++) { var y0 = poly[i].y; if (y0 < ymin) ymin = y0; if (y0 > ymax) ymax = y0; }
+  var y = (ymin + ymax) / 2, xs = [];
+  for (var a = 0, b = poly.length - 1; a < poly.length; b = a++) {
+    var yi = poly[a].y, yj = poly[b].y;
+    if ((yi > y) !== (yj > y)) xs.push((poly[b].x - poly[a].x) * (y - yi) / (yj - yi) + poly[a].x);
+  }
+  xs.sort(function (p, q) { return p - q; });
+  var bx = null, bw = -1;
+  for (var k = 0; k + 1 < xs.length; k += 2) { var w = xs[k + 1] - xs[k]; if (w > bw) { bw = w; bx = (xs[k] + xs[k + 1]) / 2; } }
+  if (bx !== null) return { x: bx, y: y };
+  var cx = 0, cy = 0; for (var m = 0; m < poly.length; m++) { cx += poly[m].x; cy += poly[m].y; }
+  return { x: cx / poly.length, y: cy / poly.length };
+}
 function normalizeWinding(contours) {
-  var polys = contours.map(function (c) { return c.points; });
+  var polys = contours.map(flattenContour);   // follow the curves, not just anchors
+  var areas = polys.map(function (p) { return Math.abs(signedArea(p)); });
+  var pts = polys.map(function (p) { return p.length >= 3 ? interiorPoint(p) : null; });
   return contours.map(function (c, i) {
-    if (c.points.length < 3) return c;
-    var s = c.points[0], depth = 0;
-    for (var j = 0; j < contours.length; j++) { if (j === i || contours[j].points.length < 3) continue; if (pointInPoly(s.x, s.y, polys[j])) depth++; }
+    if (c.points.length < 3 || !pts[i]) return c;
+    var ai = areas[i], pi = pts[i], depth = 0;
+    for (var j = 0; j < contours.length; j++) {
+      if (j === i || contours[j].points.length < 3) continue;
+      if (areas[j] > ai && pointInPoly(pi.x, pi.y, polys[j])) depth++;   // only strictly-bigger enclosers
+    }
     var wantCCW = depth % 2 === 0;
     return (signedArea(c.points) > 0) === wantCCW ? c : reverse(c);
   });
@@ -212,7 +257,9 @@ function buildGlyfFont(project, metadata, masterId) {
   var list = [{ name: '.notdef', unicode: 0, adv: Math.round(upm * 0.5), contours: [] }];
   for (var i = 0; i < project.glyphs.length; i++) {
     var g = project.glyphs[i], layer = g.layers && g.layers[masterId];
-    var ctrs = (layer && layer.contours) ? normalizeWinding(layer.contours) : [];
+    // preWound (union-baked placeholder): emit verbatim — its counters are stroke-enclosed
+    // and normalizeWinding's depth heuristic would fill them solid. See shared/placeholder.js.
+    var ctrs = (layer && layer.contours) ? (layer.preWound ? layer.contours : normalizeWinding(layer.contours)) : [];
     var tt = ctrs.map(function (c) { return contourToTT(c, tol); }).filter(function (a) { return a.length > 0; });
     list.push({ name: g.name || ('uni' + (g.unicode || 0).toString(16)), unicode: g.unicode || 0, adv: Math.round(g.advanceWidth != null ? g.advanceWidth : upm * 0.6), contours: tt });
   }
@@ -270,12 +317,16 @@ function buildGlyfFont(project, metadata, masterId) {
   var cmapBytes = cmap.b;
 
   // ---- head ----
+  // style flags shared by head.macStyle and OS/2.fsSelection (Bold masters previously
+  // shipped as weight 400 + REGULAR, so apps couldn't tell the styles apart)
+  var styleItalic = /italic|oblique/i.test(metadata.styleName || '');
+  var styleBold = (metadata.weightClass || 400) >= 600 || /bold/i.test(metadata.styleName || '');
   var head = new Writer();
   head.u32(0x00010000).u32(0x00010000).u32(0); // version, fontRevision, checkSumAdjustment(later)
   head.u32(0x5F0F3CF5).u16(0x000B).u16(upm);
   head.u32(0).u32(0).u32(0).u32(0); // created (8), modified (8)
   head.i16(built.bounds.xMin).i16(built.bounds.yMin).i16(built.bounds.xMax).i16(built.bounds.yMax);
-  head.u16(metadata.styleName && /italic/i.test(metadata.styleName) ? 0x0002 : 0); // macStyle
+  head.u16((styleBold ? 0x0001 : 0) | (styleItalic ? 0x0002 : 0)); // macStyle: bit0 bold, bit1 italic
   head.u16(8); // lowestRecPPEM
   head.i16(2).i16(1).i16(0); // fontDirectionHint, indexToLocFormat=1(long), glyphDataFormat
   var headBytes = head.b;
@@ -317,7 +368,7 @@ function buildGlyfFont(project, metadata, masterId) {
   os2.bytes([2, 0, 6, 3, 0, 0, 0, 0, 0, 0]); // panose (10)
   os2.u32(0).u32(0).u32(0).u32(0); // ulUnicodeRange1-4
   os2.tag('RNTP'); // achVendID
-  os2.u16(/italic/i.test(metadata.styleName || '') ? 0x01 : 0x40); // fsSelection
+  os2.u16(((styleItalic ? 0x01 : 0) | (styleBold ? 0x20 : 0)) || 0x40); // fsSelection: ITALIC|BOLD, else REGULAR
   os2.u16(firstCp).u16(lastCp);
   os2.i16(asc).i16(desc).i16(Math.round(upm * 0.09)); // sTypoAscender/Descender/LineGap
   os2.u16(asc).u16(Math.abs(desc)); // usWinAscent/Descent
@@ -341,6 +392,14 @@ function buildGlyfFont(project, metadata, masterId) {
   if (metadata.copyright) records.push([0, metadata.copyright]);
   if (metadata.license) records.push([13, metadata.license]);
   if (metadata.manufacturer) records.push([8, metadata.manufacturer]);
+  // signature-panel parity with the OTF path (applyNames writes these on OTF)
+  if (metadata.trademark) records.push([7, metadata.trademark]);
+  if (metadata.description) records.push([10, metadata.description]);
+  if (metadata.vendorURL) records.push([11, metadata.vendorURL]);
+  if (metadata.designerURL) records.push([12, metadata.designerURL]);
+  if (metadata.licenseURL) records.push([14, metadata.licenseURL]);
+  records.push([16, fam]); records.push([17, sty]);   // preferredFamily/Subfamily
+  if (metadata.sampleText) records.push([19, metadata.sampleText]);
   if (vAxes) for (var vni = 0; vni < vAxes.length; vni++) records.push([vAxes[vni].nameID, vAxes[vni].name]); // axis names for fvar/STAT
   records.sort(function (a, b) { return a[0] - b[0]; });
   var nameHdr = new Writer(); nameHdr.u16(0).u16(records.length).u16(6 + 12 * records.length);

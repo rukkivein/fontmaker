@@ -93,7 +93,13 @@
 
     <!-- settings heading -->
     <div class="rune-sec">
-      <div class="hword">settings<span class="dot">.</span></div>
+      <div class="rune-sec-top">
+        <div class="hword">settings<span class="dot">.</span></div>
+        <div id="modeToggle" class="mode-toggle">
+          <button id="modeBasic" class="mode-btn active" type="button">Basic</button>
+          <button id="modeAdv" class="mode-btn" type="button">Advanced</button>
+        </div>
+      </div>
       <div class="sec-desc">Customize detailed font generation settings, including multilingual support, grid structures, and other advanced options.</div>
       <div class="ul"></div>
     </div>
@@ -113,10 +119,10 @@
 
         <div class="rune-actions">
           <button id="nf-imgimport" class="rune-btn outline nf-imgimport" title="Import 1–4 reference sheets (numbers / letters / symbols) — auto-trace each glyph and auto-fill the font">⊕ Image Import — build from sheets</button>
-          <button id="nf-opentpl" class="rune-btn outline">Open Template</button>
-          <button id="nf-importtpl" class="rune-btn outline">Import from Template</button>
-          <button id="nf-import" class="rune-btn outline">Import Your Project</button>
-          <button id="nf-create" class="rune-btn blue">Start Creating</button>
+          <button id="nf-import" class="rune-btn outline" title="Open a .runetype project or an existing .otf/.ttf font to edit">Import File</button>
+          <button id="nf-create" class="rune-btn outline adv-only" title="Start the workspace and draw every glyph by hand">Draw Manually</button>
+          <button id="nf-opentpl" class="rune-btn blue-outline" title="Create an Illustrator template (one artboard per master) to draw the glyphs in">Create Template</button>
+          <button id="nf-importtpl" class="rune-btn blue" title="Read a drawn template back and start the font from it">Start from Template</button>
         </div>
       </div>
 
@@ -126,6 +132,7 @@
             <button id="countryBtn" class="country-btn" type="button"><span>Pick a country → auto-select its sets…</span><i class="dd-caret">▾</i></button>
             <div id="countryList" class="country-list hidden"></div>
           </div>
+          <label id="onlyUpperWrap" class="only-upper hidden" title="Build only UPPERCASE letters for the whole project."><input id="onlyUpper" type="checkbox" /> Only Uppercase</label>
         </div>
         <div id="rune-list" class="rune-list"></div>
       </div>
@@ -149,31 +156,38 @@
         <button class="w-stab" data-sec="save">save<span class="tdot">.</span></button>
       </div>
       <span class="gd-preset-caret w-msel"><select id="w-masterSel" class="gd-presets" title="Active master"></select></span>
+      <span id="buildTag" class="w-build" title="Loaded panel build. It changes on every install — if it doesn't change after you reopen the panel, the panel is still running cached code (close Illustrator fully and reopen).">·</span>
     </header>
 
     <div class="w-body">
       <!-- ===== glyphs. — assign drawn vectors to glyph slots, nothing else ===== -->
       <div id="sec-glyphs" class="w-left">
-        <div class="w-glyphrow">
-          <div id="w-filters" class="w-filters"></div>
+        <!-- Row 1: search + alternate + ligature — level with the right-pane toolbar -->
+        <div class="w-grow w-row1">
+          <button id="openTplBtn" class="rune-btn blue w-cbtn" title="Open the current font in Illustrator as an editable template — every glyph in a box, pre-filled with its current drawing. Edit, then Import Template.">Open Template</button>
+          <button id="importTplBtn" class="rune-btn blue w-cbtn" title="Read the open template sheet back into the font — every box returns to its glyph by name.">Import Template</button>
+          <span class="w-isep"></span>
+          <button id="altBtn" class="rune-btn outline w-cbtn">+ Alternate</button>
+          <input id="altChip" class="w-chip w-chip-in" type="text" maxlength="2" placeholder="A" />
+          <span class="w-isep"></span>
+          <button id="ligBtn" class="rune-btn outline w-cbtn">+ Ligature</button>
+          <span class="w-ligwrap"><input id="ligInput" class="w-chip w-chip-in w-ligin" type="text" placeholder="fi" maxlength="4" /><span id="ligPrev" class="w-ligprev"></span></span>
         </div>
-        <div class="ul ul-sm ul-o1"></div>
-        <div class="w-searchrow">
-          <button id="openInAi" class="w-import" disabled>Import Glyph to Illustrator</button>
-          <input id="glyphSearch" class="w-search" type="text" placeholder="Search Glyph" spellcheck="false" />
+        <div class="w-hsep"></div>
+        <!-- Row 2: alternate & ligature template + auto accents -->
+        <div class="w-grow w-row2">
+          <span class="w-rlbl">Alt &amp; Lig Template:</span>
+          <button id="altLigTplBtn" class="rune-btn blue w-cbtn" title="Open an Illustrator template with a box for every alternate &amp; ligature — draw them, then Import">Create</button>
+          <button id="altLigImportBtn" class="rune-btn blue w-cbtn" title="Read the drawn alternates &amp; ligatures back from the open template into their glyphs">Import</button>
+          <span class="w-modspacer"></span>
+          <span class="w-rlbl">Accent Template:</span>
+          <button id="accentTplBtn" class="rune-btn blue w-cbtn" title="Open an Illustrator template with a box for every diacritic mark (´ ` ¨ ˆ ˜ ˚ ¸ …) — no letters, just the marks. Draw them, then Import.">Create</button>
+          <button id="accentImportBtn" class="rune-btn blue w-cbtn" title="Read the drawn marks back and build every accented letter (À Á Ç Ñ Š …) from your base letters + marks.">Import</button>
         </div>
-        <button id="imgImportBtn" class="w-import w-imgimport" title="Import 1–4 reference sheets (numbers / letters / symbols) — Illustrator Image Trace + auto-fill the grid">⊕ Image Import — trace sheets &amp; auto-fill</button>
+        <div class="w-hsep w-hsep-b"></div>
+        <div id="w-filters" class="w-filters"></div>
+        <button id="imgImportBtn" class="w-import w-imgimport" title="Import 1–4 reference sheets — auto-trace + auto-fill the grid">⊕ Image Import</button>
         <div class="w-gridwrap"><div id="grid" class="grid"></div></div>
-        <div class="w-modrow">
-          <button id="altBtn" class="rune-btn outline sm2">+ Alternate</button>
-          <input id="altChip" class="w-chip w-chip-in" type="text" maxlength="2" />
-          <button id="ligBtn" class="rune-btn outline sm2">+ Ligature</button>
-          <input id="ligInput" class="w-chip w-chip-in" type="text" placeholder="fi" maxlength="4" />
-          <button id="accentBtn" class="rune-btn outline sm2" title="Auto-compose accented glyphs (é, č, ñ…) from base letters + drawn marks">+ Accents</button>
-          <button id="genMarksBtn" class="rune-btn outline sm2" title="Make the diacritic mark glyphs (´ ` ¨ ˜ ˚ ˆ ˇ ¯ ¸…) ONCE from your existing shapes (apostrophe / period / hyphen / comma / O) — editable glyphs you can refine; +Accents then uses them. Won't overwrite marks you've drawn.">✦ Make Marks</button>
-          <button id="altLigTplBtn" class="rune-btn outline sm2" title="Open an Illustrator template with a box for every alternate &amp; ligature (same cell height as the main template; ligatures get wider boxes) — draw them, then Import Alt/Lig">⊞ Alt/Lig Template</button>
-          <button id="altLigImportBtn" class="rune-btn outline sm2" title="Read the drawn alternates &amp; ligatures back from the open template into their glyphs">Import Alt/Lig</button>
-        </div>
         <div id="assignWrap" class="w-assign">
           <span id="assignChip" class="w-assignchip"></span>
           <button id="assignBtn" class="w-assignbtn" disabled>Assign Shape</button>
@@ -183,38 +197,44 @@
       <!-- ===== modification. — kerning & metrics; only the placed glyphs ===== -->
       <div id="sec-mod" class="w-left hidden">
         <div class="w-modauto">
-          <button id="optimizeBtn" class="rune-btn blue sm2" title="Optimize spacing &amp; kerning — sets the blue (LSB) and red (advance) lines + optical pair kerning. Never resizes a glyph.">Optimize</button>
-          <button id="autoKern" class="rune-btn outline sm2" title="Bake optical pair kerning into the font's kern table">Auto Kern</button>
-          <button id="liveTestBtn" class="rune-btn outline sm2" title="Open a floating Live Test window — type a word and watch your spacing/kerning changes update live while you edit.">⊞ Live Test</button>
+          <button id="aiAnalyze" class="rune-btn outline sm2 adv-only" title="A built-in assistant (offline): scans your glyphs and flags spacing / height / coverage issues, with a suggested next step. Opens in an overlay.">Analyze</button>
+          <button id="optimizeBtn" class="rune-btn blue sm2" title="One-click optimise: sets the Metric ⟷ Optical dial to a comfortable open default and bakes it — real sidebearings + optical pair kerning. Never resizes a glyph.">Optimize</button>
+          <button id="composeAccentsBtn" class="rune-btn blue sm2" title="Build every accented letter (À Á é ê ç ñ ö ü …) from your drawn base letters, with the diacritic marks auto-synthesized from your own shapes. They appear in the grid and export as real letters — click this so undrawn accent slots aren't filled with the placeholder logo.">+ Accents</button>
+          <span class="w-modspacer"></span>
+          <button id="liveTestBtn" class="rune-btn outline sm2 adv-only" title="Open the Mini Test — type a word and watch your spacing/kerning update live.">⊞ Mini Test</button>
         </div>
         <div class="w-corr">
+          <!-- Pipeline: ham kutu → AI Optimizasyon (bearing) → AI Optik (kern) → Tracking -->
           <div class="w-corr-row">
-            <span class="w-corr-lbl" title="Standard correction — every glyph's side bearings set to the X value (each letter's bearings averaged from Arial + Times New Roman). &gt;100% widens, &lt;100% tightens; at 0 the blue/red lines hug the ink. Never uses your font's own values; never resizes.">Standard</span>
-            <input id="refSpace" class="gd-slider wctl" type="range" min="0" max="200" value="100" />
-            <span id="refSpaceVal" class="w-refval">100%</span>
-          </div>
-          <div class="w-corr-row">
-            <span class="w-corr-lbl" title="Optical correction — nudges each glyph horizontally toward its ink density (e.g. C is heavy on the left → shifts left), within the Standard bearings. The blue/red lines stay put; horizontal only; never resizes.">Optical</span>
-            <input id="optical" class="gd-slider wctl" type="range" min="0" max="100" value="0" />
-            <span id="opticalVal" class="w-refval">0%</span>
-          </div>
-          <div class="w-corr-row">
-            <span class="w-corr-lbl" title="Width of the space character, as a % of the em. Saved into the font.">Space</span>
+            <span class="w-corr-lbl" title="Boşluk (space) karakterinin genişliği — em'in %'si. Fonta kaydedilir.">Space</span>
             <input id="m-space" class="gd-slider wctl" type="range" min="0" max="80" value="25" />
             <span id="mSpaceVal" class="w-refval">25%</span>
           </div>
-        </div>
-        <div class="w-exp">
-          <div class="w-exp-head">experimental optimisation<span class="dot">.</span></div>
           <div class="w-corr-row">
-            <span class="w-corr-lbl" title="Experimental optical method — balances each glyph by its SILHOUETTE profile (outer edges across heights) instead of its mass. An alternative to Optical; stacks within the Standard bearings. Horizontal only; never resizes.">Profile</span>
-            <input id="expProfile" class="gd-slider wctl" type="range" min="0" max="100" value="0" />
-            <span id="expProfileVal" class="w-refval">0%</span>
+            <span class="w-corr-lbl" title="AI Optimizasyon (bearing) — eğittiğimiz modelin gerçek fontlardan öğrendiği bearing bilgisiyle, BU FONTUN şekillerini okuyup her harfe optik kenar-payı verir: ince harf (I) çok daralır, geniş harf (W) az — eşit/optik daraltma. 0 = template kutusu (ham, advance = kutu boyutu), 100 = AI bearing. Önce 'Optimize et'e bas.">AI Optimizasyon</span>
+            <input id="aiOptic" class="gd-slider wctl" type="range" min="0" max="150" value="0" />
+            <span id="aiOpticVal" class="w-refval">0%</span>
           </div>
-          <div class="w-corr-row w-airow">
-            <button id="aiAnalyze" class="rune-btn outline sm2" title="A small built-in assistant (no internet, no API): scans your glyphs and flags spacing / height / coverage issues, with a suggested next step.">✦ Analyze</button>
+          <div class="w-corr-row w-vk-row">
+            <button id="aiOptimizeBtn" class="rune-btn blue sm2" title="GÜNCEL fontun şekillerini eğittiğimiz modelle okur: her harfe optik bearing + istisna kern'leri hesaplar, iki slider'ı 100 yapıp sonucu gösterir. Birkaç saniye sürer.">Optimize et (analiz)</button>
           </div>
-          <div id="aiReport" class="w-ai"></div>
+          <div class="w-corr-row">
+            <span class="w-corr-lbl" title="AI Optik — bearing üstüne, BU FONTA ÖZEL optik optimizasyon: eğittiğimiz paragraf modeli karar vererek harf çiftleri arasındaki gerçek optik kern'i (A-V, T-o…) uygular. Önce 'Optimize et'e bas. 0 = kern yok, 100 = tam optik kern.">AI Optik</span>
+            <input id="aiAvg" class="gd-slider wctl" type="range" min="0" max="150" value="0" />
+            <span id="aiAvgVal" class="w-refval">0%</span>
+          </div>
+          <div class="w-corr-row">
+            <span class="w-corr-lbl" title="Tracking — EN SON uygulanır: tüm fontun LSB+ADV'sini iki yandan EŞİT miktarda kısar/açar (uniform harf-aralığı). + açar, − sıkar.">Tracking</span>
+            <input id="moTrack" class="gd-slider wctl" type="range" min="-50" max="50" value="0" />
+            <span id="moTrackVal" class="w-refval">0%</span>
+          </div>
+        </div>
+        <!-- Analyzer output as a floating overlay (doesn't take inline space) -->
+        <div id="aiModal" class="w-ai-overlay hidden">
+          <div class="w-ai-card">
+            <div class="w-ai-head">Analyze<button id="aiModalX" class="rt-modal-x" title="Close">✕</button></div>
+            <div id="aiReport" class="w-ai"></div>
+          </div>
         </div>
         <div class="ul ul-sm ul-o2"></div>
         <div class="w-gridwrap"><div id="modGrid" class="grid"></div></div>
@@ -231,7 +251,8 @@
           <label>Size<input id="t-size" class="gd-slider wctl" type="range" min="10" max="140" value="40" /></label>
           <label>Track<input id="t-track" class="gd-slider wctl" type="range" min="-40" max="120" value="0" /></label>
           <label title="Width of the space character, as a % of the em. Saved into the font.">Space<input id="t-space" class="gd-slider wctl" type="range" min="0" max="80" value="25" /></label>
-          <label>Optical<select id="t-kern" class="w-kern"><option value="optical">Optical</option><option value="metric">Metric</option></select></label>
+          <label title="Kerning is computed LIVE from your outlines and is EXACTLY what the exported .otf ships — recomputed on every edit so it can never go stale. 'Stored table' just inspects the last baked pair-kern table (not what exports).">Kern<select id="t-kern" class="w-kern"><option value="optical">Live (real)</option><option value="metric">Stored table</option></select></label>
+          <label class="t-ligtog" title="Show your ligatures (fi, fl … and custom ones) where their letters appear in the text."><input id="t-liga" type="checkbox" checked /> Ligatures</label>
           <span class="w-bgdots">
             <i id="bg-w" class="bgdot light" title="White background"></i>
             <i id="bg-b" class="bgdot darkdot on" title="Black background"></i>
@@ -264,6 +285,7 @@
             <button id="openFileBtn" class="rune-btn outline sm2">Open File</button>
           </div>
         </div>
+        <label class="fm-chk sv-demo" title="Fill every glyph you haven't drawn with the RuneType placeholder mark, so the exported font is complete to test/demo."><input id="demoFont" type="checkbox" /> It's a Demo font <span class="muted">— every missing glyph uses the placeholder mark</span></label>
         <div class="sv-export"><button id="exportGo" class="sv-bigbtn">Export to Folder</button></div>
       </div>
 

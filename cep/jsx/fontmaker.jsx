@@ -58,11 +58,18 @@ function fmReadSelection() {
   try {
     if (app.documents.length === 0) return '{"ok":false,"error":"Open a document first"}';
     var doc = app.activeDocument;
+    // Bail on a TEMPLATE sheet (same as fmReadActive). Selecting / copy-pasting many
+    // letters there would make the 1.2s selection poller read + serialize hundreds of
+    // paths every tick and FREEZE Illustrator. The template uses Import, not live select.
+    for (var ti = 0; ti < doc.layers.length; ti++) if (doc.layers[ti].name.indexOf('Template') === 0) return '{"ok":false,"error":"template"}';
     var sel = doc.selection;
     if (!sel || sel.length === 0) return '{"ok":false,"error":"Nothing selected in Illustrator"}';
     var paths = [];
     for (var i = 0; i < sel.length; i++) fmCollect(sel[i], paths);
     if (paths.length === 0) return '{"ok":false,"error":"Selection has no path outlines"}';
+    // Universal freeze guard: never serialize a giant selection (a real shape to Assign
+    // is a handful of paths). Caps the cost in ANY doc, not just templates.
+    if (paths.length > 400) return '{"ok":false,"error":"too many paths selected"}';
     var parts = [];
     for (var k = 0; k < paths.length; k++) parts.push(fmSerializePath(paths[k]));
     return '{"ok":true,"count":' + paths.length + ',"paths":[' + parts.join(',') + ']}';
@@ -206,8 +213,16 @@ var FM_SCALE = 0.25; // points per font unit (per-glyph editing — comfortable 
 // The TEMPLATE sheet uses a much smaller scale: with hundreds of cells the 0.25 sheet
 // was ~8000×5000pt and choked low-RAM machines / the GPU. It's all vector, so a
 // smaller scale loses no quality — it just makes a far lighter document (~2000–3000pt).
-// fmOpenTemplate swaps FM_SCALE to this while building; fmReadTemplate maps back with it.
-var FM_TPL_SCALE = 0.1;
+// fmOpenTemplate swaps FM_SCALE to this while building; fmReadTemplate maps back with it. It's just
+// a pt-per-unit RENDER scale — the sheet is vector, so a smaller value only makes the whole document
+// fewer points/pixels (lighter, snappier); the import maps back with the SAME scale, so nothing about
+// the result changes. Kept compact on purpose.
+var FM_TPL_SCALE = 0.075;  // was 0.12 — smaller pixel footprint (vector, no quality loss)
+// Each template box is the em GRID grown SYMMETRICALLY by FM_TPL_PAD * (grid height) on EVERY side,
+// so the grid + letter sit CENTRED with room all around (overflow welcome). fmReadTemplate insets the
+// box by the same pad to recover the exact grid frame, so baseline/LSB import unchanged. ONE source
+// of truth: box = grid*(1 + 2*FM_TPL_PAD); inset ratio off the box height = FM_TPL_PAD/(1+2*FM_TPL_PAD).
+var FM_TPL_PAD = 0.25;     // was 0.13 — box ~50% bigger than the em grid
 
 function fmColor(g) {
   var c = new RGBColor();
@@ -698,29 +713,51 @@ function fmTemplateCells(sets, M) {
   // (contoursFromArtboard at FM_SCALE) reads drawn letters at the right size. WIDTH
   // may vary per cell (alternates = 1, ligatures wider) — height is constant.
   var AH = (M.ascender - M.descender) * FM_SCALE;
-  var AW = Math.round(AH * 0.81);   // single-letter box width (~13% wider for drawing room)
-  var GAP = Math.round(AH * 0.10);
-  var GAP_IN = Math.round(AH * 0.07);     // TIGHT gap between wrapped rows of the SAME set
-  var GAP_SET = Math.round(AH * 0.34);    // clear gap BETWEEN sets; a new set starts a fresh row
-  var LABEL_BAND = Math.round(AH * 0.22);
+  // The GRID (construction lines + the drawn glyph) keeps its em size and lower-left anchor so the
+  // baseline mapping stays exact (contoursFromArtboard maps off the box's LEFT + BOTTOM only). The
+  // visible BOX FRAME is grown ~26% to the RIGHT and UP for extra drawing room — bigger square, but
+  // the grid + letter stay put. Box left+bottom == grid left+bottom, so contours + advance import
+  // IDENTICALLY; only top+right extend.
+  var GW = Math.round(AH * 1.0);              // GRID (em-square) width per single letter — UNCHANGED
+  var PAD = Math.round(AH * FM_TPL_PAD);      // SYMMETRIC pad each side → box ~26% bigger, grid CENTRED
+  var BH = AH + 2 * PAD;                       // box HEIGHT (grid height + pad top & bottom)
+  var GAP = Math.round(AH * 0.18);            // gap between boxes
+  var GAP_IN = Math.round(AH * 0.14);         // gap between wrapped rows of the SAME set
+  var GAP_SET = Math.round(AH * 0.42);        // clear gap BETWEEN sets
+  var LABEL_BAND = Math.round(AH * 0.24);
   var LABEL_SIZE = Math.round(AH * 0.07);
-  var MAX_ROW_W = 50 * (AW + GAP);        // wrap a row at ~50 single cells wide (variable widths honoured)
+  var MAX_ROW_W = 50 * (GW + 2 * PAD + GAP);  // wrap a row at ~50 single cells wide
   var MARGIN = Math.round(AH * 0.4);
   var cells = [], labels = [], top = -MARGIN;   // content flows top-left, downward
   for (var s = 0; s < sets.length; s++) {
     var set = sets[s], chs = set.chars || set, n = chs.length;
     labels.push({ name: set.name || '', x: MARGIN, y: top, size: LABEL_SIZE }); // caption in the band
-    var rowTop = top - LABEL_BAND, left = MARGIN, rows = 1;
+    var rowTop = top - LABEL_BAND, left = MARGIN, rows = 1;   // rowTop = the BOX top edge
     for (var i = 0; i < n; i++) {
       var sp = fmCellSpec(chs[i]);
-      var cw = Math.round(AW * sp.w);
-      if (left > MARGIN && (left + cw) > (MARGIN + MAX_ROW_W)) { left = MARGIN; rowTop = rowTop - (AH + GAP_IN); rows++; } // wrap
-      cells.push({ ghost: sp.ghost, id: sp.id, left: left, top: rowTop, right: left + cw, bottom: rowTop - AH });
+      var gw = Math.round(GW * sp.w);         // GRID width (em); the box is gw + 2*PAD wide
+      var cw = gw + 2 * PAD;                    // BOX width
+      if (left > MARGIN && (left + cw) > (MARGIN + MAX_ROW_W)) { left = MARGIN; rowTop = rowTop - (BH + GAP_IN); rows++; } // wrap
+      // BOX frame {left,top,right,bottom} (the named cell). GRID frame is PAD inset on every side, so
+      // the grid + glyph sit CENTRED with room all around; import re-derives this frame by insetting.
+      cells.push({ ghost: sp.ghost, id: sp.id,
+                   left: left, top: rowTop, right: left + cw, bottom: rowTop - BH,
+                   gleft: left + PAD, gright: left + PAD + gw, gtop: rowTop - PAD, gbottom: rowTop - PAD - AH });
       left = left + cw + GAP;
     }
-    top = rowTop - AH - GAP_SET;       // drop below the last row of this set + gap
+    top = rowTop - BH - GAP_SET;       // drop below the last (full-height) box of this set + gap
   }
   return { cells: cells, labels: labels, margin: MARGIN };
+}
+// PERF: read a big template cfg from a temp file instead of a multi-MB evalScript
+// string (the panel writes JSON.stringify(cfg) to disk and passes only the path).
+function fmOpenTemplateFile(path) {
+  try {
+    var fl = new File(path);
+    if (!fl.exists) return '{"ok":false,"error":"template payload not found"}';
+    fl.encoding = 'UTF-8'; fl.open('r'); var txt = fl.read(); fl.close();
+    return fmOpenTemplate(txt);
+  } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }
 }
 function fmOpenTemplate(arg) {
   var _savedScale = FM_SCALE; FM_SCALE = FM_TPL_SCALE;   // build the whole sheet at the compact scale
@@ -738,7 +775,14 @@ function fmOpenTemplate(arg) {
     var cR = -1e9, cB = 1e9;
     for (var i = 0; i < cells.length; i++) { var c0 = cells[i]; if (c0.right > cR) cR = c0.right; if (c0.bottom < cB) cB = c0.bottom; }
     var abL = 0, abT = 0, abR = cR + MARGIN, abB = cB - MARGIN;   // top-left corner at the origin
-    var doc = app.documents.add(DocumentColorSpace.RGB, Math.max(50, Math.ceil(abR - abL)), Math.max(50, Math.ceil(abT - abB)));
+    // Create the canvas MUCH bigger than the artboard, then shrink the artboard to hug the content —
+    // the area in between is GRAY pasteboard, so there's a big scratch area all around to draw freely
+    // / overflow into. (Vector + small FM_TPL_SCALE, so this costs nothing.)
+    var _cw = Math.max(50, Math.ceil(abR - abL)), _ch = Math.max(50, Math.ceil(abT - abB));
+    var GRAY = Math.ceil(Math.max(_cw, _ch) * 0.7);   // generous gray border on every side
+    var GMAX = Math.floor((16000 - Math.max(_cw, _ch)) / 2);   // keep the canvas under Illustrator's ~16383pt cap
+    if (GRAY > GMAX) GRAY = GMAX; if (GRAY < 0) GRAY = 0;
+    var doc = app.documents.add(DocumentColorSpace.RGB, _cw + 2 * GRAY, _ch + 2 * GRAY);
     try { doc.artboards[0].artboardRect = [abL, abT, abR, abB]; } catch (eA) {}
     var tpl = doc.layers.add(); tpl.name = 'Template (locked)';
     var art = doc.layers.add(); art.name = 'Artwork'; art.zOrder(ZOrderMethod.BRINGTOFRONT);
@@ -750,9 +794,17 @@ function fmOpenTemplate(arg) {
       var box = tpl.pathItems.rectangle(ce.top, ce.left, ce.right - ce.left, ce.top - ce.bottom);
       box.filled = false; box.stroked = true; box.strokeColor = fmColor(150); box.strokeWidth = 0.5;
       box.name = 'fmcell:' + ce.id;                          // tag the box by glyph id (char code OR glyph name) so Import recovers it
-      fmDrawGrids(tpl, grids, M, ce.left, ce.right, ce.bottom); // baseline / cap / x / sidebearings
+      // grid + ghost + glyph use the CENTRED GRID (em) frame [gleft..gright, gbottom], inset PAD inside
+      // the bigger box, so they sit centred with room all around. Import re-derives this frame by
+      // insetting the box, so the baseline/LSB map exactly (and overflow into the box is welcome).
+      fmDrawGrids(tpl, grids, M, ce.gleft, ce.gright, ce.gbottom); // baseline / cap / x / sidebearings
       var yb = ybounds ? ybounds[ce.id] : null;
-      fmGhost(tpl, ce.ghost, ce.left, ce.right, ce.bottom, M, upm, gcal, yb); // faint target letter(s) to trace
+      var cellArt = cfg.art ? cfg.art[ce.id] : null;
+      // The drawn glyph IS the reference, so only GHOST the empty boxes. Skipping the
+      // ghost on filled cells avoids a textFrame + createOutline() PER drawn glyph —
+      // the single biggest Open-Template cost (createOutline is very expensive).
+      if (cellArt && cellArt.length) fmDrawContours(art, cellArt, ce.gleft, ce.gbottom, M);
+      else fmGhost(tpl, ce.ghost, ce.gleft, ce.gright, ce.gbottom, M, upm, gcal, yb);
     }
     tpl.locked = true;
     doc.activeLayer = art;
@@ -801,15 +853,20 @@ function fmReadTemplate() {
       var bx = boxes[b], id = bx.name.substring(7);  // everything after 'fmcell:' — char code OR glyph name
       if (!id) continue;
       var code = parseInt(id, 10); if (!(code > 0)) code = 0;        // back-compat numeric code for the char template
-      var gb = bx.geometricBounds;                 // [l, t, r, btm] (y-up)
+      var gb = bx.geometricBounds;                 // [l, t, r, btm] (y-up) — the BIG box frame = capture region
       var ps = [];
-      for (var a = 0; a < arts.length; a++) {      // assign by centre-in-box — pure arithmetic, no DOM reads
+      for (var a = 0; a < arts.length; a++) {      // assign by centre-in-box (big box ⇒ overflow welcome)
         var ar = arts[a];
         if (ar.cx >= gb[0] && ar.cx <= gb[2] && ar.cy <= gb[1] && ar.cy >= gb[3]) ps.push(fmSerializePath(ar.p));
       }
       if (!ps.length) continue;
       var idEsc = id.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-      parts.push('{"id":"' + idEsc + '","code":' + code + ',"rect":[' + gb[0] + ',' + gb[1] + ',' + gb[2] + ',' + gb[3] + '],"paths":[' + ps.join(',') + ']}');
+      // MAP off the CENTRED GRID frame, not the box: the box is the grid grown symmetrically by PAD on
+      // every side, so inset by pad = boxHeight * FM_TPL_PAD/(1+2*FM_TPL_PAD) to recover the exact em
+      // frame → baseline + LSB import unchanged, even though the box (and the drawing) is bigger.
+      var pad = (gb[1] - gb[3]) * (FM_TPL_PAD / (1 + 2 * FM_TPL_PAD));
+      var rL = gb[0] + pad, rT = gb[1] - pad, rR = gb[2] - pad, rB = gb[3] + pad;
+      parts.push('{"id":"' + idEsc + '","code":' + code + ',"rect":[' + rL + ',' + rT + ',' + rR + ',' + rB + '],"paths":[' + ps.join(',') + ']}');
     }
     return '{"ok":true,"scale":' + FM_TPL_SCALE + ',"cells":[' + parts.join(',') + ']}';   // template was built at FM_TPL_SCALE
   } catch (e) { return '{"ok":false,"error":"' + String(e).replace(/"/g, '\\"') + '"}'; }

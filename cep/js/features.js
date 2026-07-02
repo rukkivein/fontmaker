@@ -23,7 +23,7 @@ var EDITIONS = {
     alternates: false,                    // + Alternate / + Ligature + per-occurrence swap
     gridPresets: false,                   // only the default grid; no preset menu / Grid pill
     template: false,                      // Fontself-style Open/Import Template sheet
-    charsets: ['latinUpper', 'numbers'],  // New Font sets offered (null = all sets)
+    charsets: ['latinUpper', 'coreText'],  // New Font sets offered (null = all sets)
     emptyGlyphArt: 'bosharf',             // placeholder art assets/<art>.svg for empty cells (null = letter ghost)
   },
   // Paid: the whole tool.

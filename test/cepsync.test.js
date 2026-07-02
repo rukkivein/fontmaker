@@ -41,6 +41,10 @@ ok(read('cep/js/potrace.js') === read('shared/potrace.js'),
    'cep/js/potrace.js matches shared/potrace.js (clean-room tracer)');
 ok(read('cep/js/markgen.js') === read('shared/markgen.js'),
    'cep/js/markgen.js matches shared/markgen.js (diacritic mark synthesis)');
+ok(read('cep/js/optimizer.js') === read('shared/optimizer.js'),
+   'cep/js/optimizer.js matches shared/optimizer.js (spacing/kern engine)');
+ok(read('cep/js/kernvision.js') === read('shared/kernvision.js'),
+   'cep/js/kernvision.js matches shared/kernvision.js (Visual Kern, Track A)');
 ok(read('cep/js/imagetrace.js').indexOf("require('./lib/imagetracer.js')") !== -1,
    'bundled imagetrace requires imagetracerjs via sibling relative path');
 ok(read('cep/js/lib/imagetracer.js') === read('node_modules/imagetracerjs/imagetracer_v1.2.6.js'),

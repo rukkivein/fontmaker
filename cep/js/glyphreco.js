@@ -204,4 +204,4 @@ function cpsInRanges(ranges) {
   return out.length ? out : null;
 }
 
-module.exports = { init, isAvailable, recognizeOne, recognizeSheet, cpsInRanges, IMG };
+module.exports = { init, isAvailable, recognizeOne, recognizeSheet, cpsInRanges, rasterize, IMG, MARGIN };

@@ -23,7 +23,15 @@ function fillEmptyGlyphs(project, masterId, placeholder) {
     if (g.unicode === 32 || g.char === ' ') continue;      // space stays blank
     if (!isEmptyLayer(g, masterId)) continue;              // already drawn — keep it
     g.layers = g.layers || {};
-    g.layers[masterId] = { contours: JSON.parse(JSON.stringify(placeholder.contours)) };
+    // preWound: the placeholder art (the "Rune type" brand mark) is baked as a boolean
+    // UNION (scripts/bake-bosharf.js), so it already carries correct CFF/OTF non-zero
+    // windings (outer CCW, counters CW) — the p/e/R bowls are real reverse-wound holes.
+    // The engine's normalizeWinding RE-DERIVES winding by area-containment depth, but the
+    // grunge mark's counters are enclosed by the COMBINED ink of many overlapping strokes
+    // (no single bigger contour contains them) → depth 0 → it flips them to outer fills and
+    // they render SOLID under non-zero (the user's OTF p/e-filled bug). Flag the layer so the
+    // writers SKIP re-derivation and emit the union's already-correct windings verbatim.
+    g.layers[masterId] = { contours: JSON.parse(JSON.stringify(placeholder.contours)), preWound: true };
     if (placeholder.advanceWidth) g.advanceWidth = placeholder.advanceWidth;
     g.lsbLineX = 0;
     n++;

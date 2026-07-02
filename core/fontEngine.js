@@ -33,6 +33,12 @@ function signedArea(contour) {
   for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i].x * q.y - q.x * p[i].y; }
   return a / 2;
 }
+// shoelace over a flattened [{x,y}] polyline (used for nesting area comparisons)
+function signedAreaPoly(p) {
+  let a = 0;
+  for (let i = 0; i < p.length; i++) { const q = p[(i + 1) % p.length]; a += p[i].x * q.y - q.x * p[i].y; }
+  return a / 2;
+}
 function pointInPolygon(x, y, poly) {
   let inside = false;
   for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
@@ -50,16 +56,63 @@ function reverseContour(c) {
   return { closed: c.closed, points: pts };
 }
 
-// Outer contours CCW, holes CW (CFF/OTF non-zero fill) so counters punch.
+// Flatten a contour (incl. its bezier curves) to a dense polyline. The nesting test
+// MUST follow the real outline: an anchor-only polygon sits INSIDE a curved contour
+// (the curve bulges out between anchors), so a large round counter's sample anchor
+// could fall in that gap, miss its nesting, and FILL SOLID on export (the O/Q bug).
+function flattenContour(c) {
+  const pts = c.points, n = pts.length, out = [];
+  for (let i = 0; i < n; i++) {
+    const a = pts[i], b = pts[(i + 1) % n];
+    out.push({ x: a.x, y: a.y });
+    if (a.handleOut || b.handleIn) {
+      const c1 = a.handleOut || a, c2 = b.handleIn || b, STEPS = 8;
+      for (let s = 1; s < STEPS; s++) {
+        const t = s / STEPS, u = 1 - t;
+        out.push({
+          x: u * u * u * a.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * b.x,
+          y: u * u * u * a.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * b.y,
+        });
+      }
+    }
+  }
+  return out;
+}
+// A point GUARANTEED inside the polygon: the midpoint of the widest interior span on
+// the mid-height scanline. A contour's first ANCHOR (the old sample) sits on the
+// boundary, where the ray cast is degenerate and — worse — for a big outline the anchor
+// or centre can fall inside a SMALL nested contour, inflating its depth and flipping its
+// winding. A true interior point + the area guard below kill that.
+function interiorPoint(poly) {
+  let ymin = Infinity, ymax = -Infinity;
+  for (let i = 0; i < poly.length; i++) { const y = poly[i].y; if (y < ymin) ymin = y; if (y > ymax) ymax = y; }
+  const y = (ymin + ymax) / 2, xs = [];
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const yi = poly[i].y, yj = poly[j].y;
+    if ((yi > y) !== (yj > y)) xs.push((poly[j].x - poly[i].x) * (y - yi) / (yj - yi) + poly[i].x);
+  }
+  xs.sort((a, b) => a - b);
+  let bx = null, bw = -1;
+  for (let k = 0; k + 1 < xs.length; k += 2) { const w = xs[k + 1] - xs[k]; if (w > bw) { bw = w; bx = (xs[k] + xs[k + 1]) / 2; } }
+  if (bx !== null) return { x: bx, y };
+  let cx = 0, cy = 0; for (let i = 0; i < poly.length; i++) { cx += poly[i].x; cy += poly[i].y; }
+  return { x: cx / poly.length, y: cy / poly.length };
+}
+// Outer contours CCW, holes CW (CFF/OTF non-zero fill) so counters punch. Nesting depth
+// counts only STRICTLY BIGGER enclosing contours (a contour can't be inside a smaller
+// one) tested with a true interior point — robust for many-counter art (the brand mark)
+// and curved counters alike.
 function normalizeWinding(contours) {
-  const polys = contours.map(c => c.points);
+  const polys = contours.map(flattenContour);   // follow the curves, not just anchors
+  const areas = polys.map(p => Math.abs(signedAreaPoly(p)));
+  const pts = polys.map(p => p.length >= 3 ? interiorPoint(p) : null);
   return contours.map((c, i) => {
-    if (c.points.length < 3) return c;
-    const sample = c.points[0];
+    if (c.points.length < 3 || !pts[i]) return c;
+    const ai = areas[i], pi = pts[i];
     let depth = 0;
     for (let j = 0; j < contours.length; j++) {
       if (j === i || contours[j].points.length < 3) continue;
-      if (pointInPolygon(sample.x, sample.y, polys[j])) depth++;
+      if (areas[j] > ai && pointInPolygon(pi.x, pi.y, polys[j])) depth++;
     }
     const wantCCW = depth % 2 === 0;
     return (signedArea(c) > 0) === wantCCW ? c : reverseContour(c);
@@ -69,7 +122,12 @@ function normalizeWinding(contours) {
 function glyphToPath(glyph, masterId) {
   const path = new opentype.Path();
   const layer = glyph.layers && glyph.layers[masterId];
-  if (layer && layer.contours) for (const c of normalizeWinding(layer.contours)) contourToCommands(path, c);
+  // preWound layers (the union-baked placeholder mark) already carry correct non-zero
+  // windings; re-deriving them would fill the mark's many-stroke-enclosed counters solid.
+  if (layer && layer.contours) {
+    const ctrs = layer.preWound ? layer.contours : normalizeWinding(layer.contours);
+    for (const c of ctrs) contourToCommands(path, c);
+  }
   return path;
 }
 

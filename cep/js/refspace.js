@@ -163,4 +163,4 @@ function applyRefSpacing(project, mid, targets, minAdvance, opticalAmount, profi
   return n;
 }
 
-module.exports = { spacingTargets, applyRefSpacing, translateX, bezBounds, areaCentroidX, profileMidX };
+module.exports = { spacingTargets, applyRefSpacing, translateX, bezBounds, flattenContour, areaCentroidX, profileMidX };

@@ -8,12 +8,13 @@
     "dev": "electron . --dev",
     "cep:sync": "node scripts/sync-cep.js",
     "cep:install": "node scripts/sync-cep.js && node scripts/install-cep.js",
-    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js && node test/bridge.test.js && node test/imgimport.test.js && node test/charsets.test.js && node test/dna.test.js && node test/features.test.js && node test/placeholder.test.js && node test/bosharf-export.test.js && node test/refspace.test.js && node test/weightgen.test.js && node test/cepsync.test.js"
+    "test": "node test/structural.test.mjs && node test/alternates.test.mjs && node test/export.test.js && node test/winding.test.js && node test/gsub.test.js && node test/aiimport.test.js && node test/bridge.test.js && node test/imgimport.test.js && node test/charsets.test.js && node test/dna.test.js && node test/features.test.js && node test/placeholder.test.js && node test/accents.test.js && node test/bosharf-export.test.js && node test/refspace.test.js && node test/optbake.test.js && node test/kerninject.test.js && node test/spacing-parity.test.js && node test/kernvision.test.js && node test/stripparity.test.js && node test/unite.test.js && node test/weightgen.test.js && node test/cepsync.test.js"
   },
   "author": "",
   "license": "MIT",
   "devDependencies": {
-    "electron": "^37.10.3"
+    "electron": "^37.10.3",
+    "paper-jsdom": "0.12.18"
   },
   "dependencies": {
     "chokidar": "^3.6.0",

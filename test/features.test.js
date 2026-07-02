@@ -26,8 +26,8 @@ ok(EDITIONS.alpha.exportOtf === true, 'alpha set keeps OTF export on (core deliv
 ok(Array.isArray(EDITIONS.alpha.charsets) &&
    EDITIONS.alpha.charsets.length === 2 &&
    EDITIONS.alpha.charsets.indexOf('latinUpper') >= 0 &&
-   EDITIONS.alpha.charsets.indexOf('numbers') >= 0,
-   'alpha set charsets are exactly [latinUpper, numbers]');
+   EDITIONS.alpha.charsets.indexOf('coreText') >= 0,
+   'alpha set charsets are exactly [latinUpper, coreText]');
 ok(EDITIONS.alpha.emptyGlyphArt === 'bosharf', 'alpha set empty-cell art is bosharf');
 
 console.log(fails ? `\n${fails} feature test(s) failed` : '\nAll edition/feature gates verified');

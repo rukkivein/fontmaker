@@ -58,10 +58,12 @@ function deriveDecompose(codepoints) {
 const LATIN1 = []; for (let c = 0x00C0; c <= 0x00FF; c++) if (c !== 0x00D7 && c !== 0x00F7) LATIN1.push(c);
 const CE = [
   0x0100, 0x0101, 0x0102, 0x0103, 0x0104, 0x0105, 0x0106, 0x0107, 0x010C, 0x010D, 0x010E, 0x010F,
-  0x0112, 0x0113, 0x0116, 0x0117, 0x0118, 0x0119, 0x011A, 0x011B, 0x011E, 0x011F, 0x0143, 0x0144,
+  0x0112, 0x0113, 0x0116, 0x0117, 0x0118, 0x0119, 0x011A, 0x011B, 0x011E, 0x011F, 0x0130, 0x0143, 0x0144,
   0x0147, 0x0148, 0x0150, 0x0151, 0x0154, 0x0155, 0x0158, 0x0159, 0x015A, 0x015B, 0x0160, 0x0161,
   0x015E, 0x015F, 0x0164, 0x0165, 0x016E, 0x016F, 0x0170, 0x0171, 0x0179, 0x017A, 0x017B, 0x017C, 0x017D, 0x017E,
 ];
+// 0x0130 = İ (Turkish dotted capital I): NFD = I + U+0307 dotaccent, fully composable.
+// ı (U+0131) has NO decomposition — NFD-derived by design, it stays a draw-by-hand letter.
 const DECOMPOSE = deriveDecompose(LATIN1.concat(CE));
 
 function cloneContours(contours) {
@@ -103,6 +105,13 @@ function composeAccent(project, targetChar, masterId, opts) {
   if (!dec) return { ok: false, reason: 'not-decomposable' };
   const target = findByChar(project, targetChar);
   if (!target) return { ok: false, reason: 'no-target-slot' };
+  // HAND-DRAWN accented glyphs are sacred: only overwrite a drawn target when we composed
+  // it ourselves (composedFrom marker → keep refreshing it) or the caller explicitly forces.
+  // Without this, the implicit composeAll runs (Auto Marks, marks-template import) silently
+  // destroyed a user's hand-drawn ş/ğ/ö artwork.
+  if (drawn(layerOf(project, target, masterId)) && !target.composedFrom && !opts.force) {
+    return { ok: false, reason: 'target-drawn' };
+  }
   const baseChar = String.fromCodePoint(dec.base);
   const baseG = findByChar(project, baseChar);
   if (!baseG || !drawn(layerOf(project, baseG, masterId))) return { ok: false, reason: 'base-not-drawn:' + baseChar };
