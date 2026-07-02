@@ -105,7 +105,23 @@ The panel is assembled from three tiers; understanding this is essential.
 
 ---
 
-## 9. This session (2026-06-26) — what changed, with anchors
+## 9a. Session 2026-07-02 — verified audit: 17 spacing/kern/export fixes
+
+A multi-agent audit (findings adversarially verified) over the bearing/kerning pipeline. All fixes committed (`13d3d43`), tests green (23 suites incl. new `accents.test.js`), installed (build `mr2qzeh8`).
+
+1. **kernai was DEAD** — `kernai.predict` never seeded `_root` (unlike spacingai), so `init(null)` 404'd and `paragraph.onnx` NEVER loaded; every AI-kern path silently fell back to unseeded kernvision. Fixed: `predict(f, mid, filled, {root: ROOT})` self-seed + all 3 call sites. **The paragraph model is live for the first time.**
+2. **ensureAIOpt** — in-flight promise guard (`f._aiOptPending`), `seatTo` now `recordBaked`s the scratch seating (a concurrent `captureBaseline` can no longer adopt it into `f.spaceBase` = permanent corruption), `done()` discards a stale-shape analysis, continuations check `curFont()`.
+3. **applyAIOptic** — no-ops while an analysis is in flight; after a `.runetype` reload it re-analyzes instead of re-seating to box; kern-table OWNERSHIP (`f.aiKernOwned`, persisted): a Tracking nudge no longer wipes a Visual-Kern or reloaded kern table; on commit it re-derives composed accents from the re-baked base (é/ç/ş track e/c/s).
+4. **kernvision** — row-disjoint pairs (period vs apostrophe) get NO kern (was: max tightening); all-collided font (raw template import) synthesizes an air-scale target instead of 0; aggressiveness scaling can't ship a collision (post-scale bump); a bad Track-B seed window falls back to the full search. `whiteArea` now returns `both`.
+5. **accentCompose** — hand-drawn accented glyphs are protected (`target-drawn` refusal unless `opts.force`; self-composed glyphs keep refreshing); **İ U+0130 composable** (added to CE list; ı U+0131 stays draw-by-hand by design); `glyphset.setGlyphContours` clears `composedFrom` (+`kind`) so a hand edit stops future auto-overwrites; the live-sync poll now skips unchanged reads BEFORE writing.
+6. **Template re-import** keeps existing advances (was: every glyph reset to ink+60, wiping raw-box/AI spacing).
+7. **Export** — TTF now gets the kern table (same splice as OTF; pinned in kerninject.test.js); blank encoded slots are STRIPPED (undrawn letters fall to the OS face exactly like the tester; space/NBSP keep their advance); kern table computed per EXPORTED master (`exportKernTable(f, mid)` + per-mid `__target__` cache — Bold no longer ships Regular's kern); optical-bearing seating runs only for the built master (last-master-wins fixed); OTF/TTF name parity (trademark/URLs/description/sampleText/preferred 16/17) + Bold `usWeightClass`/`fsSelection` (+TTF `macStyle`; opentype.js ignores the head override on OTF — verified).
+8. **Tester** — the space glyph ships in the preview font (Space slider WYSIWYG).
+9. **Legacy Optimize button** rewired to the 3-slider pipeline (`onAIOptimize`); `applyMetricOptical` bails when its removed dial sliders are absent (was: destructive all-zero "reset to metric").
+
+KNOWN-GAP (documented, low): spacingai rasterizes live contours with evenodd — overlapping not-yet-united hand shapes can punch false holes into the model input (training rasters come from compiled fonts). Fix would be uniting before rasterize; deferred.
+
+## 9. Session 2026-06-26 — what changed, with anchors
 
 All deployed; tests green; build stamp current.
 
@@ -145,7 +161,9 @@ Masters exist as data (`project.masters[]` + per-glyph `layers[masterId].contour
 ## 12. Next steps
 
 - Single-file variable (fvar/gvar) TTF.
-- WOFF2 export; inject the kern table into the TTF path too.
-- Add Turkish **ş ğ ı İ** to the charset (they have no slot today, so accent-compose can't make them).
+- WOFF2 export. (~~kern into TTF~~ DONE 2026-07-02.)
+- ~~Turkish ş ğ ı İ~~ DONE: slots via `latinCentral` (full Ext-A); İ composes; ı = draw by hand (no NFD).
+- ML training campaign for "flawless bearing+kerning" (order matters — see the 2026-07-02 audit's ML assessment in [[project-kern-trainer]] memory): (1) stratified gothic/display val slice + OOD probe on the user's own fonts, (2) ONE retrain: punctuation charset + anti-aliased strips (stripSilhouette must change in LOCKSTEP), (3) display-corpus enrichment + variable instancing, fine-tune, (4) label-noise mitigation in pack/loss + gposkern accumulate fix, (5) MobileNetV3-Large only if still short. Render into NEW dirs + `--fresh` (resume-skip / stale-best.pt traps).
+- spacingai evenodd raster gap (see §9a KNOWN-GAP).
 - Optionally: auto-compose accents in the PANEL grid (not just on the button); a "copy width/centre to all" action in the optical-centre tab; per-side AI asymmetry.
 - The user often **can't test interactively** — verify changes via headless-Chrome renders of the actual exported `.otf` / real-glyph mocks before handing off, and keep the build cache-busted (`?v=` + `#buildTag`) every install.
